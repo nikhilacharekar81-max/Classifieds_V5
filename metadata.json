@@ -1,0 +1,8 @@
+{
+  "name": "Remix Classifieds_V5",
+  "description": "A streamlined starter template integrating Node.js, Express, and Vite for efficient full-stack web development.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,584 @@
+'use client';
+
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  User,
+  ChevronDown,
+  LogIn,
+  UserPlus,
+  LogOut,
+  LayoutDashboard,
+  X,
+  Mail,
+  Lock,
+  Phone,
+  MapPin,
+  Loader2,
+} from 'lucide-react';
+import { useAppOptional } from '@/context/AppContextInstance';
+import { UserAccount } from '@/lib/types';
+import { NavLink } from '@/components/common/NavLink';
+import { useNavigationFeedback } from '@/lib/router/useRouter';
+import { dispatchPublicToast } from '@/components/common/ChunkErrorRecovery';
+
+export const MyAccountDropdown: React.FC = () => {
+  const app = useAppOptional();
+  const { isUrlPending } = useNavigationFeedback();
+
+  const [isOpen, setIsOpen] = useState(false);
+  const [localAuthUser, setLocalAuthUser] = useState<UserAccount | null>(null);
+  const [hasCheckedSession, setHasCheckedSession] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup' | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Sign In form state
+  const [signInEmail, setSignInEmail] = useState('');
+  const [signInPassword, setSignInPassword] = useState('');
+
+  // Sign Up form state
+  const [signUpName, setSignUpName] = useState('');
+  const [signUpEmail, setSignUpEmail] = useState('');
+  const [signUpPassword, setSignUpPassword] = useState('');
+  const [signUpPhone, setSignUpPhone] = useState('');
+  const [signUpCity, setSignUpCity] = useState('Mumbai');
+  const [signUpState, setSignUpState] = useState('Maharashtra');
+
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const notify = (payload: {
+    type: 'success' | 'error' | 'warning' | 'info';
+    title: string;
+    message?: string;
+  }) => {
+    if (app?.addToast) {
+      app.addToast(payload);
+    } else {
+      dispatchPublicToast(payload);
+    }
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  const handleToggleMenu = () => {
+    const nextOpen = !isOpen;
+    setIsOpen(nextOpen);
+    if (nextOpen && !app && !hasCheckedSession) {
+      setHasCheckedSession(true);
+      fetch('/api/auth/me', { credentials: 'include', cache: 'no-store' })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.authenticated && data?.user) {
+            setLocalAuthUser(data.user);
+          }
+        })
+        .catch(() => {});
+    }
+  };
+
+  const openModal = (mode: 'signin' | 'signup') => {
+    setIsOpen(false);
+    setErrorMsg(null);
+    setAuthModalMode(mode);
+  };
+
+  const closeModal = () => {
+    if (isSubmitting) return;
+    setAuthModalMode(null);
+    setErrorMsg(null);
+  };
+
+  const handleSignInSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    if (!signInEmail.trim() || !signInPassword) {
+      setErrorMsg('Please enter both email and password.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: signInEmail.trim(),
+          password: signInPassword,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setErrorMsg(data.error || 'Invalid email or password.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (data.user) {
+        setLocalAuthUser(data.user);
+        setHasCheckedSession(true);
+        app?.setAuthUser(data.user);
+        app?.setCurrentUserId(data.user.id);
+      }
+      notify({
+        type: 'success',
+        title: 'Signed In Successfully',
+        message: `Welcome back, ${data.user?.name || signInEmail.trim()}!`,
+      });
+      setSignInEmail('');
+      setSignInPassword('');
+      setIsSubmitting(false);
+      setAuthModalMode(null);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Unable to sign in right now. Please try again.');
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSignUpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    if (!signUpName.trim() || !signUpEmail.trim() || !signUpPassword) {
+      setErrorMsg('Name, email, and password are required.');
+      return;
+    }
+    if (signUpPassword.length < 6) {
+      setErrorMsg('Password must be at least 6 characters long.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: signUpName.trim(),
+          email: signUpEmail.trim(),
+          password: signUpPassword,
+          phone: signUpPhone.trim(),
+          city: signUpCity.trim() || 'Mumbai',
+          state: signUpState.trim() || 'Maharashtra',
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setErrorMsg(data.error || 'Failed to create account.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (data.user) {
+        setLocalAuthUser(data.user);
+        setHasCheckedSession(true);
+        app?.setAuthUser(data.user);
+        app?.setCurrentUserId(data.user.id);
+      } else if (app?.registerUser) {
+        const fallbackUser = app.registerUser({
+          name: signUpName.trim(),
+          email: signUpEmail.trim(),
+          phone: signUpPhone.trim(),
+          location: {
+            city: signUpCity.trim() || 'Mumbai',
+            state: signUpState.trim() || 'Maharashtra',
+          },
+        });
+        setLocalAuthUser(fallbackUser);
+        app.setAuthUser(fallbackUser);
+        app.setCurrentUserId(fallbackUser.id);
+      }
+
+      notify({
+        type: 'success',
+        title: 'Account Created',
+        message: `Welcome to Chillyads, ${signUpName.trim()}!`,
+      });
+      setSignUpName('');
+      setSignUpEmail('');
+      setSignUpPassword('');
+      setSignUpPhone('');
+      setIsSubmitting(false);
+      setAuthModalMode(null);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Unable to complete registration. Please try again.');
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSignOutClick = async () => {
+    setIsOpen(false);
+    setLocalAuthUser(null);
+    if (app?.signOut) {
+      await app.signOut();
+      return;
+    }
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch {
+      // ignore error
+    }
+    notify({
+      type: 'info',
+      title: 'Signed Out',
+      message: 'You have been signed out of your account.',
+    });
+  };
+
+  const effectiveAuthUser = app?.authUser || localAuthUser;
+  const effectiveCurrentUser = app?.currentUser || localAuthUser;
+  const isAccountUrlPending = isUrlPending('/my-account');
+
+  return (
+    <>
+      <div className="relative" ref={dropdownRef}>
+        <button
+          type="button"
+          onClick={handleToggleMenu}
+          aria-expanded={isOpen}
+          aria-haspopup="menu"
+          className="px-3 py-2 text-[#3c4043] hover:text-[#202124] font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer rounded-md hover:bg-[#f1f3f4] border border-transparent hover:border-[#dadce0]"
+          title="My Account Menu"
+        >
+          {isAccountUrlPending ? (
+            <Loader2 className="w-4 h-4 animate-spin text-[#1dbf73]" />
+          ) : (
+            <User className="w-4 h-4 text-[#5f6368]" />
+          )}
+          <span className="hidden sm:inline">My Account</span>
+          <ChevronDown
+            className={`w-3.5 h-3.5 text-[#5f6368] transition-transform duration-150 ${
+              isOpen ? 'rotate-180 text-[#202124]' : ''
+            }`}
+          />
+        </button>
+
+        {isOpen && (
+          <div
+            role="menu"
+            className="absolute right-0 mt-1.5 w-56 bg-white rounded-xl border border-[#dadce0] shadow-xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150"
+          >
+            {/* Active User Info Header */}
+            <div className="px-3.5 py-2.5 border-b border-[#f1f3f4]">
+              <p className="text-xs font-bold text-[#202124] truncate">
+                {effectiveAuthUser ? effectiveAuthUser.name : effectiveCurrentUser?.name || 'Guest User'}
+              </p>
+              <p className="text-[11px] text-[#5f6368] truncate">
+                {effectiveAuthUser ? effectiveAuthUser.email : effectiveCurrentUser?.email || 'Manage your classifieds'}
+              </p>
+            </div>
+
+            {/* Dashboard Link */}
+            <div className="py-1">
+              <NavLink
+                href="/my-account"
+                onClick={() => setIsOpen(false)}
+                className="w-full px-3.5 py-2 text-left text-xs font-semibold text-[#3c4043] hover:text-[#202124] hover:bg-[#f8f9fa] flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <LayoutDashboard className="w-3.5 h-3.5 text-[#1dbf73] shrink-0" />
+                <span>My Account Dashboard</span>
+              </NavLink>
+
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => openModal('signin')}
+                className="w-full px-3.5 py-2 text-left text-xs font-semibold text-[#3c4043] hover:text-[#202124] hover:bg-[#f8f9fa] flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <LogIn className="w-3.5 h-3.5 text-[#1a73e8] shrink-0" />
+                <span>Sign In</span>
+              </button>
+
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => openModal('signup')}
+                className="w-full px-3.5 py-2 text-left text-xs font-semibold text-[#3c4043] hover:text-[#202124] hover:bg-[#f8f9fa] flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <UserPlus className="w-3.5 h-3.5 text-[#1dbf73] shrink-0" />
+                <span>Sign Up</span>
+              </button>
+            </div>
+
+            <div className="border-t border-[#f1f3f4] pt-1">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  void handleSignOutClick();
+                }}
+                className="w-full px-3.5 py-2 text-left text-xs font-semibold text-[#d93025] hover:bg-[#fce8e6]/50 flex items-center gap-2.5 transition-colors cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5 text-[#d93025] shrink-0" />
+                <span>Sign Out</span>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Sign In / Sign Up Modal */}
+      {authModalMode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl border border-[#dadce0] shadow-2xl w-full max-w-md overflow-hidden">
+            {/* Modal Header & Mode Tabs */}
+            <div className="px-6 pt-5 pb-4 border-b border-[#f1f3f4] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setErrorMsg(null);
+                    setAuthModalMode('signin');
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                    authModalMode === 'signin'
+                      ? 'bg-[#e6f4ea] text-[#137333]'
+                      : 'text-[#5f6368] hover:text-[#202124]'
+                  }`}
+                >
+                  Sign In
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setErrorMsg(null);
+                    setAuthModalMode('signup');
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                    authModalMode === 'signup'
+                      ? 'bg-[#e6f4ea] text-[#137333]'
+                      : 'text-[#5f6368] hover:text-[#202124]'
+                  }`}
+                >
+                  Sign Up
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={closeModal}
+                className="p-1.5 rounded-lg text-[#5f6368] hover:text-[#202124] hover:bg-[#f1f3f4] transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {authModalMode === 'signin' ? (
+              <form onSubmit={handleSignInSubmit} className="p-6 space-y-4">
+                <div>
+                  <h3 className="text-base font-bold text-[#202124]">Sign in to Chillyads</h3>
+                  <p className="text-xs text-[#5f6368] mt-0.5">
+                    Access your active ads, messages, and saved listings.
+                  </p>
+                </div>
+
+                {errorMsg && (
+                  <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs font-medium text-rose-700">
+                    {errorMsg}
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#3c4043] mb-1">
+                      Email Address
+                    </label>
+                    <div className="relative">
+                      <Mail className="w-4 h-4 text-[#5f6368] absolute left-3 top-2.5" />
+                      <input
+                        type="email"
+                        required
+                        value={signInEmail}
+                        onChange={(e) => setSignInEmail(e.target.value)}
+                        placeholder="you@example.com"
+                        className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-[#dadce0] focus:outline-none focus:border-[#1dbf73] text-[#202124]"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-[#3c4043] mb-1">
+                      Password
+                    </label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-[#5f6368] absolute left-3 top-2.5" />
+                      <input
+                        type="password"
+                        required
+                        value={signInPassword}
+                        onChange={(e) => setSignInPassword(e.target.value)}
+                        placeholder="Enter your password"
+                        className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-[#dadce0] focus:outline-none focus:border-[#1dbf73] text-[#202124]"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full py-2.5 bg-[#1dbf73] hover:bg-[#19a463] disabled:opacity-60 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                  <span>Sign In</span>
+                </button>
+
+                <div className="text-center pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setErrorMsg(null);
+                      setAuthModalMode('signup');
+                    }}
+                    className="text-xs text-[#1a73e8] hover:underline font-medium cursor-pointer"
+                  >
+                    Don&apos;t have an account? Sign Up
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={handleSignUpSubmit} className="p-6 space-y-4">
+                <div>
+                  <h3 className="text-base font-bold text-[#202124]">Create your Chillyads Account</h3>
+                  <p className="text-xs text-[#5f6368] mt-0.5">
+                    Post free classified ads and connect with verified local buyers.
+                  </p>
+                </div>
+
+                {errorMsg && (
+                  <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs font-medium text-rose-700">
+                    {errorMsg}
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#3c4043] mb-1">
+                      Full Name
+                    </label>
+                    <div className="relative">
+                      <User className="w-4 h-4 text-[#5f6368] absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        required
+                        value={signUpName}
+                        onChange={(e) => setSignUpName(e.target.value)}
+                        placeholder="Your full name"
+                        className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-[#dadce0] focus:outline-none focus:border-[#1dbf73] text-[#202124]"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-[#3c4043] mb-1">
+                      Email Address
+                    </label>
+                    <div className="relative">
+                      <Mail className="w-4 h-4 text-[#5f6368] absolute left-3 top-2.5" />
+                      <input
+                        type="email"
+                        required
+                        value={signUpEmail}
+                        onChange={(e) => setSignUpEmail(e.target.value)}
+                        placeholder="you@example.com"
+                        className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-[#dadce0] focus:outline-none focus:border-[#1dbf73] text-[#202124]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-[#3c4043] mb-1">
+                        Phone Number
+                      </label>
+                      <div className="relative">
+                        <Phone className="w-3.5 h-3.5 text-[#5f6368] absolute left-3 top-2.5" />
+                        <input
+                          type="tel"
+                          value={signUpPhone}
+                          onChange={(e) => setSignUpPhone(e.target.value)}
+                          placeholder="+91 98765 43210"
+                          className="w-full pl-8 pr-3 py-2 text-xs rounded-lg border border-[#dadce0] focus:outline-none focus:border-[#1dbf73] text-[#202124]"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-[#3c4043] mb-1">
+                        City
+                      </label>
+                      <div className="relative">
+                        <MapPin className="w-3.5 h-3.5 text-[#5f6368] absolute left-3 top-2.5" />
+                        <input
+                          type="text"
+                          value={signUpCity}
+                          onChange={(e) => setSignUpCity(e.target.value)}
+                          placeholder="Mumbai"
+                          className="w-full pl-8 pr-3 py-2 text-xs rounded-lg border border-[#dadce0] focus:outline-none focus:border-[#1dbf73] text-[#202124]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-[#3c4043] mb-1">
+                      Password (min. 6 characters)
+                    </label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-[#5f6368] absolute left-3 top-2.5" />
+                      <input
+                        type="password"
+                        required
+                        minLength={6}
+                        value={signUpPassword}
+                        onChange={(e) => setSignUpPassword(e.target.value)}
+                        placeholder="Create a password"
+                        className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-[#dadce0] focus:outline-none focus:border-[#1dbf73] text-[#202124]"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full py-2.5 bg-[#1dbf73] hover:bg-[#19a463] disabled:opacity-60 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                  <span>Create Account</span>
+                </button>
+
+                <div className="text-center pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setErrorMsg(null);
+                      setAuthModalMode('signin');
+                    }}
+                    className="text-xs text-[#1a73e8] hover:underline font-medium cursor-pointer"
+                  >
+                    Already have an account? Sign In
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
