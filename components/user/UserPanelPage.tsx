@@ -159,10 +159,13 @@ export const UserPanelPage: React.FC = () => {
             if (data.statusCounts) {
               setSellerStatusCounts(data.statusCounts);
             }
+            return { total, items: data.items };
           }
         }
+        return null;
       } catch (err) {
         console.error('Failed to fetch seller listings:', err);
+        return null;
       } finally {
         setLoadingSellerListings(false);
       }
@@ -212,17 +215,30 @@ export const UserPanelPage: React.FC = () => {
   const totalSellerAdsCount = sellerStatusCounts.all || (sellerListings !== null ? sellerTotal : userListings.length);
   const totalPages = Math.ceil(sellerTotal / sellerPageSize) || 1;
 
+  const refreshSellerListingsAfterAction = React.useCallback(async () => {
+    if (!currentUser?.id) return;
+    const result = await fetchSellerListings(currentUser.id, sellerPage, adStatusFilter, adSearchQuery);
+    if (result && typeof result.total === 'number') {
+      const newTotal = result.total;
+      const lastValidPage = Math.max(1, Math.ceil(newTotal / sellerPageSize));
+      if (sellerPage > lastValidPage) {
+        setSellerPage(lastValidPage);
+        await fetchSellerListings(currentUser.id, lastValidPage, adStatusFilter, adSearchQuery);
+      }
+    }
+  }, [currentUser?.id, sellerPage, adStatusFilter, adSearchQuery, sellerPageSize, fetchSellerListings]);
+
   const handleRenewListing = async (id: string, days?: number, isFree?: boolean) => {
     const success = await renewListing(id, days, isFree);
     if (success && currentUser?.id) {
-      fetchSellerListings(currentUser.id, sellerPage, adStatusFilter, adSearchQuery);
+      await refreshSellerListingsAfterAction();
     }
   };
 
   const handleMarkAsSold = async (id: string) => {
     const success = await markAsSold(id);
     if (success && currentUser?.id) {
-      fetchSellerListings(currentUser.id, sellerPage, adStatusFilter, adSearchQuery);
+      await refreshSellerListingsAfterAction();
     }
   };
 

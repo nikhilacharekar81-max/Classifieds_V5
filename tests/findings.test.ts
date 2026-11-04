@@ -422,6 +422,9 @@ test('Fix 1: Prevent sold listings from being renewed (seller, admin, and reposi
 test('Fix 2: Pagination of seller listings via API limit and offset beyond 200 items', async () => {
   const sellerId = `fix2_seller_${Date.now()}`;
   const sellerToken = `token_fix2_s_${Date.now()}`;
+  const totalCount = 251;
+  const ids: string[] = [];
+  const baseTime = Date.now();
 
   await pool.query(`
     INSERT INTO users (id, name, email, type, status, admin_role) VALUES
@@ -433,54 +436,109 @@ test('Fix 2: Pagination of seller listings via API limit and offset beyond 200 i
       ($1, $2, NOW() + INTERVAL '1 day')
   `, [sellerToken, sellerId]);
 
-  // Insert 25 items for this seller with varying statuses
-  const ids: string[] = [];
-  for (let i = 0; i < 25; i++) {
-    const id = `lst_pg_${i}_${Date.now()}`;
-    ids.push(id);
-    const status = i % 5 === 0 ? 'approved' : i % 5 === 1 ? 'pending' : i % 5 === 2 ? 'sold' : i % 5 === 3 ? 'expired' : 'rejected';
+  try {
+    // Bulk insert 251 listings with deterministic descending createdAt timestamps
+    const valuesClauses: string[] = [];
+    const queryParams: any[] = [];
+    let paramIdx = 1;
+
+    for (let i = 0; i < totalCount; i++) {
+      const id = `lst_pg_${i}_${baseTime}`;
+      ids.push(id);
+      const status = i % 5 === 0 ? 'approved' : i % 5 === 1 ? 'pending' : i % 5 === 2 ? 'sold' : i % 5 === 3 ? 'expired' : 'rejected';
+      const createdAt = new Date(baseTime - i * 1000);
+      const expiresAt = new Date(baseTime + 30 * 24 * 3600 * 1000);
+
+      valuesClauses.push(`($${paramIdx}, $${paramIdx+1}, 'Fix2 Seller', 'cat_cars', $${paramIdx+2}, 'Description', 1000, 'Mumbai', 'Maharashtra', 'Loc', $${paramIdx+3}, $${paramIdx+4}, $${paramIdx+5})`);
+      queryParams.push(id, sellerId, `Seller Ad ${i}`, status, expiresAt, createdAt);
+      paramIdx += 6;
+    }
+
     await pool.query(`
-      INSERT INTO listings (id, seller_id, seller_name, category_id, title, description, price, city, state, locality, status, expires_at)
-      VALUES ($1, $2, 'Fix2 Seller', 'cat_cars', $3, 'Description', 1000, 'Mumbai', 'Maharashtra', 'Loc', $4, NOW() + INTERVAL '30 days')
-    `, [id, sellerId, `Seller Ad ${i}`, status]);
+      INSERT INTO listings (id, seller_id, seller_name, category_id, title, description, price, city, state, locality, status, expires_at, created_at)
+      VALUES ${valuesClauses.join(', ')}
+    `, queryParams);
+
+    // Verify unauthenticated caller is restricted to approved listings only (authorization preservation)
+    const unauthReq = makeReq(`http://localhost:3000/api/listings?sellerId=${sellerId}&status=all&limit=10&offset=0`, 'GET');
+    const unauthRes = await listingsGet(unauthReq);
+    const unauthJson = await unauthRes.json();
+    assert.equal(unauthRes.status, 200);
+    assert.ok(unauthJson.total < totalCount, 'Unauthenticated caller must not see all statuses');
+    assert.ok(unauthJson.items.every((it: any) => it.status === 'approved'), 'Unauthenticated caller only sees approved listings');
+
+    // 1. The API reports the correct total of 251 listings for authenticated owner
+    const page1Req = makeReq(`http://localhost:3000/api/listings?sellerId=${sellerId}&status=all&limit=10&offset=0`, 'GET', undefined, sellerToken);
+    const page1Res = await listingsGet(page1Req);
+    const page1Json = await page1Res.json();
+    assert.equal(page1Res.status, 200);
+    assert.equal(page1Json.total, 251, 'The API reports the correct total of 251 listings');
+    assert.ok(page1Json.statusCounts, 'Expected statusCounts to be returned for seller');
+    assert.equal(page1Json.statusCounts.all, 251);
+
+    // 2. Page 1 returns the expected first 10 listings
+    assert.equal(page1Json.items.length, 10, 'Page 1 returns the expected first 10 listings');
+    assert.deepEqual(page1Json.items.map((it: any) => it.id), ids.slice(0, 10), 'Page 1 must match the first 10 inserted listings');
+
+    // 3. Page 20 returns the expected 10 listings (offset = 190)
+    const page20Req = makeReq(`http://localhost:3000/api/listings?sellerId=${sellerId}&status=all&limit=10&offset=190`, 'GET', undefined, sellerToken);
+    const page20Res = await listingsGet(page20Req);
+    const page20Json = await page20Res.json();
+    assert.equal(page20Res.status, 200);
+    assert.equal(page20Json.items.length, 10, 'Page 20 returns the expected 10 listings');
+    assert.deepEqual(page20Json.items.map((it: any) => it.id), ids.slice(190, 200), 'Page 20 must match listings 191 to 200');
+
+    // Page 21 returns the expected listings beyond 200 items (offset = 200)
+    const page21Req = makeReq(`http://localhost:3000/api/listings?sellerId=${sellerId}&status=all&limit=10&offset=200`, 'GET', undefined, sellerToken);
+    const page21Res = await listingsGet(page21Req);
+    const page21Json = await page21Res.json();
+    assert.equal(page21Res.status, 200);
+    assert.equal(page21Json.items.length, 10, 'Page 21 returns expected listings beyond 200 ceiling');
+    assert.deepEqual(page21Json.items.map((it: any) => it.id), ids.slice(200, 210), 'Page 21 must match listings 201 to 210');
+
+    // 4. Final page (offset = 250) returns the remaining listing
+    const lastPageReq = makeReq(`http://localhost:3000/api/listings?sellerId=${sellerId}&status=all&limit=10&offset=250`, 'GET', undefined, sellerToken);
+    const lastPageRes = await listingsGet(lastPageReq);
+    const lastPageJson = await lastPageRes.json();
+    assert.equal(lastPageRes.status, 200);
+    assert.equal(lastPageJson.items.length, 1, 'Page 21/26 final page returns the remaining listing');
+    assert.equal(lastPageJson.items[0].id, ids[250], 'Final page must return the 251st listing');
+
+    // Iterate through all pages to verify 5, 6, and 7
+    const totalPages = Math.ceil(totalCount / 10); // 26 pages
+    const allFetchedIds: string[] = [];
+    const idSet = new Set<string>();
+    let hasDuplicate = false;
+
+    for (let page = 1; page <= totalPages; page++) {
+      const offset = (page - 1) * 10;
+      const req = makeReq(`http://localhost:3000/api/listings?sellerId=${sellerId}&status=all&limit=10&offset=${offset}`, 'GET', undefined, sellerToken);
+      const res = await listingsGet(req);
+      const data = await res.json();
+      for (const item of data.items) {
+        if (idSet.has(item.id)) {
+          hasDuplicate = true;
+        }
+        idSet.add(item.id);
+        allFetchedIds.push(item.id);
+      }
+    }
+
+    // 5. All pages together contain exactly 251 distinct listing IDs
+    assert.equal(idSet.size, 251, 'All pages together contain exactly 251 distinct listing IDs');
+
+    // 6. There are no duplicate IDs across pages
+    assert.equal(hasDuplicate, false, 'There are no duplicate IDs across pages');
+    assert.equal(allFetchedIds.length, 251, 'Total fetched count across all pages must equal 251');
+
+    // 7. No listing is missing
+    const missingIds = ids.filter((id) => !idSet.has(id));
+    assert.equal(missingIds.length, 0, 'No listing is missing');
+  } finally {
+    // Reliable cleanup even on assertion failure
+    await pool.query('DELETE FROM listings WHERE seller_id = $1', [sellerId]);
+    await pool.query('DELETE FROM user_sessions WHERE user_id = $1', [sellerId]);
+    await pool.query('DELETE FROM users WHERE id = $1', [sellerId]);
   }
-
-  // Page 1 (limit 10, offset 0)
-  const page1Req = makeReq(`http://localhost:3000/api/listings?sellerId=${sellerId}&status=all&limit=10&offset=0`, 'GET', undefined, sellerToken);
-  const page1Res = await listingsGet(page1Req);
-  const page1Json = await page1Res.json();
-  assert.equal(page1Res.status, 200);
-  assert.equal(page1Json.items.length, 10, 'Expected 10 items on page 1');
-  assert.equal(page1Json.total, 25, 'Expected 25 total listings for seller');
-  assert.ok(page1Json.statusCounts, 'Expected statusCounts to be returned for seller');
-  assert.equal(page1Json.statusCounts.all, 25);
-
-  // Page 2 (limit 10, offset 10)
-  const page2Req = makeReq(`http://localhost:3000/api/listings?sellerId=${sellerId}&status=all&limit=10&offset=10`, 'GET', undefined, sellerToken);
-  const page2Res = await listingsGet(page2Req);
-  const page2Json = await page2Res.json();
-  assert.equal(page2Res.status, 200);
-  assert.equal(page2Json.items.length, 10, 'Expected 10 items on page 2');
-  assert.notEqual(page1Json.items[0].id, page2Json.items[0].id, 'Page 1 and Page 2 must have distinct items');
-
-  // Page 3 (limit 10, offset 20)
-  const page3Req = makeReq(`http://localhost:3000/api/listings?sellerId=${sellerId}&status=all&limit=10&offset=20`, 'GET', undefined, sellerToken);
-  const page3Res = await listingsGet(page3Req);
-  const page3Json = await page3Res.json();
-  assert.equal(page3Res.status, 200);
-  assert.equal(page3Json.items.length, 5, 'Expected 5 items on page 3');
-
-  // Filter by status=sold
-  const soldReq = makeReq(`http://localhost:3000/api/listings?sellerId=${sellerId}&status=sold&limit=10&offset=0`, 'GET', undefined, sellerToken);
-  const soldRes = await listingsGet(soldReq);
-  const soldJson = await soldRes.json();
-  assert.equal(soldRes.status, 200);
-  assert.equal(soldJson.total, 5, 'Expected 5 sold ads');
-  assert.ok(soldJson.items.every((it: any) => it.status === 'sold'));
-
-  // Clean up
-  await pool.query('DELETE FROM listings WHERE id = ANY($1)', [ids]);
-  await pool.query('DELETE FROM user_sessions WHERE user_id = $1', [sellerId]);
-  await pool.query('DELETE FROM users WHERE id = $1', [sellerId]);
 });
 
