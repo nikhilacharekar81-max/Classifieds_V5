@@ -109,7 +109,37 @@ export const UserPanelPage: React.FC = () => {
     }
   }, [listings, featureModalListing?.id]);
 
-  const userListings = listings.filter((l) => l.sellerId === currentUser.id);
+  const [sellerListings, setSellerListings] = useState<Listing[] | null>(null);
+  const [loadingSellerListings, setLoadingSellerListings] = useState(false);
+
+  const fetchSellerListings = React.useCallback(async (sellerId: string) => {
+    setLoadingSellerListings(true);
+    try {
+      const res = await fetch(`/api/listings?sellerId=${encodeURIComponent(sellerId)}&status=all&limit=200`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.items)) {
+          setSellerListings(data.items);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch seller listings:', err);
+    } finally {
+      setLoadingSellerListings(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (currentUser?.id) {
+      fetchSellerListings(currentUser.id);
+    }
+  }, [currentUser?.id, fetchSellerListings]);
+
+  const userListings = sellerListings !== null
+    ? sellerListings
+    : currentUser?.id
+      ? listings.filter((l) => l.sellerId === currentUser.id)
+      : [];
   const activeUserApprovedListingsCount = userListings.filter((l) => l.status === 'approved').length;
   const freeQuotaLimit = settings.freeListingsLimit ?? 3;
   const extraListingFeeRate = settings.extraListingFee ?? 99;
@@ -125,7 +155,28 @@ export const UserPanelPage: React.FC = () => {
     return true;
   });
 
-  const userTransactions = transactions.filter((t) => t.userId === currentUser.id);
+  const handleRenewListing = async (id: string, days?: number, isFree?: boolean) => {
+    const success = await renewListing(id, days, isFree);
+    if (success && currentUser?.id) {
+      fetchSellerListings(currentUser.id);
+    }
+  };
+
+  const handleMarkAsSold = async (id: string) => {
+    const success = await markAsSold(id);
+    if (success && currentUser?.id) {
+      fetchSellerListings(currentUser.id);
+    }
+  };
+
+  const handleDeleteListing = async (id: string) => {
+    const success = await deleteListing(id);
+    if (success && currentUser?.id) {
+      fetchSellerListings(currentUser.id);
+    }
+  };
+
+  const userTransactions = currentUser?.id ? transactions.filter((t) => t.userId === currentUser.id) : [];
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -201,14 +252,39 @@ export const UserPanelPage: React.FC = () => {
       return;
     }
 
-    const success = updateListing(editingListing);
+    const success = await updateListing(editingListing);
     if (success) {
       setEditingListing(null);
       setEditTitleError(null);
+      if (currentUser?.id) {
+        fetchSellerListings(currentUser.id);
+      }
     } else {
       setEditTitleError(DUPLICATE_TITLE_ERROR_MESSAGE);
     }
   };
+
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans flex items-center justify-center p-6">
+        <div className="max-w-md w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-8 text-center shadow-sm space-y-4">
+          <div className="w-12 h-12 bg-blue-100 dark:bg-blue-950/60 text-blue-600 rounded-full flex items-center justify-center mx-auto">
+            <ShoppingBag className="w-6 h-6" />
+          </div>
+          <h2 className="text-xl font-bold">Seller Dashboard</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Please sign in to view and manage your classified ads, renewals, and chat enquiries.
+          </p>
+          <a
+            href="/"
+            className="inline-block px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-sm transition-colors"
+          >
+            Go to Marketplace
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans pb-12 overflow-x-hidden">
@@ -279,11 +355,11 @@ export const UserPanelPage: React.FC = () => {
               setEditingListing(listing);
               setEditTitleError(null);
             }}
-            onRenewListing={renewListing}
-            onMarkAsSold={markAsSold}
+            onRenewListing={handleRenewListing}
+            onMarkAsSold={handleMarkAsSold}
             onFeatureListingModal={setFeatureModalListing}
             onBoostListingModal={setBoostTargetListing}
-            onDeleteListing={deleteListing}
+            onDeleteListing={handleDeleteListing}
           />
         )}
 

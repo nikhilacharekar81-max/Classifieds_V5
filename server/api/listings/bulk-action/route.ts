@@ -25,14 +25,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const isPrivileged = Boolean(authContext.isModerator || authContext.isSuperAdmin);
+    const isPrivileged = Boolean(authContext.isAdmin || authContext.isModerator || authContext.isSuperAdmin);
 
     const isApproving = action === 'approve' || data?.status === 'approved';
     const isRejecting = action === 'reject' || data?.status === 'rejected';
 
     // Admin/Moderator permissions required for approving or rejecting listings
     if ((isApproving || isRejecting) && !isPrivileged) {
-      return NextResponse.json({ error: 'Forbidden: Moderator permission required' }, { status: 403 });
+      return NextResponse.json({ error: 'Forbidden: Moderator or Admin permission required' }, { status: 403 });
     }
 
     // Ownership verification for non-privileged user bulk operations
@@ -65,9 +65,51 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'renew' || (action === 'update' && (data?.renew || data?.action === 'renew'))) {
-      const days = typeof data?.days === 'number' && data.days > 0 ? data.days : 30;
-      const count = await listingService.bulkRenew(ids, days);
-      return NextResponse.json({ success: true, count });
+      // Validate all listings before renewing
+      for (const id of ids) {
+        const item = await listingRepository.findById(id);
+        if (!item) {
+          return NextResponse.json({ error: `Listing ${id} not found` }, { status: 404 });
+        }
+
+        // Ordinary seller renewal checks
+        if (!isPrivileged) {
+          if (item.sellerId !== authContext.userId) {
+            return NextResponse.json(
+              { error: `Unauthorized: You do not own listing ${id}` },
+              { status: 403 }
+            );
+          }
+          if (item.status === 'pending') {
+            return NextResponse.json(
+              { error: `Cannot renew listing ${id}: Pending listings must undergo moderation and cannot be renewed directly.` },
+              { status: 400 }
+            );
+          }
+          if (item.status === 'rejected') {
+            return NextResponse.json(
+              { error: `Cannot renew listing ${id}: Rejected listings cannot be renewed.` },
+              { status: 400 }
+            );
+          }
+        }
+
+        // For both seller and admin: renewal is strictly for expired listings
+        const isExpired =
+          item.status === 'expired' ||
+          (Boolean(item.expiresAt) && new Date(item.expiresAt).getTime() <= Date.now());
+
+        if (!isExpired) {
+          return NextResponse.json(
+            { error: `Cannot renew listing ${id}: Listing is currently active and not expired.` },
+            { status: 400 }
+          );
+        }
+      }
+
+      // Renewal strictly enforces a 30-day period from the renewal time
+      const count = await listingService.bulkRenew(ids, 30);
+      return NextResponse.json({ success: true, count, renewedDurationDays: 30 });
     }
 
     return NextResponse.json({ error: `Unsupported bulk action: ${action}` }, { status: 400 });

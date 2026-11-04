@@ -367,16 +367,47 @@ export class ListingService {
     id: string,
     updatedData: Partial<Listing>,
     authenticatedUserId?: string,
-    isAdmin?: boolean
+    isAdmin?: boolean,
+    isModerator?: boolean
   ): Promise<{ success: boolean; listing?: Listing; error?: string; status: number }> {
     const existing = await listingRepository.findById(id);
     if (!existing) {
       return { success: false, error: 'Listing not found', status: 404 };
     }
 
+    const isPrivileged = Boolean(isAdmin || isModerator);
+
     // Authorization & Ownership Verification
-    if (authenticatedUserId && existing.sellerId !== authenticatedUserId && !isAdmin) {
+    if (authenticatedUserId && existing.sellerId !== authenticatedUserId && !isPrivileged) {
       return { success: false, error: 'Unauthorized: You do not own this listing', status: 403 };
+    }
+
+    // Role-based authorization for moderation fields
+    if (updatedData.status !== undefined && (updatedData.status === 'approved' || updatedData.status === 'rejected')) {
+      if (!isPrivileged) {
+        return {
+          success: false,
+          error: 'Forbidden: Moderator or Admin permission required to approve or reject listings',
+          status: 403,
+        };
+      }
+    }
+
+    if (updatedData.rejectionReason !== undefined && !isPrivileged) {
+      return {
+        success: false,
+        error: 'Forbidden: Moderator or Admin permission required to set rejection reason',
+        status: 403,
+      };
+    }
+
+    // Expiry date protection: ordinary sellers cannot modify expiresAt directly
+    if (!isPrivileged && updatedData.expiresAt !== undefined) {
+      return {
+        success: false,
+        error: 'Forbidden: Ordinary sellers cannot modify expiresAt directly. Expired listings must be renewed through the renewal endpoint.',
+        status: 400,
+      };
     }
 
     const targetTitle = updatedData.title !== undefined ? updatedData.title : existing.title;
@@ -398,7 +429,7 @@ export class ListingService {
       }
     }
 
-    // Field allowlist: regular sellers can edit content, mark as sold, or renew
+    // Field allowlist: regular sellers can edit content, mark as sold
     const safeFields: any = {};
     if (updatedData.title !== undefined) safeFields.title = updatedData.title;
     if (updatedData.description !== undefined) safeFields.description = updatedData.description;
@@ -419,8 +450,8 @@ export class ListingService {
       }
     }
 
-    // Sellers can mark as sold or renew expiresAt
-    if (!isAdmin) {
+    // Sellers can mark as sold; editing key fields resets approved status to pending
+    if (!isPrivileged) {
       if (updatedData.status === 'sold') {
         safeFields.status = 'sold';
       } else if (
@@ -435,19 +466,38 @@ export class ListingService {
         // Reset approved ad to pending when key content is edited by seller
         safeFields.status = 'pending';
       }
-
-      if (updatedData.expiresAt) {
-        safeFields.expiresAt = new Date(updatedData.expiresAt);
-      }
     }
 
-    // Admin-only fields
-    if (isAdmin) {
+    // Privileged fields (Admin / Moderator)
+    if (isPrivileged) {
       if (updatedData.status !== undefined) safeFields.status = updatedData.status;
-      if (updatedData.expiresAt !== undefined) safeFields.expiresAt = new Date(updatedData.expiresAt);
       if (updatedData.rejectionReason !== undefined) safeFields.rejectionReason = updatedData.rejectionReason;
       if (updatedData.isFeatured !== undefined) safeFields.isFeatured = updatedData.isFeatured;
       if (updatedData.isBoosted !== undefined) safeFields.isBoosted = updatedData.isBoosted;
+
+      // Legitimate admin expiry management with strict date input validation
+      if (updatedData.expiresAt !== undefined) {
+        if (!updatedData.expiresAt) {
+          return { success: false, error: 'expiresAt cannot be empty', status: 400 };
+        }
+        const expDate = new Date(updatedData.expiresAt);
+        if (isNaN(expDate.getTime())) {
+          return { success: false, error: 'Invalid expiresAt date format', status: 400 };
+        }
+        safeFields.expiresAt = expDate;
+      }
+
+      if (updatedData.featuredUntil !== undefined) {
+        if (updatedData.featuredUntil) {
+          const featDate = new Date(updatedData.featuredUntil);
+          if (isNaN(featDate.getTime())) {
+            return { success: false, error: 'Invalid featuredUntil date format', status: 400 };
+          }
+          safeFields.featuredUntil = featDate;
+        } else {
+          safeFields.featuredUntil = null;
+        }
+      }
     }
 
     try {
@@ -466,11 +516,11 @@ export class ListingService {
     }
   }
 
-  public async deleteListing(id: string, authenticatedUserId?: string, isAdmin?: boolean): Promise<boolean> {
+  public async deleteListing(id: string, authenticatedUserId?: string, isPrivileged?: boolean): Promise<boolean> {
     const existing = await listingRepository.findById(id);
     if (!existing) return false;
 
-    if (authenticatedUserId && existing.sellerId !== authenticatedUserId && !isAdmin) {
+    if (authenticatedUserId && existing.sellerId !== authenticatedUserId && !isPrivileged) {
       throw new Error('Unauthorized: You do not own this listing');
     }
 

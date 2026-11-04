@@ -46,18 +46,17 @@ export async function GET(req: NextRequest) {
   const offset = rawOffset !== null && !isNaN(Number(rawOffset)) ? Math.max(Number(rawOffset) || 0, 0) : 0;
 
   const authContext = await getAuthenticatedUser(req);
-  const isPrivileged = Boolean(authContext?.isModerator || authContext?.isSuperAdmin);
+  const isPrivileged = Boolean(authContext?.isAdmin || authContext?.isModerator || authContext?.isSuperAdmin);
+  const isOwner = Boolean(authContext?.userId && sellerId && sellerId === authContext.userId);
 
-  // Security Gate: Only verified moderators or listing owners can view non-approved status listings
+  // Security Gate: Privileged roles and listing owners querying their own ads can view non-approved statuses
   let effectiveStatus: string | undefined = 'approved';
-  if (requestedStatus && requestedStatus !== 'approved') {
-    if (isPrivileged) {
-      effectiveStatus = requestedStatus;
-    } else if (authContext?.userId && sellerId === authContext.userId) {
-      effectiveStatus = requestedStatus;
-    } else {
-      effectiveStatus = 'approved';
-    }
+  if (isPrivileged) {
+    effectiveStatus = requestedStatus || 'all';
+  } else if (isOwner) {
+    effectiveStatus = requestedStatus || 'all';
+  } else {
+    effectiveStatus = 'approved';
   }
 
   const [result, categories] = await Promise.all([
@@ -95,8 +94,7 @@ export async function GET(req: NextRequest) {
     Expires: '0',
   };
 
-  // Strip internal fields for public DTO responses unless requested by owner or admin
-  const isOwner = Boolean(authContext?.userId && sellerId === authContext.userId);
+  // Strip internal fields for public DTO responses unless requested by owner or privileged admin
   if (!isPrivileged && !isOwner) {
     return NextResponse.json(
       {
@@ -173,8 +171,8 @@ export async function POST(req: NextRequest) {
       sellerName: authContext.user.name,
       sellerPhone: authContext.user.phone || body.sellerPhone || '',
       sellerId: authContext.userId, // Derived strictly from verified session
-      // Moderation workflow: pending unless user is an authorized moderator/super_admin
-      status: authContext.isModerator || authContext.isSuperAdmin ? (body.status || 'approved') : 'pending',
+      // Moderation workflow: pending unless user is an authorized admin/moderator/super_admin
+      status: authContext.isAdmin || authContext.isModerator || authContext.isSuperAdmin ? (body.status || 'approved') : 'pending',
       isFeatured: false,
       isBoosted: false,
     };

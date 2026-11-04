@@ -39,68 +39,122 @@ export function useListingActions({
   addToast,
   recordAuditLog,
 }: UseListingActionsParams) {
-  const approveListing = (id: string) => {
+  const approveListing = async (id: string): Promise<boolean> => {
     const item = listings.find((l) => l.id === id);
-    if (!item) return;
-    setListings((prev) =>
-      prev.map((l) => (l.id === id ? { ...l, status: 'approved' as const, rejectionReason: undefined } : l))
-    );
-    recordAuditLog(
-      'APPROVE_LISTING',
-      'Marketplace / Listings',
-      id,
-      item.title,
-      'Listing reviewed and approved for public search'
-    );
+    try {
+      const res = await fetch(`/api/listings/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'approved' }),
+      });
 
-    const seller = users.find((u) => u.id === item.sellerId);
-    const sellerEmail = seller?.email || 'seller@example.com';
-    const sellerName = item.sellerName || seller?.name || 'Valued Seller';
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        addToast({
+          type: 'error',
+          title: 'Approval Failed',
+          message: errorData.error || `HTTP ${res.status}: Failed to approve listing`,
+        });
+        return false;
+      }
 
-    sendEmail({
-      toEmail: sellerEmail,
-      toName: sellerName,
-      subject: `🎉 Good News! Your ad "${item.title.substring(0, 45)}..." is Approved & Live!`,
-      body: `Hi ${sellerName},\n\nGreat news! Your classified listing "${item.title}" (Ad ID: #${item.id}) has been reviewed and approved by our moderation team. It is now live and visible to buyers across ${item.location?.city || 'India'}.\n\n🚀 Want to get up to 10x more buyer enquiries? Feature your ad at the top of category search results with an eye-catching Gold Featured Badge!`,
-      actionLabel: '⭐ Feature Your Ad Now',
-      actionUrl: `/user/my-ads?feature=${item.id}`,
-      type: 'ad_approved',
-      listingId: item.id,
-      listingTitle: item.title,
-      relatedUserId: item.sellerId,
-    });
+      const updatedListing = await res.json().catch(() => null);
+      setListings((prev) =>
+        prev.map((l) =>
+          l.id === id
+            ? (updatedListing && updatedListing.id ? updatedListing : { ...l, status: 'approved' as const, rejectionReason: undefined })
+            : l
+        )
+      );
 
-    addToast({
-      type: 'success',
-      title: 'Listing Approved & Email Sent',
-      message: `"${item.title.substring(0, 35)}..." is live. Approval email with Feature Ad option dispatched to ${sellerEmail}.`,
-    });
+      if (item) {
+        recordAuditLog(
+          'APPROVE_LISTING',
+          'Marketplace / Listings',
+          id,
+          item.title,
+          'Listing reviewed and approved for public search'
+        );
 
-    fetch(`/api/listings/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'approved' }),
-    }).catch(() => {});
+        const seller = users.find((u) => u.id === item.sellerId);
+        const sellerEmail = seller?.email || 'seller@example.com';
+        const sellerName = item.sellerName || seller?.name || 'Valued Seller';
+
+        sendEmail({
+          toEmail: sellerEmail,
+          toName: sellerName,
+          subject: `🎉 Good News! Your ad "${item.title.substring(0, 45)}..." is Approved & Live!`,
+          body: `Hi ${sellerName},\n\nGreat news! Your classified listing "${item.title}" (Ad ID: #${item.id}) has been reviewed and approved by our moderation team. It is now live and visible to buyers across ${item.location?.city || 'India'}.\n\n🚀 Want to get up to 10x more buyer enquiries? Feature your ad at the top of category search results with an eye-catching Gold Featured Badge!`,
+          actionLabel: '⭐ Feature Your Ad Now',
+          actionUrl: `/user/my-ads?feature=${item.id}`,
+          type: 'ad_approved',
+          listingId: item.id,
+          listingTitle: item.title,
+          relatedUserId: item.sellerId,
+        });
+
+        addToast({
+          type: 'success',
+          title: 'Listing Approved & Email Sent',
+          message: `"${item.title.substring(0, 35)}..." is live. Approval email with Feature Ad option dispatched to ${sellerEmail}.`,
+        });
+      }
+      return true;
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'Approval Failed',
+        message: err.message || 'Network error approving listing',
+      });
+      return false;
+    }
   };
 
-  const rejectListing = (id: string, reason: string) => {
+  const rejectListing = async (id: string, reason: string): Promise<boolean> => {
     const item = listings.find((l) => l.id === id);
-    if (!item) return;
-    setListings((prev) =>
-      prev.map((l) => (l.id === id ? { ...l, status: 'rejected' as const, rejectionReason: reason } : l))
-    );
-    recordAuditLog('REJECT_LISTING', 'Marketplace / Listings', id, item.title, `Rejected with reason: ${reason}`);
-    addToast({
-      type: 'error',
-      title: 'Listing Rejected',
-      message: `Reason: ${reason}`,
-    });
+    try {
+      const res = await fetch(`/api/listings/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'rejected', rejectionReason: reason }),
+      });
 
-    fetch(`/api/listings/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'rejected', rejectionReason: reason }),
-    }).catch(() => {});
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        addToast({
+          type: 'error',
+          title: 'Rejection Failed',
+          message: errorData.error || `HTTP ${res.status}: Failed to reject listing`,
+        });
+        return false;
+      }
+
+      const updatedListing = await res.json().catch(() => null);
+      setListings((prev) =>
+        prev.map((l) =>
+          l.id === id
+            ? (updatedListing && updatedListing.id ? updatedListing : { ...l, status: 'rejected' as const, rejectionReason: reason })
+            : l
+        )
+      );
+
+      if (item) {
+        recordAuditLog('REJECT_LISTING', 'Marketplace / Listings', id, item.title, `Rejected with reason: ${reason}`);
+      }
+      addToast({
+        type: 'info',
+        title: 'Listing Rejected',
+        message: `Reason: ${reason}`,
+      });
+      return true;
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'Rejection Failed',
+        message: err.message || 'Network error rejecting listing',
+      });
+      return false;
+    }
   };
 
   const featureListing = (id: string, isFeatured: boolean) => {
@@ -140,41 +194,83 @@ export function useListingActions({
     }).catch(() => {});
   };
 
-  const markAsSold = (id: string) => {
+  const markAsSold = async (id: string): Promise<boolean> => {
     const item = listings.find((l) => l.id === id);
-    if (!item) return;
-    setListings((prev) => prev.map((l) => (l.id === id ? { ...l, status: 'sold' as const } : l)));
-    recordAuditLog('MARK_AS_SOLD', 'Marketplace / Listings', id, item.title, 'Marked as sold');
-    addToast({
-      type: 'info',
-      title: 'Marked as Sold',
-      message: 'Item has been archived as sold.',
-    });
+    try {
+      const res = await fetch(`/api/listings/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'sold' }),
+      });
 
-    fetch(`/api/listings/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'sold' }),
-    }).catch(() => {});
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        addToast({
+          type: 'error',
+          title: 'Action Failed',
+          message: errorData.error || `HTTP ${res.status}: Failed to mark listing as sold`,
+        });
+        return false;
+      }
+
+      setListings((prev) => prev.map((l) => (l.id === id ? { ...l, status: 'sold' as const } : l)));
+      if (item) {
+        recordAuditLog('MARK_AS_SOLD', 'Marketplace / Listings', id, item.title, 'Marked as sold');
+      }
+      addToast({
+        type: 'info',
+        title: 'Marked as Sold',
+        message: 'Item has been archived as sold.',
+      });
+      return true;
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'Action Failed',
+        message: err.message || 'Network error marking as sold',
+      });
+      return false;
+    }
   };
 
-  const deleteListing = (id: string) => {
+  const deleteListing = async (id: string): Promise<boolean> => {
     const item = listings.find((l) => l.id === id);
-    if (!item) return;
-    setListings((prev) => prev.filter((l) => l.id !== id));
-    recordAuditLog('DELETE_LISTING', 'Marketplace / Listings', id, item.title, 'Permanently deleted listing');
-    addToast({
-      type: 'warning',
-      title: 'Listing Deleted',
-      message: 'The listing has been removed.',
-    });
+    try {
+      const res = await fetch(`/api/listings/${id}`, {
+        method: 'DELETE',
+      });
 
-    fetch(`/api/listings/${id}`, {
-      method: 'DELETE',
-    }).catch(() => {});
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        addToast({
+          type: 'error',
+          title: 'Delete Failed',
+          message: errorData.error || `HTTP ${res.status}: Failed to delete listing`,
+        });
+        return false;
+      }
+
+      setListings((prev) => prev.filter((l) => l.id !== id));
+      if (item) {
+        recordAuditLog('DELETE_LISTING', 'Marketplace / Listings', id, item.title, 'Permanently deleted listing');
+      }
+      addToast({
+        type: 'warning',
+        title: 'Listing Deleted',
+        message: 'The listing has been removed.',
+      });
+      return true;
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'Delete Failed',
+        message: err.message || 'Network error deleting listing',
+      });
+      return false;
+    }
   };
 
-  const updateListing = (updatedListing: Listing): boolean => {
+  const updateListing = async (updatedListing: Listing): Promise<boolean> => {
     const duplicateCheck = checkDuplicateAdTitle({
       title: updatedListing.title,
       sellerId: updatedListing.sellerId,
@@ -191,20 +287,39 @@ export function useListingActions({
       return false;
     }
 
-    setListings((prev) => prev.map((l) => (l.id === updatedListing.id ? updatedListing : l)));
-    addToast({
-      type: 'success',
-      title: 'Listing Updated',
-      message: `"${updatedListing.title.substring(0, 35)}..." saved successfully.`,
-    });
+    try {
+      const res = await fetch(`/api/listings/${updatedListing.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedListing),
+      });
 
-    fetch(`/api/listings/${updatedListing.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updatedListing),
-    }).catch(() => {});
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        addToast({
+          type: 'error',
+          title: 'Update Failed',
+          message: errorData.error || `HTTP ${res.status}: Failed to update listing`,
+        });
+        return false;
+      }
 
-    return true;
+      const returned = await res.json().catch(() => updatedListing);
+      setListings((prev) => prev.map((l) => (l.id === updatedListing.id ? (returned?.id ? returned : updatedListing) : l)));
+      addToast({
+        type: 'success',
+        title: 'Listing Updated',
+        message: `"${updatedListing.title.substring(0, 35)}..." saved successfully.`,
+      });
+      return true;
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'Update Failed',
+        message: err.message || 'Network error updating listing',
+      });
+      return false;
+    }
   };
 
   const restoreListing = (id: string) => {
@@ -269,123 +384,164 @@ export function useListingActions({
     }).catch(() => {});
   };
 
-  const renewListing = (id: string, days = 30, isFree = true) => {
+  const renewListing = async (id: string, days = 30, isFree = true): Promise<boolean> => {
     const item = listings.find((l) => l.id === id);
-    if (!item) return;
+    try {
+      const res = await fetch('/api/listings/bulk-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'renew', ids: [id] }),
+      });
 
-    const futureDate = new Date();
-    futureDate.setDate(futureDate.getDate() + days);
-    const newExpires = futureDate.toISOString().split('T')[0];
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        addToast({
+          type: 'error',
+          title: 'Renewal Failed',
+          message: errorData.error || `HTTP ${res.status}: Failed to renew listing`,
+        });
+        return false;
+      }
 
-    setListings((prev) =>
-      prev.map((l) =>
-        l.id === id
-          ? {
-              ...l,
-              status: 'approved' as const,
-              expiresAt: newExpires,
-              rejectionReason: undefined,
-            }
-          : l
-      )
-    );
+      const futureDate = new Date();
+      futureDate.setDate(futureDate.getDate() + 30);
+      const newExpires = futureDate.toISOString().split('T')[0];
 
-    const sellerUser = users.find((u) => u.id === item.sellerId);
-    const toEmail =
-      sellerUser?.email || `${item.sellerName.toLowerCase().replace(/[^a-z0-9]/g, '')}@example.com`;
+      setListings((prev) =>
+        prev.map((l) =>
+          l.id === id
+            ? {
+                ...l,
+                status: 'approved' as const,
+                expiresAt: newExpires,
+                rejectionReason: undefined,
+              }
+            : l
+        )
+      );
 
-    sendEmail({
-      toEmail,
-      toName: item.sellerName,
-      subject: `Your ad "${item.title.length > 40 ? item.title.substring(0, 37) + '...' : item.title}" has been renewed & is now LIVE!`,
-      body: `Hi ${item.sellerName},\n\nCongratulations! Your classified listing "${item.title}" (Ad ID: #${item.id}) has been successfully renewed for ${days} days until ${newExpires} (${isFree ? '100% Free of Charge' : 'Extended'}).\n\nYour ad is now active in ${item.location.city} and receiving search traffic, buyer calls, and chats.`,
-      actionLabel: 'View Live Listing',
-      actionUrl: `/item/${item.id}`,
-      type: 'ad_renewed',
-      listingId: item.id,
-      listingTitle: item.title,
-    });
-
-    recordAuditLog(
-      'RENEW_LISTING',
-      'Marketplace / Listings',
-      id,
-      item.title,
-      `Renewed for ${days} days until ${newExpires} (${isFree ? 'Free ₹0' : 'Paid'})`
-    );
-
-    addToast({
-      type: 'success',
-      title: '🎉 Ad Renewed for Free!',
-      message: `"${item.title.substring(0, 32)}..." is now renewed and active for ${days} days.`,
-    });
-
-    fetch(`/api/listings/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'approved', expiresAt: newExpires, rejectionReason: null }),
-    }).catch(() => {});
-  };
-
-  const bulkRenewListings = (ids: string[], days = 30) => {
-    if (ids.length === 0) return;
-
-    const futureDate = new Date();
-    futureDate.setDate(futureDate.getDate() + days);
-    const newExpires = futureDate.toISOString().split('T')[0];
-
-    setListings((prev) =>
-      prev.map((l) =>
-        ids.includes(l.id)
-          ? {
-              ...l,
-              status: 'approved' as const,
-              expiresAt: newExpires,
-              rejectionReason: undefined,
-            }
-          : l
-      )
-    );
-
-    ids.forEach((id) => {
-      const item = listings.find((l) => l.id === id);
       if (item) {
         const sellerUser = users.find((u) => u.id === item.sellerId);
         const toEmail =
           sellerUser?.email || `${item.sellerName.toLowerCase().replace(/[^a-z0-9]/g, '')}@example.com`;
+
         sendEmail({
           toEmail,
           toName: item.sellerName,
-          subject: `Admin Renewal Notice: Your ad "${item.title.length > 40 ? item.title.substring(0, 37) + '...' : item.title}" has been renewed!`,
-          body: `Hi ${item.sellerName},\n\nYour classified ad "${item.title}" (Ad ID: #${item.id}) has been renewed by the Chillyads Admin team for an additional ${days} days until ${newExpires} (100% Free).\n\nYour ad is active and visible to all buyers in ${item.location.city}.`,
+          subject: `Your ad "${item.title.length > 40 ? item.title.substring(0, 37) + '...' : item.title}" has been renewed & is now LIVE!`,
+          body: `Hi ${item.sellerName},\n\nCongratulations! Your classified listing "${item.title}" (Ad ID: #${item.id}) has been successfully renewed for 30 days until ${newExpires} (${isFree ? '100% Free of Charge' : 'Extended'}).\n\nYour ad is now active in ${item.location.city} and receiving search traffic, buyer calls, and chats.`,
           actionLabel: 'View Live Listing',
           actionUrl: `/item/${item.id}`,
           type: 'ad_renewed',
           listingId: item.id,
           listingTitle: item.title,
         });
+
+        recordAuditLog(
+          'RENEW_LISTING',
+          'Marketplace / Listings',
+          id,
+          item.title,
+          `Renewed for 30 days until ${newExpires} (${isFree ? 'Free ₹0' : 'Paid'})`
+        );
       }
-    });
 
-    recordAuditLog(
-      'BULK_RENEW_LISTINGS',
-      'Marketplace / Admin',
-      `${ids.length} ads`,
-      `Bulk renewed ${ids.length} expired ads`,
-      `Extended all by ${days} days until ${newExpires} (Free renewal)`
-    );
+      addToast({
+        type: 'success',
+        title: '🎉 Ad Renewed!',
+        message: `"${item?.title?.substring(0, 32) || id}..." is now renewed and active for 30 days.`,
+      });
 
-    addToast({
-      type: 'success',
-      title: '✅ Bulk Renewal Completed',
-      message: `Successfully renewed ${ids.length} expired listings for ${days} days. Confirmation emails sent to sellers.`,
-    });
+      return true;
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'Renewal Failed',
+        message: err.message || 'Network error renewing listing',
+      });
+      return false;
+    }
+  };
 
-    fetch('/api/listings/bulk-action', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'update', ids, data: { status: 'approved', expiresAt: newExpires } }),
-    }).catch(() => {});
+  const bulkRenewListings = async (ids: string[], days = 30): Promise<boolean> => {
+    if (ids.length === 0) return false;
+    try {
+      const res = await fetch('/api/listings/bulk-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'renew', ids }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        addToast({
+          type: 'error',
+          title: 'Bulk Renewal Failed',
+          message: errorData.error || `HTTP ${res.status}: Failed to renew listings`,
+        });
+        return false;
+      }
+
+      const futureDate = new Date();
+      futureDate.setDate(futureDate.getDate() + 30);
+      const newExpires = futureDate.toISOString().split('T')[0];
+
+      setListings((prev) =>
+        prev.map((l) =>
+          ids.includes(l.id)
+            ? {
+                ...l,
+                status: 'approved' as const,
+                expiresAt: newExpires,
+                rejectionReason: undefined,
+              }
+            : l
+        )
+      );
+
+      ids.forEach((id) => {
+        const item = listings.find((l) => l.id === id);
+        if (item) {
+          const sellerUser = users.find((u) => u.id === item.sellerId);
+          const toEmail =
+            sellerUser?.email || `${item.sellerName.toLowerCase().replace(/[^a-z0-9]/g, '')}@example.com`;
+          sendEmail({
+            toEmail,
+            toName: item.sellerName,
+            subject: `Admin Renewal Notice: Your ad "${item.title.length > 40 ? item.title.substring(0, 37) + '...' : item.title}" has been renewed!`,
+            body: `Hi ${item.sellerName},\n\nYour classified ad "${item.title}" (Ad ID: #${item.id}) has been renewed by the Chillyads Admin team for an additional 30 days until ${newExpires} (100% Free).\n\nYour ad is active and visible to all buyers in ${item.location.city}.`,
+            actionLabel: 'View Live Listing',
+            actionUrl: `/item/${item.id}`,
+            type: 'ad_renewed',
+            listingId: item.id,
+            listingTitle: item.title,
+          });
+        }
+      });
+
+      recordAuditLog(
+        'BULK_RENEW_LISTINGS',
+        'Marketplace / Admin',
+        `${ids.length} ads`,
+        `Bulk renewed ${ids.length} expired ads`,
+        `Extended all by 30 days until ${newExpires} (Free renewal)`
+      );
+
+      addToast({
+        type: 'success',
+        title: '✅ Bulk Renewal Completed',
+        message: `Successfully renewed ${ids.length} expired listings for 30 days. Confirmation emails sent to sellers.`,
+      });
+
+      return true;
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'Bulk Renewal Failed',
+        message: err.message || 'Network error renewing listings',
+      });
+      return false;
+    }
   };
 
   const extendExpiration = (id: string, days = 30) => {
@@ -484,74 +640,137 @@ export function useListingActions({
     return clientCheck;
   };
 
-  const bulkApproveListings = (ids: string[]) => {
-    setListings((prev) =>
-      prev.map((l) => (ids.includes(l.id) ? { ...l, status: 'approved' as const, rejectionReason: undefined } : l))
-    );
-    recordAuditLog(
-      'BULK_APPROVE',
-      'Marketplace / Moderation',
-      `${ids.length} items`,
-      `${ids.length} listings approved`,
-      `IDs: ${ids.join(', ')}`
-    );
-    addToast({
-      type: 'success',
-      title: 'Bulk Approval Complete',
-      message: `Successfully approved ${ids.length} listings.`,
-    });
+  const bulkApproveListings = async (ids: string[]): Promise<boolean> => {
+    if (ids.length === 0) return false;
+    try {
+      const res = await fetch('/api/listings/bulk-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'approve', ids }),
+      });
 
-    fetch('/api/listings/bulk-action', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'update', ids, data: { status: 'approved' } }),
-    }).catch(() => {});
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        addToast({
+          type: 'error',
+          title: 'Bulk Approval Failed',
+          message: errorData.error || `HTTP ${res.status}: Failed to approve listings`,
+        });
+        return false;
+      }
+
+      setListings((prev) =>
+        prev.map((l) => (ids.includes(l.id) ? { ...l, status: 'approved' as const, rejectionReason: undefined } : l))
+      );
+      recordAuditLog(
+        'BULK_APPROVE',
+        'Marketplace / Moderation',
+        `${ids.length} items`,
+        `${ids.length} listings approved`,
+        `IDs: ${ids.join(', ')}`
+      );
+      addToast({
+        type: 'success',
+        title: 'Bulk Approval Complete',
+        message: `Successfully approved ${ids.length} listings.`,
+      });
+      return true;
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'Bulk Approval Failed',
+        message: err.message || 'Network error approving listings',
+      });
+      return false;
+    }
   };
 
-  const bulkRejectListings = (ids: string[], reason: string) => {
-    setListings((prev) =>
-      prev.map((l) => (ids.includes(l.id) ? { ...l, status: 'rejected' as const, rejectionReason: reason } : l))
-    );
-    recordAuditLog(
-      'BULK_REJECT',
-      'Marketplace / Moderation',
-      `${ids.length} items`,
-      `${ids.length} listings rejected`,
-      `Reason: ${reason}`
-    );
-    addToast({
-      type: 'error',
-      title: 'Bulk Rejection Applied',
-      message: `Rejected ${ids.length} listings. Reason: ${reason}`,
-    });
+  const bulkRejectListings = async (ids: string[], reason: string): Promise<boolean> => {
+    if (ids.length === 0) return false;
+    try {
+      const res = await fetch('/api/listings/bulk-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reject', ids, data: { rejectionReason: reason } }),
+      });
 
-    fetch('/api/listings/bulk-action', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'update', ids, data: { status: 'rejected', rejectionReason: reason } }),
-    }).catch(() => {});
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        addToast({
+          type: 'error',
+          title: 'Bulk Rejection Failed',
+          message: errorData.error || `HTTP ${res.status}: Failed to reject listings`,
+        });
+        return false;
+      }
+
+      setListings((prev) =>
+        prev.map((l) => (ids.includes(l.id) ? { ...l, status: 'rejected' as const, rejectionReason: reason } : l))
+      );
+      recordAuditLog(
+        'BULK_REJECT',
+        'Marketplace / Moderation',
+        `${ids.length} items`,
+        `${ids.length} listings rejected`,
+        `Reason: ${reason}`
+      );
+      addToast({
+        type: 'info',
+        title: 'Bulk Rejection Applied',
+        message: `Rejected ${ids.length} listings. Reason: ${reason}`,
+      });
+      return true;
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'Bulk Rejection Failed',
+        message: err.message || 'Network error rejecting listings',
+      });
+      return false;
+    }
   };
 
-  const bulkDeleteListings = (ids: string[]) => {
-    setListings((prev) => prev.filter((l) => !ids.includes(l.id)));
-    recordAuditLog(
-      'BULK_DELETE',
-      'Marketplace / Listings',
-      `${ids.length} items`,
-      'Permanently deleted multiple listings',
-      `IDs: ${ids.join(', ')}`
-    );
-    addToast({
-      type: 'warning',
-      title: 'Bulk Delete Applied',
-      message: `Deleted ${ids.length} listings.`,
-    });
+  const bulkDeleteListings = async (ids: string[]): Promise<boolean> => {
+    if (ids.length === 0) return false;
+    try {
+      const res = await fetch('/api/listings/bulk-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', ids }),
+      });
 
-    fetch('/api/listings/bulk-action', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'delete', ids }),
-    }).catch(() => {});
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        addToast({
+          type: 'error',
+          title: 'Bulk Delete Failed',
+          message: errorData.error || `HTTP ${res.status}: Failed to delete listings`,
+        });
+        return false;
+      }
+
+      setListings((prev) => prev.filter((l) => !ids.includes(l.id)));
+      recordAuditLog(
+        'BULK_DELETE',
+        'Marketplace / Listings',
+        `${ids.length} items`,
+        'Permanently deleted multiple listings',
+        `IDs: ${ids.join(', ')}`
+      );
+      addToast({
+        type: 'warning',
+        title: 'Bulk Delete Applied',
+        message: `Deleted ${ids.length} listings.`,
+      });
+      return true;
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'Bulk Delete Failed',
+        message: err.message || 'Network error deleting listings',
+      });
+      return false;
+    }
   };
 
   const cleanupExpiredBoosts = () => {

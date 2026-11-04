@@ -213,12 +213,68 @@ export const ListingsModule: React.FC<ListingsModuleProps> = ({
     });
   }, [listings, appliedFilters]);
 
+  // Server-side paginated listings loading beyond 500-item bootstrap
+  const [serverListings, setServerListings] = useState<Listing[] | null>(null);
+  const [serverTotal, setServerTotal] = useState<number | null>(null);
+  const [isLoadingServer, setIsLoadingServer] = useState(false);
+
+  const fetchServerListings = React.useCallback(async () => {
+    setIsLoadingServer(true);
+    try {
+      const params = new URLSearchParams();
+      if (appliedFilters.status) {
+        params.set('status', appliedFilters.status);
+      }
+      if (appliedFilters.search.trim()) {
+        params.set('search', appliedFilters.search.trim());
+      }
+      if (appliedFilters.category !== 'all') {
+        params.set('category', appliedFilters.category);
+      }
+      if (appliedFilters.subcategory !== 'all') {
+        params.set('subcategory', appliedFilters.subcategory);
+      }
+      if (appliedFilters.location !== 'all') {
+        params.set('city', appliedFilters.location);
+      }
+      if (appliedFilters.minPrice) {
+        params.set('minPrice', appliedFilters.minPrice);
+      }
+      if (appliedFilters.maxPrice) {
+        params.set('maxPrice', appliedFilters.maxPrice);
+      }
+      params.set('limit', String(pageSize));
+      params.set('offset', String((currentPage - 1) * pageSize));
+
+      const res = await fetch(`/api/listings?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.items)) {
+          setServerListings(data.items);
+          setServerTotal(typeof data.total === 'number' ? data.total : data.items.length);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load server listings in admin:', err);
+    } finally {
+      setIsLoadingServer(false);
+    }
+  }, [appliedFilters, currentPage, pageSize]);
+
+  React.useEffect(() => {
+    fetchServerListings();
+  }, [fetchServerListings]);
+
   // Paginated listings
-  const totalPages = Math.ceil(filteredListings.length / pageSize) || 1;
+  const totalItems = serverTotal !== null ? serverTotal : filteredListings.length;
+  const totalPages = Math.ceil(totalItems / pageSize) || 1;
   const paginatedListings = useMemo(() => {
+    if (serverListings !== null) {
+      return serverListings;
+    }
     const start = (currentPage - 1) * pageSize;
     return filteredListings.slice(start, start + pageSize);
-  }, [filteredListings, currentPage, pageSize]);
+  }, [serverListings, filteredListings, currentPage, pageSize]);
 
   // Selection handlers
   const isPageAllSelected = useMemo(() => {
@@ -650,9 +706,12 @@ export const ListingsModule: React.FC<ListingsModuleProps> = ({
                 <RotateCcw className="w-3.5 h-3.5" /> Bulk Renew ({selectedItems.length})
               </button>
               <button
-                onClick={() => {
-                  bulkApproveListings(selectedItems);
-                  setSelectedItems([]);
+                onClick={async () => {
+                  const ok = await bulkApproveListings(selectedItems);
+                  if (ok) {
+                    fetchServerListings();
+                    setSelectedItems([]);
+                  }
                 }}
                 className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-semibold flex items-center gap-1 transition-colors"
               >
@@ -860,7 +919,10 @@ export const ListingsModule: React.FC<ListingsModuleProps> = ({
                             {/* Approve */}
                             {item.status !== 'approved' && (
                               <button
-                                onClick={() => approveListing(item.id)}
+                                onClick={async () => {
+                                  const ok = await approveListing(item.id);
+                                  if (ok) fetchServerListings();
+                                }}
                                 className="p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-950 text-emerald-600 rounded transition-colors"
                                 title="Approve Listing"
                               >
@@ -1000,10 +1062,12 @@ export const ListingsModule: React.FC<ListingsModuleProps> = ({
       <ConfirmDialog
         isOpen={rejectDialog.isOpen}
         onClose={() => setRejectDialog({ isOpen: false })}
-        onConfirm={(reason) => {
+        onConfirm={async (reason) => {
           if (rejectDialog.id) {
-            rejectListing(rejectDialog.id, reason || 'Incomplete details');
+            const ok = await rejectListing(rejectDialog.id, reason || 'Incomplete details');
+            if (ok) fetchServerListings();
           }
+          setRejectDialog({ isOpen: false });
         }}
         title="Reject Listing"
         description="Specify the reason why this listing does not satisfy Chillyads moderation guidelines. The seller will be notified."
@@ -1017,9 +1081,13 @@ export const ListingsModule: React.FC<ListingsModuleProps> = ({
       <ConfirmDialog
         isOpen={bulkRejectDialog}
         onClose={() => setBulkRejectDialog(false)}
-        onConfirm={(reason) => {
-          bulkRejectListings(selectedItems, reason || 'Bulk moderation rejection');
-          setSelectedItems([]);
+        onConfirm={async (reason) => {
+          const ok = await bulkRejectListings(selectedItems, reason || 'Bulk moderation rejection');
+          if (ok) {
+            fetchServerListings();
+            setSelectedItems([]);
+          }
+          setBulkRejectDialog(false);
         }}
         title={`Reject ${selectedItems.length} Selected Listings`}
         description="Are you sure you want to reject these items in bulk?"
@@ -1033,10 +1101,12 @@ export const ListingsModule: React.FC<ListingsModuleProps> = ({
       <ConfirmDialog
         isOpen={deleteConfirm.isOpen}
         onClose={() => setDeleteConfirm({ isOpen: false })}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (deleteConfirm.id) {
-            deleteListing(deleteConfirm.id);
+            const ok = await deleteListing(deleteConfirm.id);
+            if (ok) fetchServerListings();
           }
+          setDeleteConfirm({ isOpen: false });
         }}
         title="Delete Listing Permanently"
         description="This action cannot be undone. The listing will be erased from search and buyer favorites."
@@ -1048,9 +1118,13 @@ export const ListingsModule: React.FC<ListingsModuleProps> = ({
       <ConfirmDialog
         isOpen={bulkDeleteConfirm}
         onClose={() => setBulkDeleteConfirm(false)}
-        onConfirm={() => {
-          bulkDeleteListings(selectedItems);
-          setSelectedItems([]);
+        onConfirm={async () => {
+          const ok = await bulkDeleteListings(selectedItems);
+          if (ok) {
+            fetchServerListings();
+            setSelectedItems([]);
+          }
+          setBulkDeleteConfirm(false);
         }}
         title={`Delete ${selectedItems.length} Selected Listings`}
         description="Are you sure you want to permanently delete all selected classified ads?"
@@ -1121,14 +1195,17 @@ export const ListingsModule: React.FC<ListingsModuleProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  bulkRenewListings(selectedItems, bulkRenewDialog.days);
-                  setSelectedItems([]);
+                onClick={async () => {
+                  const ok = await bulkRenewListings(selectedItems, 30);
+                  if (ok) {
+                    fetchServerListings();
+                    setSelectedItems([]);
+                  }
                   setBulkRenewDialog({ isOpen: false, days: 30 });
                 }}
                 className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
               >
-                <RotateCcw className="w-3.5 h-3.5" /> Confirm Free Bulk Renewal
+                <RotateCcw className="w-3.5 h-3.5" /> Confirm Free Bulk Renewal (30 Days)
               </button>
             </div>
           </div>
@@ -1152,34 +1229,8 @@ export const ListingsModule: React.FC<ListingsModuleProps> = ({
             </div>
 
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              This ad will be restored to active status immediately. Expiration will be extended by {singleRenewDialog.days} days from today.
+              This ad will be restored to active status immediately. Expiration will be set to exactly 30 days from today.
             </p>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                Extension Duration
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { days: 30, label: '30 Days' },
-                  { days: 60, label: '60 Days' },
-                  { days: 90, label: '90 Days' },
-                ].map((opt) => (
-                  <button
-                    key={opt.days}
-                    type="button"
-                    onClick={() => setSingleRenewDialog((prev) => ({ ...prev, days: opt.days }))}
-                    className={`py-2 px-3 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
-                      singleRenewDialog.days === opt.days
-                        ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-500 text-emerald-700 dark:text-emerald-300 ring-2 ring-emerald-500/20'
-                        : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
 
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
@@ -1191,15 +1242,16 @@ export const ListingsModule: React.FC<ListingsModuleProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
                   if (singleRenewDialog.id) {
-                    renewListing(singleRenewDialog.id, singleRenewDialog.days);
+                    const ok = await renewListing(singleRenewDialog.id, 30);
+                    if (ok) fetchServerListings();
                   }
                   setSingleRenewDialog({ isOpen: false, days: 30 });
                 }}
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
               >
-                <RotateCcw className="w-3.5 h-3.5" /> Renew Ad (Free)
+                <RotateCcw className="w-3.5 h-3.5" /> Renew Ad for 30 Days (Free)
               </button>
             </div>
           </div>

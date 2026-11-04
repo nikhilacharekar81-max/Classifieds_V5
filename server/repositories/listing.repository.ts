@@ -632,7 +632,7 @@ export class ListingRepository {
 
   public async bulkRenew(ids: string[], days = 30): Promise<{ renewedCount: number }> {
     try {
-      const validDays = !isNaN(Number(days)) && Number(days) > 0 ? Number(days) : 30;
+      const validDays = 30;
       const newExpiry = new Date(Date.now() + validDays * 24 * 60 * 60 * 1000);
       return await db.transaction(async (tx) => {
         const res = await tx
@@ -640,9 +640,13 @@ export class ListingRepository {
           .set({
             status: 'approved',
             expiresAt: newExpiry,
+            rejectionReason: null,
             updatedAt: new Date(),
           })
-          .where(inArray(schema.listings.id, ids))
+          .where(and(
+            inArray(schema.listings.id, ids),
+            notInArray(schema.listings.status, ['pending', 'rejected'])
+          ))
           .returning({ id: schema.listings.id });
 
         if (res.length > 0) {

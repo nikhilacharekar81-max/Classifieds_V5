@@ -23,7 +23,7 @@ export async function GET(
 
   const authContext = await getAuthenticatedUser(req);
   const isOwner = Boolean(authContext?.userId && authContext.userId === listing.sellerId);
-  const isPrivileged = Boolean(authContext?.isModerator || authContext?.isSuperAdmin);
+  const isPrivileged = Boolean(authContext?.isAdmin || authContext?.isModerator || authContext?.isSuperAdmin);
 
   // Expiration Check: If listing is expired, only owner or admin can view it
   const isExpired = listing.expiresAt && new Date(listing.expiresAt) <= new Date();
@@ -53,8 +53,11 @@ export async function PUT(
       return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
     }
 
+    const isModerator = Boolean(authContext.isModerator || authContext.isSuperAdmin);
+    const isAdmin = Boolean(authContext.isAdmin || authContext.isSuperAdmin);
+
     const body = await req.json();
-    const result = await listingService.updateListing(id, body, authContext.userId, authContext.isAdmin);
+    const result = await listingService.updateListing(id, body, authContext.userId, isAdmin, isModerator);
     if (!result.success) {
       return NextResponse.json(
         { error: result.error, code: result.status === 409 ? 'DUPLICATE_TITLE' : 'VALIDATION_ERROR' },
@@ -79,7 +82,8 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
     }
 
-    const success = await listingService.deleteListing(id, authContext.userId, authContext.isAdmin);
+    const isPrivileged = Boolean(authContext.isAdmin || authContext.isModerator || authContext.isSuperAdmin);
+    const success = await listingService.deleteListing(id, authContext.userId, isPrivileged);
     if (!success) {
       return NextResponse.json({ error: 'Listing not found or could not be deleted' }, { status: 404 });
     }

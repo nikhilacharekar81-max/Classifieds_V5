@@ -181,24 +181,32 @@ export class UserRepository {
 
   public async findSession(sessionId: string) {
     try {
-      const rows = await withDbRetry(() =>
+      const sessionRows = await withDbRetry(() =>
         db
-          .select({
-            session: schema.userSessions,
-            user: schema.users,
-          })
+          .select()
           .from(schema.userSessions)
-          .innerJoin(schema.users, eq(schema.userSessions.userId, schema.users.id))
           .where(eq(schema.userSessions.id, sessionId))
           .limit(1)
       );
 
-      if (!rows.length) return null;
-      const { session, user } = rows[0];
+      if (!sessionRows.length) return null;
+      const session = sessionRows[0];
       if (session.expiresAt < new Date()) {
         await this.deleteSession(sessionId);
         return null;
       }
+
+      const userRows = await withDbRetry(() =>
+        db
+          .select()
+          .from(schema.users)
+          .where(eq(schema.users.id, session.userId))
+          .limit(1)
+      );
+
+      if (!userRows.length) return null;
+      const user = userRows[0];
+
       // Security Gate: Inactive or banned users cannot authenticate
       if (user.status !== 'active') {
         await this.deleteSession(sessionId);
