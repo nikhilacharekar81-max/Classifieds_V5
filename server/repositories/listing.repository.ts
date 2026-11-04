@@ -630,6 +630,48 @@ export class ListingRepository {
     }
   }
 
+  public async getSellerStatusCounts(sellerId: string): Promise<{
+    all: number;
+    approved: number;
+    pending: number;
+    expired: number;
+    sold: number;
+    rejected: number;
+  }> {
+    const counts = {
+      all: 0,
+      approved: 0,
+      pending: 0,
+      expired: 0,
+      sold: 0,
+      rejected: 0,
+    };
+    try {
+      const rows = await withDbRetry(() =>
+        db
+          .select({
+            status: schema.listings.status,
+            count: sql<number>`count(*)::int`,
+          })
+          .from(schema.listings)
+          .where(eq(schema.listings.sellerId, sellerId))
+          .groupBy(schema.listings.status)
+      );
+
+      for (const row of rows) {
+        const c = Number(row.count) || 0;
+        if (row.status in counts && row.status !== 'all') {
+          counts[row.status as keyof typeof counts] = c;
+        }
+        counts.all += c;
+      }
+      return counts;
+    } catch (error) {
+      console.error('ListingRepository.getSellerStatusCounts error:', error);
+      return counts;
+    }
+  }
+
   public async bulkRenew(ids: string[], days = 30): Promise<{ renewedCount: number }> {
     try {
       const validDays = 30;
@@ -645,7 +687,14 @@ export class ListingRepository {
           })
           .where(and(
             inArray(schema.listings.id, ids),
-            notInArray(schema.listings.status, ['pending', 'rejected'])
+            notInArray(schema.listings.status, ['sold', 'pending', 'rejected']),
+            or(
+              eq(schema.listings.status, 'expired'),
+              and(
+                eq(schema.listings.status, 'approved'),
+                lte(schema.listings.expiresAt, new Date())
+              )
+            )
           ))
           .returning({ id: schema.listings.id });
 

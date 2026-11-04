@@ -86,7 +86,7 @@ test('Finding 1 & 2: Renewal and Expiry Date Protection', async () => {
   const now = Date.now();
   // Expiry must be roughly 30 days ahead (between 29 and 31 days)
   const diffDays = Math.round((expiryTime - now) / (24 * 3600 * 1000));
-  assert.equal(diffDays, 30, `Expected 30 days expiry, got ${diffDays}`);
+  assert.ok(diffDays >= 29 && diffDays <= 31, `Expected roughly 30 days expiry, got ${diffDays}`);
 
   // TEST 1.2: Seller CANNOT renew pending listing (must undergo moderation)
   const renewPendingReq = makeReq('http://localhost:3000/api/listings/bulk-action', 'POST', {
@@ -320,3 +320,167 @@ test('Finding 4: Loading Seller & Moderation Listings Beyond Bootstrap', async (
   await pool.query('DELETE FROM user_sessions WHERE user_id IN ($1, $2, $3)', [sellerId, otherSellerId, adminId]);
   await pool.query('DELETE FROM users WHERE id IN ($1, $2, $3)', [sellerId, otherSellerId, adminId]);
 });
+
+test('Fix 1: Prevent sold listings from being renewed (seller, admin, and repository level)', async () => {
+  const sellerId = `fix1_seller_${Date.now()}`;
+  const adminId = `fix1_admin_${Date.now()}`;
+  const sellerToken = `token_fix1_s_${Date.now()}`;
+  const adminToken = `token_fix1_a_${Date.now()}`;
+
+  await pool.query(`
+    INSERT INTO users (id, name, email, type, status, admin_role) VALUES
+      ($1, 'Fix1 Seller', '${sellerId}@example.com', 'user', 'active', NULL),
+      ($2, 'Fix1 Admin', '${adminId}@example.com', 'user', 'active', 'admin')
+  `, [sellerId, adminId]);
+
+  await pool.query(`
+    INSERT INTO user_sessions (id, user_id, expires_at) VALUES
+      ($1, $2, NOW() + INTERVAL '1 day'),
+      ($3, $4, NOW() + INTERVAL '1 day')
+  `, [sellerToken, sellerId, adminToken, adminId]);
+
+  const soldAdId = `lst_sold_${Date.now()}`;
+  const expiredAdId = `lst_exp_${Date.now()}`;
+  const pendingAdId = `lst_pnd_${Date.now()}`;
+  const rejectedAdId = `lst_rej_${Date.now()}`;
+  const pastDate = new Date(Date.now() - 10 * 24 * 3600 * 1000);
+
+  // Insert a sold listing with past expires_at
+  await pool.query(`
+    INSERT INTO listings (id, seller_id, seller_name, category_id, title, description, price, city, state, locality, status, expires_at) VALUES
+      ($1, $2, 'Fix1 Seller', 'cat_cars', 'Sold Car Listing', 'Sold desc', 1000, 'Mumbai', 'Maharashtra', 'Loc', 'sold', $3),
+      ($4, $2, 'Fix1 Seller', 'cat_cars', 'Expired Car Listing', 'Exp desc', 1000, 'Mumbai', 'Maharashtra', 'Loc', 'expired', $3),
+      ($5, $2, 'Fix1 Seller', 'cat_cars', 'Pending Car Listing', 'Pnd desc', 1000, 'Mumbai', 'Maharashtra', 'Loc', 'pending', $3),
+      ($6, $2, 'Fix1 Seller', 'cat_cars', 'Rejected Car Listing', 'Rej desc', 1000, 'Mumbai', 'Maharashtra', 'Loc', 'rejected', $3)
+  `, [soldAdId, sellerId, pastDate, expiredAdId, pendingAdId, rejectedAdId]);
+
+  // 1. Seller attempting to renew sold listing MUST fail with 400
+  const sellerRenewSoldReq = makeReq('http://localhost:3000/api/listings/bulk-action', 'POST', {
+    action: 'renew',
+    ids: [soldAdId],
+  }, sellerToken);
+  const sellerRenewSoldRes = await bulkActionPost(sellerRenewSoldReq);
+  const sellerRenewSoldJson = await sellerRenewSoldRes.json();
+  assert.equal(sellerRenewSoldRes.status, 400, 'Seller renewing sold listing must return 400');
+  assert.match(sellerRenewSoldJson.error, /Sold listings cannot be renewed/i);
+
+  // 2. Admin attempting to renew sold listing MUST ALSO fail with 400
+  const adminRenewSoldReq = makeReq('http://localhost:3000/api/listings/bulk-action', 'POST', {
+    action: 'renew',
+    ids: [soldAdId],
+  }, adminToken);
+  const adminRenewSoldRes = await bulkActionPost(adminRenewSoldReq);
+  const adminRenewSoldJson = await adminRenewSoldRes.json();
+  assert.equal(adminRenewSoldRes.status, 400, 'Admin renewing sold listing must return 400');
+  assert.match(adminRenewSoldJson.error, /Sold listings cannot be renewed/i);
+
+  // 3. Admin attempting to renew pending or rejected listing MUST fail with 400
+  const adminRenewPendingReq = makeReq('http://localhost:3000/api/listings/bulk-action', 'POST', {
+    action: 'renew',
+    ids: [pendingAdId],
+  }, adminToken);
+  const adminRenewPendingRes = await bulkActionPost(adminRenewPendingReq);
+  assert.equal(adminRenewPendingRes.status, 400, 'Admin renewing pending listing must return 400');
+
+  const adminRenewRejectedReq = makeReq('http://localhost:3000/api/listings/bulk-action', 'POST', {
+    action: 'renew',
+    ids: [rejectedAdId],
+  }, adminToken);
+  const adminRenewRejectedRes = await bulkActionPost(adminRenewRejectedReq);
+  assert.equal(adminRenewRejectedRes.status, 400, 'Admin renewing rejected listing must return 400');
+
+  // 4. Repository level direct bypass attempt: bulkRenew directly called on sold, pending, and rejected
+  const directRenewResult = await listingRepository.bulkRenew([soldAdId, pendingAdId, rejectedAdId], 30);
+  assert.equal(directRenewResult.renewedCount, 0, 'Repository bulkRenew must not update sold, pending, or rejected listings');
+
+  // Verify database status remains strictly unchanged
+  const checkSold = await listingRepository.findById(soldAdId);
+  assert.equal(checkSold?.status, 'sold', 'Sold listing status must still be sold');
+  const checkPending = await listingRepository.findById(pendingAdId);
+  assert.equal(checkPending?.status, 'pending', 'Pending listing status must still be pending');
+  const checkRejected = await listingRepository.findById(rejectedAdId);
+  assert.equal(checkRejected?.status, 'rejected', 'Rejected listing status must still be rejected');
+
+  // 5. Eligible expired listing CAN be renewed and gets exactly 30 days
+  const renewExpReq = makeReq('http://localhost:3000/api/listings/bulk-action', 'POST', {
+    action: 'renew',
+    ids: [expiredAdId],
+  }, sellerToken);
+  const renewExpRes = await bulkActionPost(renewExpReq);
+  assert.equal(renewExpRes.status, 200, 'Eligible expired listing renewal must return 200');
+  const checkExp = await listingRepository.findById(expiredAdId);
+  assert.equal(checkExp?.status, 'approved', 'Renewed listing status must be approved');
+  const daysDiff = Math.round((new Date(checkExp!.expiresAt).getTime() - Date.now()) / (24 * 3600 * 1000));
+  assert.ok(daysDiff >= 29 && daysDiff <= 31, `Renewal must add exactly 30 days (got ${daysDiff})`);
+
+  // Clean up
+  await pool.query('DELETE FROM listings WHERE id IN ($1, $2, $3, $4)', [soldAdId, expiredAdId, pendingAdId, rejectedAdId]);
+  await pool.query('DELETE FROM user_sessions WHERE user_id IN ($1, $2)', [sellerId, adminId]);
+  await pool.query('DELETE FROM users WHERE id IN ($1, $2)', [sellerId, adminId]);
+});
+
+test('Fix 2: Pagination of seller listings via API limit and offset beyond 200 items', async () => {
+  const sellerId = `fix2_seller_${Date.now()}`;
+  const sellerToken = `token_fix2_s_${Date.now()}`;
+
+  await pool.query(`
+    INSERT INTO users (id, name, email, type, status, admin_role) VALUES
+      ($1, 'Fix2 Seller', '${sellerId}@example.com', 'user', 'active', NULL)
+  `, [sellerId]);
+
+  await pool.query(`
+    INSERT INTO user_sessions (id, user_id, expires_at) VALUES
+      ($1, $2, NOW() + INTERVAL '1 day')
+  `, [sellerToken, sellerId]);
+
+  // Insert 25 items for this seller with varying statuses
+  const ids: string[] = [];
+  for (let i = 0; i < 25; i++) {
+    const id = `lst_pg_${i}_${Date.now()}`;
+    ids.push(id);
+    const status = i % 5 === 0 ? 'approved' : i % 5 === 1 ? 'pending' : i % 5 === 2 ? 'sold' : i % 5 === 3 ? 'expired' : 'rejected';
+    await pool.query(`
+      INSERT INTO listings (id, seller_id, seller_name, category_id, title, description, price, city, state, locality, status, expires_at)
+      VALUES ($1, $2, 'Fix2 Seller', 'cat_cars', $3, 'Description', 1000, 'Mumbai', 'Maharashtra', 'Loc', $4, NOW() + INTERVAL '30 days')
+    `, [id, sellerId, `Seller Ad ${i}`, status]);
+  }
+
+  // Page 1 (limit 10, offset 0)
+  const page1Req = makeReq(`http://localhost:3000/api/listings?sellerId=${sellerId}&status=all&limit=10&offset=0`, 'GET', undefined, sellerToken);
+  const page1Res = await listingsGet(page1Req);
+  const page1Json = await page1Res.json();
+  assert.equal(page1Res.status, 200);
+  assert.equal(page1Json.items.length, 10, 'Expected 10 items on page 1');
+  assert.equal(page1Json.total, 25, 'Expected 25 total listings for seller');
+  assert.ok(page1Json.statusCounts, 'Expected statusCounts to be returned for seller');
+  assert.equal(page1Json.statusCounts.all, 25);
+
+  // Page 2 (limit 10, offset 10)
+  const page2Req = makeReq(`http://localhost:3000/api/listings?sellerId=${sellerId}&status=all&limit=10&offset=10`, 'GET', undefined, sellerToken);
+  const page2Res = await listingsGet(page2Req);
+  const page2Json = await page2Res.json();
+  assert.equal(page2Res.status, 200);
+  assert.equal(page2Json.items.length, 10, 'Expected 10 items on page 2');
+  assert.notEqual(page1Json.items[0].id, page2Json.items[0].id, 'Page 1 and Page 2 must have distinct items');
+
+  // Page 3 (limit 10, offset 20)
+  const page3Req = makeReq(`http://localhost:3000/api/listings?sellerId=${sellerId}&status=all&limit=10&offset=20`, 'GET', undefined, sellerToken);
+  const page3Res = await listingsGet(page3Req);
+  const page3Json = await page3Res.json();
+  assert.equal(page3Res.status, 200);
+  assert.equal(page3Json.items.length, 5, 'Expected 5 items on page 3');
+
+  // Filter by status=sold
+  const soldReq = makeReq(`http://localhost:3000/api/listings?sellerId=${sellerId}&status=sold&limit=10&offset=0`, 'GET', undefined, sellerToken);
+  const soldRes = await listingsGet(soldReq);
+  const soldJson = await soldRes.json();
+  assert.equal(soldRes.status, 200);
+  assert.equal(soldJson.total, 5, 'Expected 5 sold ads');
+  assert.ok(soldJson.items.every((it: any) => it.status === 'sold'));
+
+  // Clean up
+  await pool.query('DELETE FROM listings WHERE id = ANY($1)', [ids]);
+  await pool.query('DELETE FROM user_sessions WHERE user_id = $1', [sellerId]);
+  await pool.query('DELETE FROM users WHERE id = $1', [sellerId]);
+});
+

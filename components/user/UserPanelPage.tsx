@@ -110,69 +110,131 @@ export const UserPanelPage: React.FC = () => {
   }, [listings, featureModalListing?.id]);
 
   const [sellerListings, setSellerListings] = useState<Listing[] | null>(null);
+  const [sellerTotal, setSellerTotal] = useState<number>(0);
+  const [sellerPage, setSellerPage] = useState<number>(1);
+  const [sellerPageSize] = useState<number>(10);
+  const [sellerStatusCounts, setSellerStatusCounts] = useState<{
+    all: number;
+    approved: number;
+    pending: number;
+    expired: number;
+    sold: number;
+    rejected: number;
+  }>({
+    all: 0,
+    approved: 0,
+    pending: 0,
+    expired: 0,
+    sold: 0,
+    rejected: 0,
+  });
   const [loadingSellerListings, setLoadingSellerListings] = useState(false);
 
-  const fetchSellerListings = React.useCallback(async (sellerId: string) => {
-    setLoadingSellerListings(true);
-    try {
-      const res = await fetch(`/api/listings?sellerId=${encodeURIComponent(sellerId)}&status=all&limit=200`);
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.items)) {
-          setSellerListings(data.items);
+  const fetchSellerListings = React.useCallback(
+    async (
+      sellerId: string,
+      page = sellerPage,
+      status = adStatusFilter,
+      search = adSearchQuery,
+      limit = sellerPageSize
+    ) => {
+      setLoadingSellerListings(true);
+      try {
+        const params = new URLSearchParams();
+        params.set('sellerId', sellerId);
+        params.set('status', status);
+        if (search.trim()) {
+          params.set('search', search.trim());
         }
+        params.set('limit', String(limit));
+        params.set('offset', String(Math.max(0, (page - 1) * limit)));
+
+        const res = await fetch(`/api/listings?${params.toString()}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.items)) {
+            setSellerListings(data.items);
+            const total = typeof data.total === 'number' ? data.total : data.items.length;
+            setSellerTotal(total);
+            if (data.statusCounts) {
+              setSellerStatusCounts(data.statusCounts);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch seller listings:', err);
+      } finally {
+        setLoadingSellerListings(false);
       }
-    } catch (err) {
-      console.error('Failed to fetch seller listings:', err);
-    } finally {
-      setLoadingSellerListings(false);
-    }
-  }, []);
+    },
+    [sellerPage, adStatusFilter, adSearchQuery, sellerPageSize]
+  );
 
   React.useEffect(() => {
     if (currentUser?.id) {
-      fetchSellerListings(currentUser.id);
+      fetchSellerListings(currentUser.id, sellerPage, adStatusFilter, adSearchQuery);
     }
-  }, [currentUser?.id, fetchSellerListings]);
+  }, [currentUser?.id, sellerPage, adStatusFilter, adSearchQuery, fetchSellerListings]);
+
+  const handleStatusFilterChange = (status: 'all' | 'approved' | 'pending' | 'expired' | 'sold' | 'rejected') => {
+    setAdStatusFilter(status);
+    setSellerPage(1);
+  };
+
+  const handleSearchQueryChange = (q: string) => {
+    setAdSearchQuery(q);
+    setSellerPage(1);
+  };
 
   const userListings = sellerListings !== null
     ? sellerListings
     : currentUser?.id
       ? listings.filter((l) => l.sellerId === currentUser.id)
       : [];
-  const activeUserApprovedListingsCount = userListings.filter((l) => l.status === 'approved').length;
+  const activeUserApprovedListingsCount = sellerStatusCounts.approved || userListings.filter((l) => l.status === 'approved').length;
   const freeQuotaLimit = settings.freeListingsLimit ?? 3;
   const extraListingFeeRate = settings.extraListingFee ?? 99;
   const isQuotaExceeded = activeUserApprovedListingsCount >= freeQuotaLimit;
   const freeQuotaSlotsRemaining = Math.max(0, freeQuotaLimit - activeUserApprovedListingsCount);
 
-  const filteredUserListings = userListings.filter((l) => {
-    if (adStatusFilter !== 'all' && l.status !== adStatusFilter) return false;
-    if (adSearchQuery.trim()) {
-      const q = adSearchQuery.toLowerCase();
-      return l.title.toLowerCase().includes(q) || l.description.toLowerCase().includes(q);
-    }
-    return true;
-  });
+  // When sellerListings is populated from server-side pagination, it is already filtered and paginated
+  const filteredUserListings = sellerListings !== null
+    ? sellerListings
+    : userListings.filter((l) => {
+        if (adStatusFilter !== 'all' && l.status !== adStatusFilter) return false;
+        if (adSearchQuery.trim()) {
+          const q = adSearchQuery.toLowerCase();
+          return l.title.toLowerCase().includes(q) || l.description.toLowerCase().includes(q);
+        }
+        return true;
+      });
+
+  const totalSellerAdsCount = sellerStatusCounts.all || (sellerListings !== null ? sellerTotal : userListings.length);
+  const totalPages = Math.ceil(sellerTotal / sellerPageSize) || 1;
 
   const handleRenewListing = async (id: string, days?: number, isFree?: boolean) => {
     const success = await renewListing(id, days, isFree);
     if (success && currentUser?.id) {
-      fetchSellerListings(currentUser.id);
+      fetchSellerListings(currentUser.id, sellerPage, adStatusFilter, adSearchQuery);
     }
   };
 
   const handleMarkAsSold = async (id: string) => {
     const success = await markAsSold(id);
     if (success && currentUser?.id) {
-      fetchSellerListings(currentUser.id);
+      fetchSellerListings(currentUser.id, sellerPage, adStatusFilter, adSearchQuery);
     }
   };
 
   const handleDeleteListing = async (id: string) => {
     const success = await deleteListing(id);
     if (success && currentUser?.id) {
-      fetchSellerListings(currentUser.id);
+      const willBeEmptyPage = (sellerListings?.length || 0) <= 1 && sellerPage > 1;
+      const targetPage = willBeEmptyPage ? sellerPage - 1 : sellerPage;
+      if (willBeEmptyPage) {
+        setSellerPage(targetPage);
+      }
+      fetchSellerListings(currentUser.id, targetPage, adStatusFilter, adSearchQuery);
     }
   };
 
@@ -257,7 +319,7 @@ export const UserPanelPage: React.FC = () => {
       setEditingListing(null);
       setEditTitleError(null);
       if (currentUser?.id) {
-        fetchSellerListings(currentUser.id);
+        fetchSellerListings(currentUser.id, sellerPage, adStatusFilter, adSearchQuery);
       }
     } else {
       setEditTitleError(DUPLICATE_TITLE_ERROR_MESSAGE);
@@ -304,7 +366,7 @@ export const UserPanelPage: React.FC = () => {
         {/* Tab Navigation Menu */}
         <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 overflow-x-auto scrollbar-none pb-0.5">
           {[
-            { id: 'my-ads', label: 'My Classified Ads', icon: ShoppingBag, count: userListings.length },
+            { id: 'my-ads', label: 'My Classified Ads', icon: ShoppingBag, count: totalSellerAdsCount },
             { id: 'email-notifications', label: 'Email Notifications & Approvals', icon: Mail, count: userEmails.length },
             { id: 'orders-receipts', label: 'Purchases & Invoices', icon: Receipt, count: userTransactions.length },
             { id: 'messages', label: 'Chat Enquiries', icon: MessageSquare, count: userListings.reduce((sum, l) => sum + l.chatsCount, 0) },
@@ -349,8 +411,8 @@ export const UserPanelPage: React.FC = () => {
             freeQuotaSlotsRemaining={freeQuotaSlotsRemaining}
             adStatusFilter={adStatusFilter}
             adSearchQuery={adSearchQuery}
-            onStatusFilterChange={setAdStatusFilter}
-            onSearchQueryChange={setAdSearchQuery}
+            onStatusFilterChange={handleStatusFilterChange}
+            onSearchQueryChange={handleSearchQueryChange}
             onEditListing={(listing) => {
               setEditingListing(listing);
               setEditTitleError(null);
@@ -360,6 +422,13 @@ export const UserPanelPage: React.FC = () => {
             onFeatureListingModal={setFeatureModalListing}
             onBoostListingModal={setBoostTargetListing}
             onDeleteListing={handleDeleteListing}
+            currentPage={sellerPage}
+            totalPages={totalPages}
+            totalListings={sellerTotal}
+            pageSize={sellerPageSize}
+            onPageChange={setSellerPage}
+            isLoading={loadingSellerListings}
+            statusCounts={sellerStatusCounts}
           />
         )}
 

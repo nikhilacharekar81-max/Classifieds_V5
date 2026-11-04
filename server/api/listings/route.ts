@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { listingService } from '@/server/services/listing.service';
+import { listingRepository } from '@/server/repositories/listing.repository';
 import { getCategoriesWithLiveCounts } from '@/server/cache/reference-data.cache';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import { toPublicListingDTO } from '@/lib/utils/seoAndUrlHelper';
@@ -59,7 +60,7 @@ export async function GET(req: NextRequest) {
     effectiveStatus = 'approved';
   }
 
-  const [result, categories] = await Promise.all([
+  const [result, categories, statusCounts] = await Promise.all([
     listingService.getMarketplaceListings({
       city,
       category,
@@ -86,6 +87,7 @@ export async function GET(req: NextRequest) {
       offset,
     }),
     includeCategories ? getCategoriesWithLiveCounts(city) : Promise.resolve(undefined),
+    sellerId && (isOwner || isPrivileged) ? listingRepository.getSellerStatusCounts(sellerId) : Promise.resolve(undefined),
   ]);
 
   const noCacheHeaders = {
@@ -110,6 +112,7 @@ export async function GET(req: NextRequest) {
     {
       ...result,
       ...(categories ? { categories } : {}),
+      ...(statusCounts ? { statusCounts } : {}),
     },
     { headers: noCacheHeaders }
   );

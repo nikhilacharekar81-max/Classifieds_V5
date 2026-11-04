@@ -72,34 +72,48 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ error: `Listing ${id} not found` }, { status: 404 });
         }
 
-        // Ordinary seller renewal checks
-        if (!isPrivileged) {
-          if (item.sellerId !== authContext.userId) {
-            return NextResponse.json(
-              { error: `Unauthorized: You do not own listing ${id}` },
-              { status: 403 }
-            );
-          }
-          if (item.status === 'pending') {
-            return NextResponse.json(
-              { error: `Cannot renew listing ${id}: Pending listings must undergo moderation and cannot be renewed directly.` },
-              { status: 400 }
-            );
-          }
-          if (item.status === 'rejected') {
-            return NextResponse.json(
-              { error: `Cannot renew listing ${id}: Rejected listings cannot be renewed.` },
-              { status: 400 }
-            );
-          }
+        // Ownership verification for non-privileged users
+        if (!isPrivileged && item.sellerId !== authContext.userId) {
+          return NextResponse.json(
+            { error: `Unauthorized: You do not own listing ${id}` },
+            { status: 403 }
+          );
         }
 
-        // For both seller and admin: renewal is strictly for expired listings
-        const isExpired =
-          item.status === 'expired' ||
-          (Boolean(item.expiresAt) && new Date(item.expiresAt).getTime() <= Date.now());
+        // Renewal eligibility rules apply to BOTH ordinary sellers AND privileged staff:
+        // Rule 2: A listing with status 'sold' must never be renewed.
+        if (item.status === 'sold') {
+          return NextResponse.json(
+            { error: `Cannot renew listing ${id}: Sold listings cannot be renewed.` },
+            { status: 400 }
+          );
+        }
 
-        if (!isExpired) {
+        // Rule 3: Listings with status 'pending' or 'rejected' must remain ineligible for renewal.
+        if (item.status === 'pending') {
+          return NextResponse.json(
+            { error: `Cannot renew listing ${id}: Pending listings must undergo moderation and cannot be renewed directly.` },
+            { status: 400 }
+          );
+        }
+
+        if (item.status === 'rejected') {
+          return NextResponse.json(
+            { error: `Cannot renew listing ${id}: Rejected listings cannot be renewed.` },
+            { status: 400 }
+          );
+        }
+
+        // Rule 1: A listing may be renewed only if:
+        // - Its status is expired; OR
+        // - Its status is approved and its expiry date has already passed.
+        const isEligibleExpired = item.status === 'expired';
+        const isEligibleApprovedPastExpiry =
+          item.status === 'approved' &&
+          Boolean(item.expiresAt) &&
+          new Date(item.expiresAt).getTime() <= Date.now();
+
+        if (!isEligibleExpired && !isEligibleApprovedPastExpiry) {
           return NextResponse.json(
             { error: `Cannot renew listing ${id}: Listing is currently active and not expired.` },
             { status: 400 }

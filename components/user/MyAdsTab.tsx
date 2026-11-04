@@ -19,6 +19,8 @@ import {
   RotateCcw,
   Layers,
   Star,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { Listing } from '@/lib/types';
 import { Badge } from '@/components/common/Badge';
@@ -43,6 +45,20 @@ interface MyAdsTabProps {
   onFeatureListingModal: (listing: Listing) => void;
   onBoostListingModal: (listing: Listing) => void;
   onDeleteListing: (id: string) => void;
+  currentPage?: number;
+  totalPages?: number;
+  totalListings?: number;
+  pageSize?: number;
+  onPageChange?: (page: number) => void;
+  isLoading?: boolean;
+  statusCounts?: {
+    all: number;
+    approved: number;
+    pending: number;
+    expired: number;
+    sold: number;
+    rejected: number;
+  };
 }
 
 export const MyAdsTab: React.FC<MyAdsTabProps> = ({
@@ -63,6 +79,13 @@ export const MyAdsTab: React.FC<MyAdsTabProps> = ({
   onFeatureListingModal,
   onBoostListingModal,
   onDeleteListing,
+  currentPage = 1,
+  totalPages = 1,
+  totalListings = 0,
+  pageSize = 10,
+  onPageChange,
+  isLoading = false,
+  statusCounts,
 }) => {
   return (
     <div className="space-y-4">
@@ -114,12 +137,12 @@ export const MyAdsTab: React.FC<MyAdsTabProps> = ({
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto">
           {[
-            { id: 'all', label: 'All Ads', count: userListings.length },
-            { id: 'approved', label: 'Active Live', count: userListings.filter((l) => l.status === 'approved').length },
-            { id: 'pending', label: 'Pending Review', count: userListings.filter((l) => l.status === 'pending').length },
-            { id: 'expired', label: 'Expired Ads', count: userListings.filter((l) => l.status === 'expired').length },
-            { id: 'sold', label: 'Archived Sold', count: userListings.filter((l) => l.status === 'sold').length },
-            { id: 'rejected', label: 'Rejected', count: userListings.filter((l) => l.status === 'rejected').length },
+            { id: 'all', label: 'All Ads', count: statusCounts ? statusCounts.all : userListings.length },
+            { id: 'approved', label: 'Active Live', count: statusCounts ? statusCounts.approved : userListings.filter((l) => l.status === 'approved').length },
+            { id: 'pending', label: 'Pending Review', count: statusCounts ? statusCounts.pending : userListings.filter((l) => l.status === 'pending').length },
+            { id: 'expired', label: 'Expired Ads', count: statusCounts ? statusCounts.expired : userListings.filter((l) => l.status === 'expired').length },
+            { id: 'sold', label: 'Archived Sold', count: statusCounts ? statusCounts.sold : userListings.filter((l) => l.status === 'sold').length },
+            { id: 'rejected', label: 'Rejected', count: statusCounts ? statusCounts.rejected : userListings.filter((l) => l.status === 'rejected').length },
           ].map((btn) => (
             <button
               key={btn.id}
@@ -337,6 +360,40 @@ export const MyAdsTab: React.FC<MyAdsTabProps> = ({
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Server-Side Pagination Controls */}
+      {totalPages > 1 && onPageChange && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+          <div className="text-slate-500 dark:text-slate-400">
+            Showing <span className="font-semibold text-slate-800 dark:text-slate-200">{Math.min((currentPage - 1) * pageSize + 1, totalListings)}</span> to{' '}
+            <span className="font-semibold text-slate-800 dark:text-slate-200">{Math.min(currentPage * pageSize, totalListings)}</span> of{' '}
+            <span className="font-semibold text-slate-800 dark:text-slate-200">{totalListings}</span> ads
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={currentPage <= 1 || isLoading}
+              onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-700 font-medium transition-colors flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <span>Previous</span>
+            </button>
+            <span className="px-2 font-semibold text-slate-700 dark:text-slate-300">
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={currentPage >= totalPages || isLoading}
+              onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-700 font-medium transition-colors flex items-center gap-1 cursor-pointer disabled:cursor-not-allowed"
+            >
+              <span>Next</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
     </div>
