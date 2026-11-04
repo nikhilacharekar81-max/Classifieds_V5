@@ -13,6 +13,47 @@ export interface ChatMessageItem {
 }
 
 export class ChatRepository {
+  public async findMessagesForConversation(
+    listingId: string,
+    participant1: string,
+    participant2: string
+  ): Promise<ChatMessageItem[]> {
+    try {
+      const rows = await db
+        .select()
+        .from(schema.chatMessages)
+        .where(
+          and(
+            eq(schema.chatMessages.listingId, listingId),
+            or(
+              and(
+                eq(schema.chatMessages.senderId, participant1),
+                eq(schema.chatMessages.receiverId, participant2)
+              ),
+              and(
+                eq(schema.chatMessages.senderId, participant2),
+                eq(schema.chatMessages.receiverId, participant1)
+              )
+            )
+          )
+        )
+        .orderBy(asc(schema.chatMessages.createdAt));
+
+      return rows.map((r) => ({
+        id: r.id,
+        listingId: r.listingId,
+        senderId: r.senderId,
+        receiverId: r.receiverId,
+        messageText: r.messageText,
+        readAt: r.readAt ? r.readAt.toISOString() : undefined,
+        createdAt: r.createdAt.toISOString(),
+      }));
+    } catch (error) {
+      console.error('ChatRepository.findMessagesForConversation error:', error);
+      return [];
+    }
+  }
+
   public async findMessagesForListing(listingId: string): Promise<ChatMessageItem[]> {
     try {
       const rows = await db

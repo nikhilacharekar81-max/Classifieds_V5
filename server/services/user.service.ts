@@ -5,7 +5,7 @@ import { UserAccount, KycStatus } from '@/lib/types';
 
 export class UserService {
   public async getUsers(filter: string = 'all'): Promise<UserAccount[]> {
-    const all = await userRepository.findAll();
+    const all = await userRepository.findAllForAdmin();
     if (filter === 'regular' || filter === 'users') {
       return all.filter((u) => u.type === 'user');
     }

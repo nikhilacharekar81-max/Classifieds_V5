@@ -364,7 +364,7 @@ export async function provisionFirstAdministrator(executor: SeedDbExecutor = db)
     process.env.INITIAL_ADMIN_EMAIL ||
     process.env.FIRST_ADMIN_EMAIL ||
     ''
-  ).trim();
+  ).trim().toLowerCase();
 
   const adminPassword = (
     process.env.ADMIN_INITIAL_PASSWORD ||
@@ -393,6 +393,24 @@ export async function provisionFirstAdministrator(executor: SeedDbExecutor = db)
     return;
   }
 
+  // Check if account with adminEmail already exists
+  const existingUser = await executor
+    .select()
+    .from(schema.users)
+    .where(eq(schema.users.email, adminEmail));
+
+  if (existingUser.length > 0) {
+    const user = existingUser[0];
+    if (user.type === 'admin' || user.adminRole === 'super_admin' || user.adminRole === 'admin') {
+      console.log(`[AdminProvisioning] Account ${adminEmail} is already an administrator.`);
+      return;
+    }
+    console.error(
+      `[AdminProvisioning] Error: Email ${adminEmail} belongs to an existing non-administrator account. Cannot provision initial super_admin on an existing non-admin account without explicit authorization.`
+    );
+    return;
+  }
+
   const hashedPassword = await hashPassword(adminPassword);
   const adminId = `adm_init_${Date.now()}`;
 
@@ -401,7 +419,7 @@ export async function provisionFirstAdministrator(executor: SeedDbExecutor = db)
     .values({
       id: adminId,
       name: adminName,
-      email: adminEmail.toLowerCase(),
+      email: adminEmail,
       phone: '',
       passwordHash: hashedPassword,
       type: 'admin',
@@ -412,7 +430,22 @@ export async function provisionFirstAdministrator(executor: SeedDbExecutor = db)
     })
     .onConflictDoNothing();
 
-  console.log(`[AdminProvisioning] Initial super_admin successfully provisioned for ${adminEmail}.`);
+  // Verify actual creation result from database
+  const createdAdmin = await executor
+    .select()
+    .from(schema.users)
+    .where(eq(schema.users.id, adminId));
+
+  if (
+    createdAdmin.length > 0 &&
+    (createdAdmin[0].type === 'admin' || createdAdmin[0].adminRole === 'super_admin')
+  ) {
+    console.log(`[AdminProvisioning] Initial super_admin successfully provisioned for ${adminEmail}.`);
+  } else {
+    console.error(
+      `[AdminProvisioning] Error: Provisioning failed for ${adminEmail}. Account was not created or lacks administrator privileges.`
+    );
+  }
 }
 
 /**
@@ -589,6 +622,9 @@ export async function ensureDatabaseSeeded(options?: {
               'Essential production database initialization failed completeness verification after seeding.'
             );
           }
+        } else {
+          // Even if database structure was previously initialized, check and provision first administrator if credentials are newly configured
+          await provisionFirstAdministrator(tx);
         }
 
         if (shouldSeedDemo) {

@@ -64,6 +64,7 @@ export const UserPanelPage: React.FC = () => {
   const [kycModalOpen, setKycModalOpen] = useState(false);
   const [kycDocType, setKycDocType] = useState<'Aadhaar' | 'PAN' | 'GSTIN' | 'Passport'>('Aadhaar');
   const [kycDocNumber, setKycDocNumber] = useState('');
+  const [kycFileData, setKycFileData] = useState<string | null>(null);
 
   const [profileForm, setProfileForm] = useState({
     name: currentUser?.name || '',
@@ -288,6 +289,11 @@ export const UserPanelPage: React.FC = () => {
       return;
     }
 
+    if (!kycFileData) {
+      addToast({ type: 'error', title: 'Document Scan Required', message: 'Please upload a front scan of your government ID document.' });
+      return;
+    }
+
     try {
       const res = await fetch('/api/user/kyc', {
         method: 'POST',
@@ -295,7 +301,7 @@ export const UserPanelPage: React.FC = () => {
         body: JSON.stringify({
           documentType: kycDocType,
           documentNumber: kycDocNumber.trim(),
-          fileUrl: 'https://images.unsplash.com/photo-1568602471122-7832951cc4c5?auto=format&fit=crop&w=400&q=80',
+          fileUrl: kycFileData,
         }),
       });
 
@@ -304,6 +310,8 @@ export const UserPanelPage: React.FC = () => {
         throw new Error(data?.error || 'Failed to submit KYC verification');
       }
 
+      const returnedDocUrl = data?.document?.fileUrl || kycFileData;
+
       const updated: UserAccount = {
         ...currentUser,
         kycStatus: 'pending',
@@ -311,13 +319,14 @@ export const UserPanelPage: React.FC = () => {
           type: kycDocType,
           docNumber: kycDocNumber.trim(),
           submittedAt: new Date().toISOString().split('T')[0],
-          fileUrl: 'https://images.unsplash.com/photo-1568602471122-7832951cc4c5?auto=format&fit=crop&w=400&q=80',
+          fileUrl: returnedDocUrl,
         },
       };
 
       updateUser(updated);
       setKycModalOpen(false);
       setKycDocNumber('');
+      setKycFileData(null);
       addToast({
         type: 'success',
         title: 'KYC Document Submitted',
@@ -522,8 +531,10 @@ export const UserPanelPage: React.FC = () => {
         isOpen={kycModalOpen}
         kycDocType={kycDocType}
         kycDocNumber={kycDocNumber}
+        kycFileData={kycFileData}
         onDocTypeChange={setKycDocType}
         onDocNumberChange={setKycDocNumber}
+        onDocFileChange={setKycFileData}
         onClose={() => setKycModalOpen(false)}
         onSubmit={handleKycSubmit}
       />

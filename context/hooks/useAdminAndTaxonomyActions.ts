@@ -580,34 +580,40 @@ export function useAdminAndTaxonomyActions({
   };
 
   const updateSettings = (newSettings: Partial<SystemSettings>) => {
-    setSettings((prev) => ({ ...prev, ...newSettings }));
-    fetch('/api/admin/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newSettings),
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const err = await res.json().catch(() => null);
-          throw new Error(err?.error || 'Failed to save settings');
-        }
-        const data = await res.json().catch(() => null);
-        if (data && data.settings) {
-          setSettings((prev) => ({ ...prev, ...data.settings }));
-        }
-      })
-      .catch((err) => {
-        console.error('Failed to persist settings:', err);
-      });
+    void (async () => {
+      try {
+        const res = await fetch('/api/admin/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newSettings),
+        });
 
-    recordAuditLog(
-      'UPDATE_SYSTEM_SETTINGS',
-      'Administration / Settings',
-      'sys_config',
-      'System Configuration',
-      'Updated global site settings'
-    );
-    addToast({ type: 'success', title: 'Settings Saved', message: 'System configuration updated.' });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(data?.error || 'Failed to save settings');
+        }
+
+        const updatedSettings = data && data.settings ? data.settings : newSettings;
+        setSettings((prev) => ({ ...prev, ...updatedSettings }));
+
+        recordAuditLog(
+          'UPDATE_SYSTEM_SETTINGS',
+          'Administration / Settings',
+          'sys_config',
+          'System Configuration',
+          'Updated global site settings'
+        );
+
+        addToast({ type: 'success', title: 'Settings Saved', message: 'System configuration updated successfully.' });
+      } catch (err: any) {
+        console.error('Failed to persist settings:', err);
+        addToast({
+          type: 'error',
+          title: 'Save Settings Failed',
+          message: err?.message || 'Unable to update system configuration.',
+        });
+      }
+    })();
   };
 
   const resetAllCounters = () => {

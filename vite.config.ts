@@ -16,6 +16,16 @@ export default defineConfig(() => {
         'next/cache': path.resolve(__dirname, './src/shims/next-cache.ts'),
       },
     },
+    optimizeDeps: {
+      include: [
+        'react',
+        'react-dom',
+        'lucide-react',
+        'clsx',
+        'tailwind-merge',
+        'motion',
+      ],
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.

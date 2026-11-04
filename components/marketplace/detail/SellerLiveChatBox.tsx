@@ -131,12 +131,6 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
             </span>
           </div>
         ))}
-
-        {isTyping && (
-          <div className="flex items-center gap-1 text-[#5f6368] italic text-[11px]">
-            <span>Seller is typing...</span>
-          </div>
-        )}
       </div>
 
       {/* Chat Input */}

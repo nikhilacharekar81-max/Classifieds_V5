@@ -7,13 +7,50 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
+    const authContext = await getAuthenticatedUser(req);
+    if (!authContext) {
+      return NextResponse.json({ error: 'Authentication required to access chat' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(req.url);
     const listingId = searchParams.get('listingId');
     if (!listingId) {
       return NextResponse.json({ error: 'listingId is required' }, { status: 400 });
     }
 
-    const messages = await chatRepository.findMessagesForListing(listingId);
+    const listing = await listingRepository.findById(listingId);
+    if (!listing) {
+      return NextResponse.json({ error: 'Listing not found' }, { status: 404 });
+    }
+
+    const isSeller = authContext.userId === listing.sellerId;
+    const isPrivilegedAdmin = Boolean(authContext.isAdmin || authContext.isSuperAdmin);
+
+    if (isSeller || isPrivilegedAdmin) {
+      const targetBuyerId = searchParams.get('buyerId');
+      if (targetBuyerId) {
+        // Fetch specific conversation with the requested buyer
+        const messages = await chatRepository.findMessagesForConversation(
+          listingId,
+          listing.sellerId,
+          targetBuyerId
+        );
+        return NextResponse.json({ messages });
+      }
+      // If seller or admin doesn't pass a specific buyerId, fetch all messages related to seller for this listing
+      const allMessages = await chatRepository.findMessagesForListing(listingId);
+      const filtered = allMessages.filter(
+        (m) => m.senderId === listing.sellerId || m.receiverId === listing.sellerId
+      );
+      return NextResponse.json({ messages: filtered });
+    }
+
+    // Buyer accessing chat: strictly scoped to the conversation between this authenticated buyer and the seller
+    const messages = await chatRepository.findMessagesForConversation(
+      listingId,
+      authContext.userId,
+      listing.sellerId
+    );
     return NextResponse.json({ messages });
   } catch (error: any) {
     console.error('API /api/chat GET error:', error);
@@ -45,17 +82,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Listing not found' }, { status: 404 });
     }
 
-    // Determine receiver: if caller is seller, use explicitReceiverId; otherwise receiver is listing seller
     let receiverId = listing.sellerId;
     if (authContext.userId === listing.sellerId) {
-      if (explicitReceiverId && typeof explicitReceiverId === 'string') {
-        receiverId = explicitReceiverId;
-      } else {
-        // Find existing conversation buyer
-        const existingMessages = await chatRepository.findMessagesForListing(listingId);
-        const buyerMsg = existingMessages.find((m) => m.senderId !== listing.sellerId);
-        receiverId = buyerMsg ? buyerMsg.senderId : listing.sellerId;
+      // Seller sending message: require explicit recipient buyer ID
+      if (!explicitReceiverId || typeof explicitReceiverId !== 'string') {
+        return NextResponse.json(
+          { error: 'receiverId is required when seller sends a message' },
+          { status: 400 }
+        );
       }
+      receiverId = explicitReceiverId;
     }
 
     const id = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;

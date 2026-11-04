@@ -53,8 +53,53 @@ export class EmailService {
   public async sendEmail(logData: Omit<EmailLog, 'id' | 'sentAt' | 'status'>): Promise<EmailLog> {
     const id = `eml_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const smtpHost = process.env.SMTP_HOST || process.env.MAIL_HOST;
+    const smtpPort = Number(process.env.SMTP_PORT || process.env.MAIL_PORT || 587);
     const smtpUser = process.env.SMTP_USER || process.env.MAIL_USER;
-    const isConfigured = Boolean(smtpHost && smtpUser);
+    const smtpPass = process.env.SMTP_PASS || process.env.MAIL_PASS || process.env.SMTP_PASSWORD;
+    const fromAddress = process.env.SMTP_FROM || process.env.MAIL_FROM || 'noreply@chillyads.com';
+
+    if (!smtpHost || !smtpUser) {
+      return await emailRepository.logEmail({
+        id,
+        toEmail: logData.toEmail,
+        toName: logData.toName,
+        subject: logData.subject,
+        body: logData.body,
+        status: 'failed',
+        type: logData.type,
+        listingId: logData.listingId,
+        relatedUserId: logData.relatedUserId,
+      });
+    }
+
+    let isSentSuccess = false;
+
+    try {
+      const nodemailer = await import('nodemailer');
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+        connectionTimeout: 8000,
+      });
+
+      const info = await transporter.sendMail({
+        from: `"${process.env.SITE_NAME || 'Chillyads'}" <${fromAddress}>`,
+        to: logData.toName ? `"${logData.toName}" <${logData.toEmail}>` : logData.toEmail,
+        subject: logData.subject,
+        html: logData.body,
+      });
+
+      if (info && (info.messageId || (Array.isArray(info.accepted) && info.accepted.length > 0))) {
+        isSentSuccess = true;
+      }
+    } catch (err: any) {
+      console.error('[EmailService] SMTP send error:', err?.message || err);
+    }
 
     return await emailRepository.logEmail({
       id,
@@ -62,7 +107,7 @@ export class EmailService {
       toName: logData.toName,
       subject: logData.subject,
       body: logData.body,
-      status: isConfigured ? 'delivered' : 'failed',
+      status: isSentSuccess ? 'delivered' : 'failed',
       type: logData.type,
       listingId: logData.listingId,
       relatedUserId: logData.relatedUserId,
@@ -158,8 +203,9 @@ export class EmailService {
 
   public async testSmtpConnection(config?: EmailSmtpConfig): Promise<{ success: boolean; message: string; latencyMs: number }> {
     const host = config?.host || process.env.SMTP_HOST || process.env.MAIL_HOST;
-    const port = Number(config?.port || process.env.SMTP_PORT || 587);
+    const port = Number(config?.port || process.env.SMTP_PORT || process.env.MAIL_PORT || 587);
     const user = config?.username || process.env.SMTP_USER || process.env.MAIL_USER;
+    const pass = config?.password || process.env.SMTP_PASS || process.env.MAIL_PASS || process.env.SMTP_PASSWORD;
 
     if (!host || !user) {
       return {
@@ -169,39 +215,35 @@ export class EmailService {
       };
     }
 
-    const net = await import('node:net');
     const startTime = Date.now();
-
-    return new Promise((resolve) => {
-      const socket = net.createConnection({ host, port, timeout: 4000 }, () => {
-        const latencyMs = Date.now() - startTime;
-        socket.destroy();
-        resolve({
-          success: true,
-          message: `Connected successfully to SMTP host ${host}:${port} with latency ${latencyMs}ms.`,
-          latencyMs,
-        });
+    try {
+      const nodemailer = await import('nodemailer');
+      const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: port === 465,
+        auth: {
+          user,
+          pass,
+        },
+        connectionTimeout: 5000,
       });
 
-      socket.on('error', (err) => {
-        const latencyMs = Date.now() - startTime;
-        socket.destroy();
-        resolve({
-          success: false,
-          message: `Failed to connect to ${host}:${port}: ${err.message}`,
-          latencyMs,
-        });
-      });
-
-      socket.on('timeout', () => {
-        socket.destroy();
-        resolve({
-          success: false,
-          message: `Connection timed out to ${host}:${port}`,
-          latencyMs: 4000,
-        });
-      });
-    });
+      await transporter.verify();
+      const latencyMs = Date.now() - startTime;
+      return {
+        success: true,
+        message: `SMTP handshake and authentication verified for ${host}:${port}.`,
+        latencyMs,
+      };
+    } catch (err: any) {
+      const latencyMs = Date.now() - startTime;
+      return {
+        success: false,
+        message: `SMTP verification failed for ${host}:${port}: ${err?.message || 'Connection failed'}`,
+        latencyMs,
+      };
+    }
   }
 }
 

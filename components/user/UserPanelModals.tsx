@@ -7,8 +7,10 @@ interface KycDocumentModalProps {
   isOpen: boolean;
   kycDocType: 'Aadhaar' | 'PAN' | 'GSTIN' | 'Passport';
   kycDocNumber: string;
+  kycFileData: string | null;
   onDocTypeChange: (type: 'Aadhaar' | 'PAN' | 'GSTIN' | 'Passport') => void;
   onDocNumberChange: (num: string) => void;
+  onDocFileChange: (fileData: string | null) => void;
   onClose: () => void;
   onSubmit: (e: React.FormEvent) => void;
 }
@@ -17,12 +19,30 @@ export const KycDocumentModal: React.FC<KycDocumentModalProps> = ({
   isOpen,
   kycDocType,
   kycDocNumber,
+  kycFileData,
   onDocTypeChange,
   onDocNumberChange,
+  onDocFileChange,
   onClose,
   onSubmit,
 }) => {
   if (!isOpen) return null;
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('File size exceeds 5MB limit.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      onDocFileChange(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
 
   return (
     <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
@@ -64,10 +84,19 @@ export const KycDocumentModal: React.FC<KycDocumentModalProps> = ({
             />
           </div>
 
-          <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 p-4 rounded-xl text-center space-y-1">
+          <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 p-4 rounded-xl text-center space-y-2">
             <Upload className="w-6 h-6 text-slate-400 mx-auto" />
-            <div className="font-bold text-slate-700 dark:text-slate-300">Upload Front Document Scan</div>
-            <div className="text-[10px] text-slate-400">PDF, JPG or PNG up to 5MB</div>
+            <div className="font-bold text-slate-700 dark:text-slate-300">
+              {kycFileData ? 'Document Selected' : 'Upload Front Document Scan'}
+            </div>
+            <div className="text-[10px] text-slate-400">PDF, JPG, PNG or WEBP up to 5MB</div>
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,application/pdf"
+              onChange={handleFileChange}
+              className="block w-full text-xs text-slate-500 file:mr-4 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer mt-1"
+              required={!kycFileData}
+            />
           </div>
 
           <div className="pt-2 flex items-center justify-end gap-2">
@@ -80,7 +109,8 @@ export const KycDocumentModal: React.FC<KycDocumentModalProps> = ({
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-lg shadow cursor-pointer"
+              disabled={!kycFileData}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-extrabold rounded-lg shadow cursor-pointer"
             >
               Submit for Compliance Review
             </button>

@@ -359,12 +359,16 @@ export class ListingService {
       return { success: true, listing: created, status: 201 };
     } catch (err: any) {
       console.error('ListingService.createListing error:', err);
-      const isUniqueViolation =
-        err?.code === '23505' ||
-        err?.cause?.code === '23505' ||
-        String(err?.message || '').includes('idx_unique_active_ad_title_per_seller') ||
-        String(err?.cause?.message || '').includes('idx_unique_active_ad_title_per_seller');
-      if (isUniqueViolation) {
+      const isTitleIndexViolation =
+        (err?.code === '23505' || err?.cause?.code === '23505') &&
+        (err?.constraint === 'idx_unique_active_ad_title_per_seller' ||
+          err?.cause?.constraint === 'idx_unique_active_ad_title_per_seller' ||
+          String(err?.message || '').includes('idx_unique_active_ad_title_per_seller') ||
+          String(err?.cause?.message || '').includes('idx_unique_active_ad_title_per_seller') ||
+          String(err?.detail || '').includes('idx_unique_active_ad_title_per_seller') ||
+          String(err?.cause?.detail || '').includes('idx_unique_active_ad_title_per_seller'));
+
+      if (isTitleIndexViolation) {
         return { success: false, error: DUPLICATE_TITLE_ERROR_MESSAGE, status: 409 };
       }
       return { success: false, error: err.message || 'Failed to save listing', status: 500 };
@@ -520,12 +524,16 @@ export class ListingService {
       return { success: true, listing: updated, status: 200 };
     } catch (err: any) {
       console.error('ListingService.updateListing error:', err);
-      const isUniqueViolation =
-        err?.code === '23505' ||
-        err?.cause?.code === '23505' ||
-        String(err?.message || '').includes('idx_unique_active_ad_title_per_seller') ||
-        String(err?.cause?.message || '').includes('idx_unique_active_ad_title_per_seller');
-      if (isUniqueViolation) {
+      const isTitleIndexViolation =
+        (err?.code === '23505' || err?.cause?.code === '23505') &&
+        (err?.constraint === 'idx_unique_active_ad_title_per_seller' ||
+          err?.cause?.constraint === 'idx_unique_active_ad_title_per_seller' ||
+          String(err?.message || '').includes('idx_unique_active_ad_title_per_seller') ||
+          String(err?.cause?.message || '').includes('idx_unique_active_ad_title_per_seller') ||
+          String(err?.detail || '').includes('idx_unique_active_ad_title_per_seller') ||
+          String(err?.cause?.detail || '').includes('idx_unique_active_ad_title_per_seller'));
+
+      if (isTitleIndexViolation) {
         return { success: false, error: DUPLICATE_TITLE_ERROR_MESSAGE, status: 409 };
       }
       return { success: false, error: err.message || 'Failed to update listing', status: 500 };

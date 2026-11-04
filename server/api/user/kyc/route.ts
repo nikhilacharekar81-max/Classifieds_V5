@@ -59,7 +59,29 @@ export async function POST(req: NextRequest) {
 
     const cleanFileUrl = String(fileUrl || '').trim();
     if (!cleanFileUrl) {
-      return NextResponse.json({ error: 'Document file or image URL is required' }, { status: 400 });
+      return NextResponse.json({ error: 'Document file scan is required' }, { status: 400 });
+    }
+
+    // Validate uploaded document file format and size server-side
+    const ALLOWED_MIME_PREFIXES = [
+      'data:image/jpeg;base64,',
+      'data:image/jpg;base64,',
+      'data:image/png;base64,',
+      'data:image/webp;base64,',
+      'data:application/pdf;base64,',
+    ];
+
+    const isAllowedFormat = ALLOWED_MIME_PREFIXES.some((prefix) => cleanFileUrl.startsWith(prefix));
+    if (!isAllowedFormat) {
+      return NextResponse.json(
+        { error: 'Invalid document file format. Only JPG, PNG, WEBP, and PDF scans are accepted.' },
+        { status: 400 }
+      );
+    }
+
+    // Server-side file size check (max 5MB = ~6.8MB base64 encoded string)
+    if (cleanFileUrl.length > 7 * 1024 * 1024) {
+      return NextResponse.json({ error: 'Document scan file size exceeds maximum limit of 5MB.' }, { status: 400 });
     }
 
     const id = `kyc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;

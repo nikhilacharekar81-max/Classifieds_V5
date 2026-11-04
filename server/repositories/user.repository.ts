@@ -38,9 +38,9 @@ export class UserRepository {
 
   public async findById(id: string): Promise<UserAccount | null> {
     try {
-      const rows = await withDbRetry(() =>
+      const rows = (await withDbRetry(() =>
         db.select().from(schema.users).where(eq(schema.users.id, id)).limit(1)
-      );
+      )) as any[];
       if (!rows.length) return null;
       return this.mapRowToUser(rows[0]);
     } catch (error) {
@@ -76,6 +76,42 @@ export class UserRepository {
     } catch (error) {
       console.error('UserRepository.findAll error:', error);
       throw new Error('Failed to find users', { cause: error });
+    }
+  }
+
+  public async findAllForAdmin(): Promise<UserAccount[]> {
+    try {
+      const users = await this.findAll();
+      const kycRows = await db
+        .select()
+        .from(schema.kycDocuments)
+        .orderBy(desc(schema.kycDocuments.submittedAt));
+
+      const kycByUserId = new Map<string, typeof schema.kycDocuments.$inferSelect>();
+      for (const kyc of kycRows) {
+        if (!kycByUserId.has(kyc.userId)) {
+          kycByUserId.set(kyc.userId, kyc);
+        }
+      }
+
+      return users.map((u) => {
+        const kyc = kycByUserId.get(u.id);
+        if (kyc) {
+          return {
+            ...u,
+            kycDocument: {
+              type: kyc.documentType as any,
+              docNumber: kyc.documentNumber,
+              submittedAt: kyc.submittedAt.toISOString().split('T')[0],
+              fileUrl: kyc.fileUrl,
+            },
+          };
+        }
+        return u;
+      });
+    } catch (error) {
+      console.error('UserRepository.findAllForAdmin error:', error);
+      return await this.findAll();
     }
   }
 
