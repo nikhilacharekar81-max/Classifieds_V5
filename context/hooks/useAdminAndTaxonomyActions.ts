@@ -133,25 +133,51 @@ export function useAdminAndTaxonomyActions({
 
     const parsedReason = validReasons[reportData.reason] || 'spam';
 
-    const newReport: ReportItem = {
-      id: `rep_${Date.now()}`,
-      type: reportData.targetType,
-      targetId: reportData.targetId,
-      targetTitle: reportData.targetTitle,
-      reportedBy: currentUser ? currentUser.id : 'usr_anon',
-      reportedByName: currentUser ? currentUser.name : 'Anonymous User',
-      reason: parsedReason,
-      notes: reportData.comments || 'User submitted report',
-      createdAt: new Date().toISOString().replace('T', ' ').substring(0, 16),
-      status: 'pending',
-    };
-    setReports((prev) => [newReport, ...prev]);
-    addToast({
-      type: 'success',
-      title: 'Report Submitted',
-      message: 'Thank you for reporting. Our moderation team will review this within 15 minutes.',
-    });
-    setReportModalConfig(null);
+    void (async () => {
+      try {
+        const res = await fetch('/api/reports', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            targetType: reportData.targetType,
+            targetId: reportData.targetId,
+            targetTitle: reportData.targetTitle,
+            reason: parsedReason,
+            notes: reportData.comments || 'User submitted report',
+          }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(data?.error || 'Failed to submit report');
+        }
+        const createdReport: ReportItem = {
+          id: data.report?.id || `rep_${Date.now()}`,
+          type: reportData.targetType,
+          targetId: reportData.targetId,
+          targetTitle: reportData.targetTitle,
+          reportedBy: currentUser ? currentUser.id : 'usr_anon',
+          reportedByName: currentUser ? currentUser.name : 'Anonymous User',
+          reason: parsedReason,
+          notes: reportData.comments || 'User submitted report',
+          createdAt: new Date().toISOString().replace('T', ' ').substring(0, 16),
+          status: 'pending',
+        };
+        setReports((prev) => [createdReport, ...prev]);
+        addToast({
+          type: 'success',
+          title: 'Report Submitted',
+          message: 'Thank you for reporting. Our moderation team has received your report and will review it.',
+        });
+      } catch (err: any) {
+        addToast({
+          type: 'error',
+          title: 'Report Submission Failed',
+          message: err?.message || 'Unable to submit report at this time.',
+        });
+      } finally {
+        setReportModalConfig(null);
+      }
+    })();
   };
 
   const addCategory = (catData: Omit<Category, 'id' | 'listingCount'>) => {
@@ -555,6 +581,25 @@ export function useAdminAndTaxonomyActions({
 
   const updateSettings = (newSettings: Partial<SystemSettings>) => {
     setSettings((prev) => ({ ...prev, ...newSettings }));
+    fetch('/api/admin/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newSettings),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          throw new Error(err?.error || 'Failed to save settings');
+        }
+        const data = await res.json().catch(() => null);
+        if (data && data.settings) {
+          setSettings((prev) => ({ ...prev, ...data.settings }));
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to persist settings:', err);
+      });
+
     recordAuditLog(
       'UPDATE_SYSTEM_SETTINGS',
       'Administration / Settings',

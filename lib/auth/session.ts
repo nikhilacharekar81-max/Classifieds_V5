@@ -11,6 +11,7 @@ export interface AuthenticatedContext {
   isModerator: boolean;
   isFinance: boolean;
   ipAddress: string;
+  impersonatedBy?: string | null;
 }
 
 /**
@@ -69,6 +70,7 @@ export async function getAuthenticatedUser(req: NextRequest): Promise<Authentica
       isModerator: role === 'moderator' || role === 'super_admin',
       isFinance: role === 'finance_user' || role === 'super_admin',
       ipAddress,
+      impersonatedBy: dbSession.session.impersonatedBy || null,
     };
   }
 

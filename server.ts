@@ -41,6 +41,10 @@ import * as adminModerationRoute from './server/api/admin/moderation/route.ts';
 import * as adminSettingsRoute from './server/api/admin/settings/route.ts';
 import * as adminCmsRoute from './server/api/admin/cms/route.ts';
 import * as adminCmsByIdRoute from './server/api/admin/cms/[id]/route.ts';
+import * as chatRoute from './server/api/chat/route.ts';
+import * as reportsRoute from './server/api/reports/route.ts';
+import * as userKycRoute from './server/api/user/kyc/route.ts';
+import * as adminImpersonateRoute from './server/api/admin/impersonate/route.ts';
 
 function escapeHtml(str: string): string {
   return String(str || '')
@@ -50,11 +54,19 @@ function escapeHtml(str: string): string {
     .replace(/>/g, '&gt;');
 }
 
+// Production mode must be explicit and safe:
+// Treat unset or invalid NODE_ENV safely as production.
+// Only enable development features when NODE_ENV is explicitly 'development'.
+const isDevelopment = process.env.NODE_ENV === 'development';
+if (!isDevelopment && process.env.NODE_ENV !== 'production') {
+  process.env.NODE_ENV = 'production';
+}
+
 async function initializePostgreSQL() {
   try {
     await ensurePgSchemaApplied();
     await ensureDatabaseSeeded({
-      includeDemoData: process.env.NODE_ENV !== 'production',
+      includeDemoData: isDevelopment,
     });
     console.log('[PostgreSQL] Schema and essential reference data verified.');
   } catch (err) {
@@ -123,6 +135,10 @@ async function startServer() {
   app.all('/api/admin/settings', createExpressRouteHandler(adminSettingsRoute));
   app.all('/api/admin/cms/:id', createExpressRouteHandler(adminCmsByIdRoute));
   app.all('/api/admin/cms', createExpressRouteHandler(adminCmsRoute));
+  app.all('/api/chat', createExpressRouteHandler(chatRoute));
+  app.all('/api/reports', createExpressRouteHandler(reportsRoute));
+  app.all('/api/user/kyc', createExpressRouteHandler(userKycRoute));
+  app.all('/api/admin/impersonate', createExpressRouteHandler(adminImpersonateRoute));
 
   // SEO robots.txt
   app.get('/robots.txt', (req, res) => {
@@ -192,7 +208,7 @@ ${urls
   });
 
   let vite: ViteDevServer | undefined;
-  if (process.env.NODE_ENV !== 'production') {
+  if (isDevelopment) {
     vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'custom',
@@ -239,24 +255,24 @@ ${urls
       const serializedState = serializeJsonLd(ssrResult.ssrProps);
 
       const fullHtml = templateHtml
-        .replace(/<title>.*?<\/title>/s, `<title>${safeTitle}</title>`)
+        .replace(/<title>.*?<\/title>/s, () => `<title>${safeTitle}</title>`)
         .replace(
           /<meta name="description" content=".*?" \/>/,
-          `<meta name="description" content="${safeDesc}" />`
+          () => `<meta name="description" content="${safeDesc}" />`
         )
         .replace(
           /<meta property="og:title" content=".*?" \/>/,
-          `<meta property="og:title" content="${safeTitle}" />`
+          () => `<meta property="og:title" content="${safeTitle}" />`
         )
         .replace(
           /<meta property="og:description" content=".*?" \/>/,
-          `<meta property="og:description" content="${safeDesc}" />`
+          () => `<meta property="og:description" content="${safeDesc}" />`
         )
-        .replace('</head>', `    ${ssrResult.headTagsHtml}\n  </head>`)
-        .replace('<div id="root"></div>', `<div id="root">${ssrResult.appHtml}</div>`)
+        .replace('</head>', () => `    ${ssrResult.headTagsHtml}\n  </head>`)
+        .replace('<div id="root"></div>', () => `<div id="root">${ssrResult.appHtml}</div>`)
         .replace(
           '</body>',
-          `    <script id="__SSR_STATE__" type="application/json">${serializedState}</script>\n  </body>`
+          () => `    <script id="__SSR_STATE__" type="application/json">${serializedState}</script>\n  </body>`
         );
 
       res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8' }).end(fullHtml);

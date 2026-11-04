@@ -281,32 +281,55 @@ export const UserPanelPage: React.FC = () => {
     updateUser(updated);
   };
 
-  const handleKycSubmit = (e: React.FormEvent) => {
+  const handleKycSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!kycDocNumber.trim()) {
       addToast({ type: 'error', title: 'KYC Document Required', message: 'Please enter a valid document number.' });
       return;
     }
 
-    const updated: UserAccount = {
-      ...currentUser,
-      kycStatus: 'pending',
-      kycDocument: {
-        type: kycDocType,
-        docNumber: kycDocNumber,
-        submittedAt: new Date().toISOString().split('T')[0],
-        fileUrl: 'https://images.unsplash.com/photo-1568602471122-7832951cc4c5?auto=format&fit=crop&w=400&q=80',
-      },
-    };
+    try {
+      const res = await fetch('/api/user/kyc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentType: kycDocType,
+          documentNumber: kycDocNumber.trim(),
+          fileUrl: 'https://images.unsplash.com/photo-1568602471122-7832951cc4c5?auto=format&fit=crop&w=400&q=80',
+        }),
+      });
 
-    updateUser(updated);
-    setKycModalOpen(false);
-    setKycDocNumber('');
-    addToast({
-      type: 'success',
-      title: 'KYC Document Submitted',
-      message: 'Your verification request has been sent for admin compliance review.',
-    });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to submit KYC verification');
+      }
+
+      const updated: UserAccount = {
+        ...currentUser,
+        kycStatus: 'pending',
+        kycDocument: {
+          type: kycDocType,
+          docNumber: kycDocNumber.trim(),
+          submittedAt: new Date().toISOString().split('T')[0],
+          fileUrl: 'https://images.unsplash.com/photo-1568602471122-7832951cc4c5?auto=format&fit=crop&w=400&q=80',
+        },
+      };
+
+      updateUser(updated);
+      setKycModalOpen(false);
+      setKycDocNumber('');
+      addToast({
+        type: 'success',
+        title: 'KYC Document Submitted',
+        message: 'Your verification request has been sent for admin compliance review.',
+      });
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'Submission Failed',
+        message: err?.message || 'Could not submit KYC verification document.',
+      });
+    }
   };
 
   const handleSaveListingEdit = async (e: React.FormEvent) => {

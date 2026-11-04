@@ -123,19 +123,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
       : INITIAL_LOCATIONS
   );
   const [users, setUsers] = useState<UserAccount[]>([]);
-  const [reports, setReports] = useState<ReportItem[]>(INITIAL_REPORTS);
+  const [reports, setReports] = useState<ReportItem[]>([]);
   const [rules, setRules] = useState<ModerationRule[]>(INITIAL_MODERATION_RULES);
   const [packages, setPackages] = useState<PromotionalPackage[]>(INITIAL_PACKAGES);
-  const [transactions, setTransactions] = useState<OrderTransaction[]>(INITIAL_TRANSACTIONS);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(INITIAL_AUDIT_LOGS);
+  const [transactions, setTransactions] = useState<OrderTransaction[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [settings, setSettings] = useState<SystemSettings>(() =>
     initialServerData?.settings ? { ...INITIAL_SETTINGS, ...initialServerData.settings } : INITIAL_SETTINGS
   );
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const [emailLogs, setEmailLogs] = useState<EmailLog[]>(INITIAL_EMAIL_LOGS);
+  const [emailLogs, setEmailLogs] = useState<EmailLog[]>([]);
   const [emailSettings, setEmailSettings] = useState<EmailSettings>(INITIAL_EMAIL_SETTINGS);
   const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>(INITIAL_EMAIL_TEMPLATES);
-  const [newsletters, setNewsletters] = useState<NewsletterCampaign[]>(INITIAL_NEWSLETTERS);
+  const [newsletters, setNewsletters] = useState<NewsletterCampaign[]>([]);
 
   // Sync server-provided reference data when root layout revalidates
   useEffect(() => {
@@ -362,24 +362,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
     });
   };
 
-  const impersonateUser = (user: UserAccount) => {
-    setImpersonatedUser(user);
-    setViewMode('marketplace');
-    recordAuditLog(
-      'IMPERSONATE_USER',
-      'Users / Impersonation',
-      user.id,
-      user.name,
-      `Admin ${currentAdmin?.name || 'System'} started impersonation session for audit`
-    );
-    addToast({
-      type: 'warning',
-      title: `Impersonating ${user.name}`,
-      message: 'You are now viewing the marketplace as this user. Actions will be logged in audit trail.',
-    });
+  const impersonateUser = async (user: UserAccount) => {
+    try {
+      const res = await fetch('/api/admin/impersonate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'start', userId: user.id }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to start impersonation');
+      }
+      setImpersonatedUser(user);
+      setViewMode('marketplace');
+      recordAuditLog(
+        'IMPERSONATE_USER',
+        'Users / Impersonation',
+        user.id,
+        user.name,
+        `Admin ${currentAdmin?.name || 'System'} started impersonation session for audit`
+      );
+      addToast({
+        type: 'warning',
+        title: `Impersonating ${user.name}`,
+        message: 'You are now viewing the marketplace as this user. Actions will be logged in audit trail.',
+      });
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'Impersonation Failed',
+        message: err?.message || 'Could not initiate impersonation session.',
+      });
+    }
   };
 
-  const exitImpersonation = () => {
+  const exitImpersonation = async () => {
+    try {
+      await fetch('/api/admin/impersonate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'stop' }),
+      });
+    } catch (err) {
+      console.error('Failed to exit impersonation on server:', err);
+    }
     if (impersonatedUser) {
       recordAuditLog(
         'EXIT_IMPERSONATION',

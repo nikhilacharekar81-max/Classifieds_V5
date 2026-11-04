@@ -211,7 +211,7 @@ export class ListingRepository {
     try {
       const conditions = [
         eq(schema.listings.sellerId, sellerId),
-        sql`LOWER(REGEXP_REPLACE(TRIM(${schema.listings.title}), '\s+', ' ', 'g')) = ${normalized}`,
+        sql`LOWER(REGEXP_REPLACE(TRIM(${schema.listings.title}), '\\s+', ' ', 'g')) = ${normalized}`,
         notInArray(schema.listings.status, ['sold', 'expired']),
       ];
 

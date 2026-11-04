@@ -1,47 +1,104 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MessageCircle, Send, ShieldCheck } from 'lucide-react';
 import { Listing } from '@/lib/types';
+import { useAppOptional } from '@/context/AppContextInstance';
 
 export interface SellerLiveChatBoxProps {
   listing: Listing;
 }
 
 export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing }) => {
+  const app = useAppOptional();
   const [chatMessages, setChatMessages] = useState<
-    Array<{ sender: 'user' | 'seller'; text: string; time: string }>
-  >([
-    {
-      sender: 'seller',
-      text: 'Namaste! Thanks for your interest in this listing. Feel free to ask any questions or schedule an inspection.',
-      time: 'Just now',
-    },
-  ]);
+    Array<{ id: string; sender: 'user' | 'seller'; text: string; time: string }>
+  >([]);
   const [newChatInput, setNewChatInput] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  useEffect(() => {
+    let isMounted = true;
+    setLoading(true);
+    fetch(`/api/chat?listingId=${encodeURIComponent(listing.id)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!isMounted || !data || !Array.isArray(data.messages)) return;
+        setChatMessages(
+          data.messages.map((m: any) => ({
+            id: m.id,
+            sender: m.senderId === listing.sellerId ? 'seller' : 'user',
+            text: m.messageText,
+            time: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          }))
+        );
+      })
+      .catch((err) => {
+        console.error('Failed to load chat messages:', err);
+      })
+      .finally(() => {
+        if (isMounted) setLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [listing.id, listing.sellerId]);
+
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newChatInput.trim()) return;
+    if (!newChatInput.trim() || sending) return;
 
     const userMsg = newChatInput.trim();
-    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setChatMessages((prev) => [...prev, { sender: 'user', text: userMsg, time: now }]);
-    setNewChatInput('');
+    setChatError(null);
+    setSending(true);
 
-    setIsTyping(true);
-    setTimeout(() => {
-      setIsTyping(false);
-      setChatMessages((prev) => [
-        ...prev,
-        {
-          sender: 'seller',
-          text: `Yes, the ${listing.title} is available in ${listing.location.city}. You are welcome to inspect it!`,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ]);
-    }, 1200);
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          listingId: listing.id,
+          messageText: userMsg,
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        if (res.status === 401) {
+          setChatError('Please sign in to message this seller.');
+          app?.addToast?.({
+            type: 'warning',
+            title: 'Sign In Required',
+            message: 'You must be signed in to send messages to sellers.',
+          });
+        } else {
+          setChatError(data?.error || 'Failed to send message.');
+        }
+        return;
+      }
+
+      if (data?.message) {
+        const createdMsg = data.message;
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            id: createdMsg.id,
+            sender: createdMsg.senderId === listing.sellerId ? 'seller' : 'user',
+            text: createdMsg.messageText,
+            time: new Date(createdMsg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+        setNewChatInput('');
+      }
+    } catch (err: any) {
+      setChatError(err?.message || 'Network error while sending message.');
+    } finally {
+      setSending(false);
+    }
   };
 
   return (

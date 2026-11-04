@@ -1,0 +1,92 @@
+import { NextRequest, NextResponse } from '@/src/shims/next-server';
+import { userRepository } from '@/server/repositories/user.repository';
+import { getAuthenticatedUser } from '@/lib/auth/session';
+
+export const dynamic = 'force-dynamic';
+
+const VALID_DOC_TYPES = ['Aadhaar', 'PAN', 'GSTIN', 'Passport'];
+
+export async function GET(req: NextRequest) {
+  try {
+    const authContext = await getAuthenticatedUser(req);
+    if (!authContext) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
+    const doc = await userRepository.findLatestKycDocument(authContext.userId);
+    return NextResponse.json({
+      kycStatus: authContext.user.kycStatus,
+      document: doc
+        ? {
+            id: doc.id,
+            documentType: doc.documentType,
+            documentNumber: doc.documentNumber,
+            fileUrl: doc.fileUrl,
+            status: doc.status,
+            rejectionReason: doc.rejectionReason,
+            submittedAt: doc.submittedAt.toISOString(),
+            reviewedAt: doc.reviewedAt ? doc.reviewedAt.toISOString() : null,
+          }
+        : null,
+    });
+  } catch (error: any) {
+    console.error('API /api/user/kyc GET error:', error);
+    return NextResponse.json({ error: error.message || 'Failed to fetch KYC document' }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const authContext = await getAuthenticatedUser(req);
+    if (!authContext) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
+    const body = await req.json();
+    const { documentType, documentNumber, fileUrl } = body;
+
+    if (!documentType || !VALID_DOC_TYPES.includes(documentType)) {
+      return NextResponse.json(
+        { error: `Invalid document type. Allowed types: ${VALID_DOC_TYPES.join(', ')}` },
+        { status: 400 }
+      );
+    }
+
+    const cleanDocNumber = String(documentNumber || '').trim();
+    if (!cleanDocNumber || cleanDocNumber.length < 3 || cleanDocNumber.length > 64) {
+      return NextResponse.json({ error: 'A valid document number is required' }, { status: 400 });
+    }
+
+    const cleanFileUrl = String(fileUrl || '').trim();
+    if (!cleanFileUrl) {
+      return NextResponse.json({ error: 'Document file or image URL is required' }, { status: 400 });
+    }
+
+    const id = `kyc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const created = await userRepository.createKycDocument({
+      id,
+      userId: authContext.userId, // Authenticated user ID derived strictly from verified session
+      documentType,
+      documentNumber: cleanDocNumber,
+      fileUrl: cleanFileUrl,
+    });
+
+    return NextResponse.json(
+      {
+        success: true,
+        document: {
+          id: created.id,
+          documentType: created.documentType,
+          documentNumber: created.documentNumber,
+          fileUrl: created.fileUrl,
+          status: created.status,
+          submittedAt: created.submittedAt.toISOString(),
+        },
+      },
+      { status: 201 }
+    );
+  } catch (error: any) {
+    console.error('API /api/user/kyc POST error:', error);
+    return NextResponse.json({ error: error.message || 'Failed to submit KYC document' }, { status: 500 });
+  }
+}

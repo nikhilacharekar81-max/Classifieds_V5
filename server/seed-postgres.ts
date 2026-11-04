@@ -1,6 +1,6 @@
 import { db } from '@/src/db/index';
 import * as schema from '@/src/db/schema';
-import { eq, inArray, sql } from '@/src/db/pg-orm';
+import { eq, or, inArray, sql } from '@/src/db/pg-orm';
 import { hashPassword } from '@/lib/auth/password';
 import {
   INITIAL_CATEGORIES,
@@ -318,7 +318,10 @@ export async function seedEssentialProductionData(executor: SeedDbExecutor = db)
     })
     .onConflictDoNothing();
 
-  // 9. Consistent Initialization Completion Marker (written ONLY after all essential steps succeed)
+  // 9. Provision initial administrator if configured and no admin exists
+  await provisionFirstAdministrator(executor);
+
+  // 10. Consistent Initialization Completion Marker (written ONLY after all essential steps succeed)
   await executor
     .insert(schema.systemSettings)
     .values({
@@ -332,6 +335,84 @@ export async function seedEssentialProductionData(executor: SeedDbExecutor = db)
     .onConflictDoNothing();
 
   console.log('--- Essential Production Database Initialization Complete ---');
+}
+
+/**
+ * Secure First-Administrator Provisioning:
+ * Creates an initial super_admin if and only if no administrator exists in the database.
+ * Uses explicitly supplied deployment environment credentials.
+ * Never uses hardcoded default passwords or Password123!.
+ */
+export async function provisionFirstAdministrator(executor: SeedDbExecutor = db): Promise<void> {
+  // Check if any administrator already exists
+  const existingAdmins = await executor
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.users)
+    .where(
+      or(
+        eq(schema.users.type, 'admin'),
+        inArray(schema.users.adminRole, ['super_admin', 'admin', 'moderator'])
+      )
+    );
+
+  if (Number(existingAdmins[0]?.count || 0) > 0) {
+    return;
+  }
+
+  const adminEmail = (
+    process.env.ADMIN_INITIAL_EMAIL ||
+    process.env.INITIAL_ADMIN_EMAIL ||
+    process.env.FIRST_ADMIN_EMAIL ||
+    ''
+  ).trim();
+
+  const adminPassword = (
+    process.env.ADMIN_INITIAL_PASSWORD ||
+    process.env.INITIAL_ADMIN_PASSWORD ||
+    process.env.FIRST_ADMIN_PASSWORD ||
+    ''
+  ).trim();
+
+  const adminName = (
+    process.env.ADMIN_INITIAL_NAME ||
+    process.env.INITIAL_ADMIN_NAME ||
+    'System Administrator'
+  ).trim();
+
+  if (!adminEmail || !adminPassword) {
+    console.log(
+      '[AdminProvisioning] Notice: No administrator account exists. Configure ADMIN_INITIAL_EMAIL and ADMIN_INITIAL_PASSWORD to provision the initial super_admin.'
+    );
+    return;
+  }
+
+  if (adminPassword === 'Password123!' || adminPassword.length < 8) {
+    console.error(
+      '[AdminProvisioning] Security Error: ADMIN_INITIAL_PASSWORD cannot be Password123! and must be at least 8 characters long.'
+    );
+    return;
+  }
+
+  const hashedPassword = await hashPassword(adminPassword);
+  const adminId = `adm_init_${Date.now()}`;
+
+  await executor
+    .insert(schema.users)
+    .values({
+      id: adminId,
+      name: adminName,
+      email: adminEmail.toLowerCase(),
+      phone: '',
+      passwordHash: hashedPassword,
+      type: 'admin',
+      adminRole: 'super_admin',
+      status: 'active',
+      city: 'Mumbai',
+      state: 'Maharashtra',
+    })
+    .onConflictDoNothing();
+
+  console.log(`[AdminProvisioning] Initial super_admin successfully provisioned for ${adminEmail}.`);
 }
 
 /**

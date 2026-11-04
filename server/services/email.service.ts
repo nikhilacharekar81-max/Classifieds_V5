@@ -52,13 +52,17 @@ export class EmailService {
 
   public async sendEmail(logData: Omit<EmailLog, 'id' | 'sentAt' | 'status'>): Promise<EmailLog> {
     const id = `eml_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const smtpHost = process.env.SMTP_HOST || process.env.MAIL_HOST;
+    const smtpUser = process.env.SMTP_USER || process.env.MAIL_USER;
+    const isConfigured = Boolean(smtpHost && smtpUser);
+
     return await emailRepository.logEmail({
       id,
       toEmail: logData.toEmail,
       toName: logData.toName,
       subject: logData.subject,
       body: logData.body,
-      status: 'delivered',
+      status: isConfigured ? 'delivered' : 'failed',
       type: logData.type,
       listingId: logData.listingId,
       relatedUserId: logData.relatedUserId,
@@ -148,17 +152,56 @@ export class EmailService {
     return {
       success: true,
       recipientCount: count,
-      message: `Newsletter "${campaign.subject}" successfully dispatched to ${count} recipients.`,
+      message: `Newsletter "${campaign.subject}" processed for ${count} recipients.`,
     };
   }
 
-  public async testSmtpConnection(_config?: EmailSmtpConfig): Promise<{ success: boolean; message: string; latencyMs: number }> {
-    const latency = Math.floor(40 + Math.random() * 60);
-    return {
-      success: true,
-      message: `Connected successfully to SMTP host with latency ${latency}ms. STARTTLS verified.`,
-      latencyMs: latency,
-    };
+  public async testSmtpConnection(config?: EmailSmtpConfig): Promise<{ success: boolean; message: string; latencyMs: number }> {
+    const host = config?.host || process.env.SMTP_HOST || process.env.MAIL_HOST;
+    const port = Number(config?.port || process.env.SMTP_PORT || 587);
+    const user = config?.username || process.env.SMTP_USER || process.env.MAIL_USER;
+
+    if (!host || !user) {
+      return {
+        success: false,
+        message: 'SMTP credentials are not configured. Set host and user in email settings.',
+        latencyMs: 0,
+      };
+    }
+
+    const net = await import('node:net');
+    const startTime = Date.now();
+
+    return new Promise((resolve) => {
+      const socket = net.createConnection({ host, port, timeout: 4000 }, () => {
+        const latencyMs = Date.now() - startTime;
+        socket.destroy();
+        resolve({
+          success: true,
+          message: `Connected successfully to SMTP host ${host}:${port} with latency ${latencyMs}ms.`,
+          latencyMs,
+        });
+      });
+
+      socket.on('error', (err) => {
+        const latencyMs = Date.now() - startTime;
+        socket.destroy();
+        resolve({
+          success: false,
+          message: `Failed to connect to ${host}:${port}: ${err.message}`,
+          latencyMs,
+        });
+      });
+
+      socket.on('timeout', () => {
+        socket.destroy();
+        resolve({
+          success: false,
+          message: `Connection timed out to ${host}:${port}`,
+          latencyMs: 4000,
+        });
+      });
+    });
   }
 }
 

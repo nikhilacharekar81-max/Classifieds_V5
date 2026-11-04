@@ -26,6 +26,7 @@ export async function GET(req: NextRequest) {
       isAdmin: authContext.isAdmin,
       isModerator: authContext.isModerator,
       isFinance: authContext.isFinance,
+      impersonatedBy: authContext.impersonatedBy || null,
     },
     { status: 200, headers: noCacheHeaders }
   );

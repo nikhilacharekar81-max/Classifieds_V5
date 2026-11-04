@@ -142,7 +142,7 @@ export class UserRepository {
     }
   }
 
-  public async updateKycStatus(userId: string, status: string, rejectionReason?: string): Promise<boolean> {
+  public async updateKycStatus(userId: string, status: string, rejectionReason?: string, reviewedBy?: string): Promise<boolean> {
     try {
       const res = await db
         .update(schema.users)
@@ -153,10 +153,72 @@ export class UserRepository {
         .where(eq(schema.users.id, userId))
         .returning({ id: schema.users.id });
 
+      // Update associated kyc_documents record as well
+      await db
+        .update(schema.kycDocuments)
+        .set({
+          status: status === 'verified' ? 'verified' : status === 'rejected' ? 'rejected' : 'pending',
+          rejectionReason: rejectionReason || null,
+          reviewedBy: reviewedBy || null,
+          reviewedAt: new Date(),
+        })
+        .where(eq(schema.kycDocuments.userId, userId));
+
       return res.length > 0;
     } catch (error) {
       console.error('UserRepository.updateKycStatus error:', error);
       throw new Error('Failed to update KYC status', { cause: error });
+    }
+  }
+
+  public async createKycDocument(data: {
+    id: string;
+    userId: string;
+    documentType: string;
+    documentNumber: string;
+    fileUrl: string;
+  }) {
+    try {
+      const inserted = await db
+        .insert(schema.kycDocuments)
+        .values({
+          id: data.id,
+          userId: data.userId,
+          documentType: data.documentType,
+          documentNumber: data.documentNumber,
+          fileUrl: data.fileUrl,
+          status: 'pending',
+        })
+        .returning();
+
+      await db
+        .update(schema.users)
+        .set({
+          kycStatus: 'pending',
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.users.id, data.userId));
+
+      return inserted[0];
+    } catch (error) {
+      console.error('UserRepository.createKycDocument error:', error);
+      throw new Error('Failed to create KYC document', { cause: error });
+    }
+  }
+
+  public async findLatestKycDocument(userId: string) {
+    try {
+      const rows = await db
+        .select()
+        .from(schema.kycDocuments)
+        .where(eq(schema.kycDocuments.userId, userId))
+        .orderBy(desc(schema.kycDocuments.submittedAt))
+        .limit(1);
+
+      return rows[0] || null;
+    } catch (error) {
+      console.error('UserRepository.findLatestKycDocument error:', error);
+      return null;
     }
   }
 
