@@ -48,10 +48,17 @@ export const PostAdPage: React.FC = () => {
     dynamicAttributes: {} as Record<string, any>,
   });
 
+  // Authentication check helper
+  const isUserAuthenticated = !!currentUser;
+
+  const openAuthModal = (mode: 'signin' | 'signup') => {
+    window.dispatchEvent(new CustomEvent('open_auth_modal', { detail: { mode } }));
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
-
+    // ... (rest of function remains same)
     const remainingSlots = 5 - postForm.images.length;
     if (remainingSlots <= 0) {
       addToast({
@@ -124,14 +131,14 @@ export const PostAdPage: React.FC = () => {
 
   // As-you-type debounced duplicate title check for immediate user feedback
   useEffect(() => {
-    if (!postForm.title.trim()) {
+    if (!postForm.title.trim() || !currentUser?.id) {
       if (titleError !== null) setTitleError(null);
       return;
     }
 
     const timer = setTimeout(async () => {
       setIsCheckingTitle(true);
-      const res = await checkDuplicateTitle(postForm.title, currentUser?.id || 'usr_101');
+      const res = await checkDuplicateTitle(postForm.title, currentUser.id);
       if (res.isDuplicate) {
         setTitleError(res.message || DUPLICATE_TITLE_ERROR_MESSAGE);
       } else {
@@ -195,6 +202,16 @@ export const PostAdPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (!currentUser) {
+      addToast({
+        title: 'Authentication Required',
+        message: 'Please log in to post an ad.',
+        type: 'warning',
+      });
+      openAuthModal('signin');
+      return;
+    }
+
     if (!postForm.title) {
       addToast({
         title: 'Title Required',
@@ -213,7 +230,7 @@ export const PostAdPage: React.FC = () => {
       return;
     }
 
-    const duplicateCheck = await checkDuplicateTitle(postForm.title, currentUser?.id || 'usr_101');
+    const duplicateCheck = await checkDuplicateTitle(postForm.title, currentUser.id);
     if (duplicateCheck.isDuplicate) {
       const errorMsg = duplicateCheck.message || DUPLICATE_TITLE_ERROR_MESSAGE;
       setTitleError(errorMsg);
@@ -227,13 +244,11 @@ export const PostAdPage: React.FC = () => {
       return;
     }
 
-    const sellerId = currentUser?.id || 'usr_101';
-    const sellerName = currentUser?.name || 'Rohit Verma';
-    const sellerType = (currentUser?.type as any) || 'user';
-    const sellerPhone = currentUser?.phone || '+91 98201 54321';
-    const sellerAvatar =
-      currentUser?.avatar ||
-      'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80';
+    const sellerId = currentUser.id;
+    const sellerName = currentUser.name;
+    const sellerType = currentUser.type || 'user';
+    const sellerPhone = currentUser.phone || '';
+    const sellerAvatar = currentUser.avatar || '';
 
     const finalImages = postForm.images.slice(0, 5);
 
@@ -331,183 +346,206 @@ export const PostAdPage: React.FC = () => {
 
       {/* Main Posting Form */}
       <main className="max-w-4xl mx-auto px-4 py-8">
-        <div className="mb-6">
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-            Create Your Free Classified Listing
-          </h1>
-          <p className="text-xs text-slate-500 mt-1">
-            Choose your main department and subcategory. Custom fields adapt dynamically to your selection.
-          </p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <FreemiumQuotaBanner
-            isVolumeQuotaExceeded={isVolumeQuotaExceeded}
-            remainingFreeListings={remainingFreeListings}
-            userActiveListingsCount={userActiveListingsCount}
-            freeQuotaLimit={freeQuotaLimit}
-            extraListingFeeRate={extraListingFeeRate}
-          />
-
-          <CategoryStepSection
-            categories={categories}
-            rootCategories={rootCategories}
-            currentSubcategories={currentSubcategories}
-            selectedCategory={selectedCategory}
-            selectedSubcategory={selectedSubcategory}
-            categoryId={postForm.categoryId}
-            subcategoryId={postForm.subcategoryId}
-            onSelectCategory={(catId, defaultSubId) => {
-              setPostForm((prev) => ({
-                ...prev,
-                categoryId: catId,
-                subcategoryId: defaultSubId,
-                dynamicAttributes: {},
-              }));
-            }}
-            onSelectSubcategory={(subId) => {
-              setPostForm((prev) => ({
-                ...prev,
-                subcategoryId: subId,
-              }));
-            }}
-          />
-
-          <AdDetailsStepSection
-            title={postForm.title}
-            description={postForm.description}
-            price={postForm.price}
-            titleError={titleError}
-            isCheckingTitle={isCheckingTitle}
-            titleInputRef={titleInputRef}
-            activeCategoryFields={activeCategoryFields}
-            selectedCategory={selectedCategory}
-            selectedSubcategory={selectedSubcategory}
-            dynamicAttributes={postForm.dynamicAttributes}
-            onTitleChange={(title) => {
-              setPostForm((prev) => ({ ...prev, title }));
-              if (titleError) setTitleError(null);
-            }}
-            onDescriptionChange={(description) => setPostForm((prev) => ({ ...prev, description }))}
-            onPriceChange={(price) => setPostForm((prev) => ({ ...prev, price }))}
-            onDynamicAttrChange={handleDynamicAttrChange}
-          />
-
-          <PhotoUploadSection
-            images={postForm.images}
-            onFileChange={handleFileChange}
-            onRemoveImage={handleRemoveImage}
-          />
-
-          <LocationStepSection
-            state={postForm.state}
-            city={postForm.city}
-            locality={postForm.locality}
-            sortedStates={sortedStates}
-            availableCities={availableCities}
-            cities={cities}
-            localities={localities}
-            currentUser={currentUser}
-            onStateChange={(state) =>
-              setPostForm((prev) => ({
-                ...prev,
-                state,
-                city: '',
-                locality: '',
-              }))
-            }
-            onCityChange={(city) =>
-              setPostForm((prev) => ({
-                ...prev,
-                city,
-                locality: '',
-              }))
-            }
-            onLocalityChange={(locality) =>
-              setPostForm((prev) => ({
-                ...prev,
-                locality,
-              }))
-            }
-            onUseProfileLocation={() => {
-              if (!currentUser?.location) return;
-              setPostForm((prev) => ({
-                ...prev,
-                country: 'India',
-                state: currentUser.location.state,
-                city: currentUser.location.city,
-                locality: '',
-              }));
-              addToast({
-                title: 'Location Set from Profile',
-                message: `Set to ${currentUser.location.city}, ${currentUser.location.state}`,
-                type: 'info',
-              });
-            }}
-          />
-
-          <BoostAndCheckoutSection
-            isFeaturedEnabled={isFeaturedEnabled}
-            wantFeatured={wantFeatured}
-            currencySymbol={currencySymbol}
-            featuredAdPrice={featuredAdPrice}
-            featuredAdDurationDays={paidCfg?.featuredAdDurationDays || 30}
-            requiresPayment={requiresPayment}
-            totalFee={totalFee}
-            isPaidSubcategory={isPaidSubcategory}
-            postingFeeAmount={postingFeeAmount}
-            selectedCategory={selectedCategory}
-            selectedSubcategory={selectedSubcategory}
-            isVolumeQuotaExceeded={isVolumeQuotaExceeded}
-            userActiveListingsCount={userActiveListingsCount}
-            volumeQuotaFee={volumeQuotaFee}
-            freeQuotaLimit={freeQuotaLimit}
-            paymentMethod={paymentMethod}
-            onToggleFeatured={(checked) => {
-              setWantFeatured(checked);
-              if (checked) {
-                addToast({
-                  type: 'success',
-                  title: 'Featured Promotion Added',
-                  message: `Successfully added Featured Ad promotion (${currencySymbol}${featuredAdPrice}) to your checkout invoice.`,
-                });
-              }
-            }}
-            onSelectPaymentMethod={setPaymentMethod}
-          />
-
-          {/* Submit Actions Bar */}
-          <div className="flex items-center justify-between gap-4 pt-4 border-t border-slate-200">
-            <button
-              type="button"
-              onClick={() => navigateTo('/')}
-              className="px-5 py-2.5 text-xs font-bold text-slate-600 hover:text-slate-800 transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-
-            <button
-              type="submit"
-              className={`px-8 py-3 text-white font-bold rounded-xl shadow-lg text-sm flex items-center gap-2 transition-all cursor-pointer hover:scale-102 ${
-                requiresPayment
-                  ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/30'
-                  : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/30'
-              }`}
-            >
-              {requiresPayment ? (
-                <>
-                  <IndianRupee className="w-4 h-4" />
-                  <span>Pay ₹{totalFee} & Post Ad Now</span>
-                </>
-              ) : (
-                <>
-                  <Upload className="w-4 h-4" />
-                  <span>Post Classified Ad Now</span>
-                </>
-              )}
-            </button>
+        {!isUserAuthenticated ? (
+          <div className="bg-white rounded-2xl p-8 border border-slate-200 shadow-sm text-center">
+            <h2 className="text-xl font-black text-slate-900 mb-4">Post Free Classified Ad</h2>
+            <p className="text-slate-600 mb-6">Please log in or register to post your free ad. Registration is free.</p>
+            <div className="flex gap-4 justify-center">
+              <button
+                onClick={() => openAuthModal('signin')}
+                className="px-6 py-2 bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 cursor-pointer"
+              >
+                Log In
+              </button>
+              <button
+                onClick={() => openAuthModal('signup')}
+                className="px-6 py-2 bg-slate-200 text-slate-800 font-bold rounded-lg hover:bg-slate-300 cursor-pointer"
+              >
+                Register for Free
+              </button>
+            </div>
           </div>
-        </form>
+        ) : (
+          <>
+            <div className="mb-6">
+              <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+                Create Your Free Classified Listing
+              </h1>
+              <p className="text-xs text-slate-500 mt-1">
+                Choose your main department and subcategory. Custom fields adapt dynamically to your selection.
+              </p>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <FreemiumQuotaBanner
+                isVolumeQuotaExceeded={isVolumeQuotaExceeded}
+                remainingFreeListings={remainingFreeListings}
+                userActiveListingsCount={userActiveListingsCount}
+                freeQuotaLimit={freeQuotaLimit}
+                extraListingFeeRate={extraListingFeeRate}
+              />
+
+              <CategoryStepSection
+                categories={categories}
+                rootCategories={rootCategories}
+                currentSubcategories={currentSubcategories}
+                selectedCategory={selectedCategory}
+                selectedSubcategory={selectedSubcategory}
+                categoryId={postForm.categoryId}
+                subcategoryId={postForm.subcategoryId}
+                onSelectCategory={(catId, defaultSubId) => {
+                  setPostForm((prev) => ({
+                    ...prev,
+                    categoryId: catId,
+                    subcategoryId: defaultSubId,
+                    dynamicAttributes: {},
+                  }));
+                }}
+                onSelectSubcategory={(subId) => {
+                  setPostForm((prev) => ({
+                    ...prev,
+                    subcategoryId: subId,
+                  }));
+                }}
+              />
+
+              <AdDetailsStepSection
+                title={postForm.title}
+                description={postForm.description}
+                price={postForm.price}
+                titleError={titleError}
+                isCheckingTitle={isCheckingTitle}
+                titleInputRef={titleInputRef}
+                activeCategoryFields={activeCategoryFields}
+                selectedCategory={selectedCategory}
+                selectedSubcategory={selectedSubcategory}
+                dynamicAttributes={postForm.dynamicAttributes}
+                onTitleChange={(title) => {
+                  setPostForm((prev) => ({ ...prev, title }));
+                  if (titleError) setTitleError(null);
+                }}
+                onDescriptionChange={(description) => setPostForm((prev) => ({ ...prev, description }))}
+                onPriceChange={(price) => setPostForm((prev) => ({ ...prev, price }))}
+                onDynamicAttrChange={handleDynamicAttrChange}
+              />
+
+              <PhotoUploadSection
+                images={postForm.images}
+                onFileChange={handleFileChange}
+                onRemoveImage={handleRemoveImage}
+              />
+
+              <LocationStepSection
+                state={postForm.state}
+                city={postForm.city}
+                locality={postForm.locality}
+                sortedStates={sortedStates}
+                availableCities={availableCities}
+                cities={cities}
+                localities={localities}
+                currentUser={currentUser}
+                onStateChange={(state) =>
+                  setPostForm((prev) => ({
+                    ...prev,
+                    state,
+                    city: '',
+                    locality: '',
+                  }))
+                }
+                onCityChange={(city) =>
+                  setPostForm((prev) => ({
+                    ...prev,
+                    city,
+                    locality: '',
+                  }))
+                }
+                onLocalityChange={(locality) =>
+                  setPostForm((prev) => ({
+                    ...prev,
+                    locality,
+                  }))
+                }
+                onUseProfileLocation={() => {
+                  if (!currentUser?.location) return;
+                  setPostForm((prev) => ({
+                    ...prev,
+                    country: 'India',
+                    state: currentUser.location.state,
+                    city: currentUser.location.city,
+                    locality: '',
+                  }));
+                  addToast({
+                    title: 'Location Set from Profile',
+                    message: `Set to ${currentUser.location.city}, ${currentUser.location.state}`,
+                    type: 'info',
+                  });
+                }}
+              />
+
+              <BoostAndCheckoutSection
+                isFeaturedEnabled={isFeaturedEnabled}
+                wantFeatured={wantFeatured}
+                currencySymbol={currencySymbol}
+                featuredAdPrice={featuredAdPrice}
+                featuredAdDurationDays={paidCfg?.featuredAdDurationDays || 30}
+                requiresPayment={requiresPayment}
+                totalFee={totalFee}
+                isPaidSubcategory={isPaidSubcategory}
+                postingFeeAmount={postingFeeAmount}
+                selectedCategory={selectedCategory}
+                selectedSubcategory={selectedSubcategory}
+                isVolumeQuotaExceeded={isVolumeQuotaExceeded}
+                userActiveListingsCount={userActiveListingsCount}
+                volumeQuotaFee={volumeQuotaFee}
+                freeQuotaLimit={freeQuotaLimit}
+                paymentMethod={paymentMethod}
+                onToggleFeatured={(checked) => {
+                  setWantFeatured(checked);
+                  if (checked) {
+                    addToast({
+                      type: 'success',
+                      title: 'Featured Promotion Added',
+                      message: `Successfully added Featured Ad promotion (${currencySymbol}${featuredAdPrice}) to your checkout invoice.`,
+                    });
+                  }
+                }}
+                onSelectPaymentMethod={setPaymentMethod}
+              />
+
+              {/* Submit Actions Bar */}
+              <div className="flex items-center justify-between gap-4 pt-4 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => navigateTo('/')}
+                  className="px-5 py-2.5 text-xs font-bold text-slate-600 hover:text-slate-800 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  className={`px-8 py-3 text-white font-bold rounded-xl shadow-lg text-sm flex items-center gap-2 transition-all cursor-pointer hover:scale-102 ${
+                    requiresPayment
+                      ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/30'
+                      : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/30'
+                  }`}
+                >
+                  {requiresPayment ? (
+                    <>
+                      <IndianRupee className="w-4 h-4" />
+                      <span>Pay ₹{totalFee} & Post Ad Now</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4" />
+                      <span>Post Classified Ad Now</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </>
+        )}
       </main>
     </div>
   );
