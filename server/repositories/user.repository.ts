@@ -134,6 +134,15 @@ export class UserRepository {
     verifiedBusiness?: boolean;
     adminRole?: string;
   }): Promise<UserAccount> {
+    if (!data.phone || typeof data.phone !== 'string' || !data.phone.trim()) {
+      throw new Error('A valid phone number is required to register an account');
+    }
+    const cleanDigits = data.phone.trim().replace(/\D/g, '');
+    if (cleanDigits.length < 10 || cleanDigits.length > 15) {
+      throw new Error('Phone number must contain between 10 and 15 digits');
+    }
+    const normalizedPhone = data.phone.trim().startsWith('+') ? `+${cleanDigits}` : cleanDigits;
+
     try {
       const inserted = await db
         .insert(schema.users)
@@ -142,12 +151,12 @@ export class UserRepository {
           uid: data.uid || null,
           name: data.name,
           email: data.email.toLowerCase().trim(),
-          phone: data.phone || '',
+          phone: normalizedPhone,
           passwordHash: data.passwordHash || null,
           avatarUrl: data.avatarUrl || null,
           type: data.type || 'user',
-          city: data.city || 'Mumbai',
-          state: data.state || 'Maharashtra',
+          city: data.city && typeof data.city === 'string' ? data.city.trim() : '',
+          state: data.state && typeof data.state === 'string' ? data.state.trim() : '',
           businessName: data.businessName || null,
           gstNumber: data.gstNumber || null,
           verifiedBusiness: data.verifiedBusiness ?? false,
@@ -679,7 +688,7 @@ export class UserRepository {
     }
   }
 
-  public async recordFailedAttempt(key: string, windowMs = 15 * 60 * 1000, blockMs = 15 * 60 * 1000) {
+  public async recordFailedAttempt(key: string, maxAttempts = 5, windowMs = 15 * 60 * 1000, blockMs = 15 * 60 * 1000) {
     try {
       const now = new Date();
       const rows = await db
@@ -709,7 +718,7 @@ export class UserRepository {
 
       const newAttempts = record.attempts + 1;
       let blockedUntil = record.blockedUntil;
-      if (newAttempts >= 5) {
+      if (newAttempts >= maxAttempts) {
         blockedUntil = new Date(now.getTime() + blockMs);
       }
 

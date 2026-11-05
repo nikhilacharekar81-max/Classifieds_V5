@@ -253,11 +253,26 @@ export const UserPanelPage: React.FC = () => {
     e.preventDefault();
     if (!currentUser) return;
 
+    const rawPhone = profileForm.phone ? profileForm.phone.trim() : '';
+    let normalizedPhone = '';
+    if (rawPhone) {
+      const cleanDigits = rawPhone.replace(/\D/g, '');
+      if (cleanDigits.length < 10 || cleanDigits.length > 15) {
+        addToast({
+          type: 'error',
+          title: 'Invalid Phone Number',
+          message: 'Phone number must contain between 10 and 15 digits.',
+        });
+        return;
+      }
+      normalizedPhone = rawPhone.startsWith('+') ? `+${cleanDigits}` : cleanDigits;
+    }
+
     const updated: UserAccount = {
       ...currentUser,
       name: profileForm.name,
       email: profileForm.email,
-      phone: profileForm.phone,
+      phone: normalizedPhone,
       location: {
         city: profileForm.city,
         state: profileForm.state,

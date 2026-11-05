@@ -231,6 +231,15 @@ export const PostAdPage: React.FC = () => {
       return;
     }
 
+    if (!currentUser.phone || !currentUser.phone.trim()) {
+      addToast({
+        title: 'Phone Number Required',
+        message: 'A verified phone number is required on your account to post an ad. Please add your phone number in Account Settings.',
+        type: 'warning',
+      });
+      return;
+    }
+
     const duplicateCheck = await checkDuplicateTitle(postForm.title, currentUser.id);
     if (duplicateCheck.isDuplicate) {
       const errorMsg = duplicateCheck.message || DUPLICATE_TITLE_ERROR_MESSAGE;

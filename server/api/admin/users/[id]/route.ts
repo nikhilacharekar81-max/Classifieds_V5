@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { userRepository } from '@/server/repositories/user.repository';
 import { getAuthenticatedUser } from '@/lib/auth/session';
+import { emailService } from '@/server/services/email.service';
+import crypto from 'node:crypto';
 
 export async function PUT(
   req: NextRequest,
@@ -29,10 +31,6 @@ export async function PUT(
     }
 
     // Role Hierarchy: Moderators cannot edit Admin or Super Admin accounts
-    const targetHasAdminPrivileges = Boolean(
-      (targetUser as any).adminRole || targetUser.type === 'business' && false // check adminRole
-    );
-    // Also check if targetUser has admin record in DB
     const targetRow = await userRepository.findByEmail(targetUser.email);
     if (!isSelf && !isAdmin && isModerator && targetRow?.adminRole) {
       return NextResponse.json(
@@ -54,6 +52,14 @@ export async function PUT(
 
     // Email change integrity check
     if (body.email !== undefined) {
+      // Moderators cannot change another user's email
+      if (!isSelf && !isAdmin) {
+        return NextResponse.json(
+          { error: "Forbidden: Only administrators can modify another user's email address" },
+          { status: 403 }
+        );
+      }
+
       const cleanEmail = String(body.email).toLowerCase().trim();
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(cleanEmail)) {
@@ -72,6 +78,28 @@ export async function PUT(
         // Reset email verification when email address is altered
         allowedFields.emailVerified = false;
         allowedFields.emailVerifiedAt = null;
+
+        // Initiate email verification workflow for self or staff-initiated changes
+        try {
+          const rawToken = crypto.randomBytes(32).toString('hex');
+          const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+          const tokenId = `evt_${crypto.randomUUID()}`;
+          const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+          await userRepository.createEmailVerificationToken(tokenId, id, tokenHash, expiresAt);
+
+          const origin = req.nextUrl?.origin || 'http://localhost:3000';
+          const verifyUrl = `${origin}/verify-email?token=${rawToken}`;
+          await emailService.sendCustomEmail({
+            toEmail: cleanEmail,
+            toName: allowedFields.name || targetUser.name || 'User',
+            subject: 'Verify Your New Email Address - Chillyads',
+            body: `<p>Hello ${allowedFields.name || targetUser.name},</p><p>Your account email address was recently updated. Please verify your new email address by clicking the link below:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>This link expires in 24 hours.</p>`,
+            type: 'email_verification',
+            relatedUserId: id,
+          });
+        } catch (emailErr) {
+          console.error('[AdminUsersAPI] Verification email dispatch warning:', emailErr);
+        }
       }
     }
 
@@ -82,8 +110,10 @@ export async function PUT(
         if (digits.length < 10 || digits.length > 15) {
           return NextResponse.json({ error: 'Phone number must be between 10 and 15 digits' }, { status: 400 });
         }
+        allowedFields.phone = cleanPhone.startsWith('+') ? `+${digits}` : digits;
+      } else {
+        allowedFields.phone = '';
       }
-      allowedFields.phone = cleanPhone;
     }
 
     if (body.avatar !== undefined) allowedFields.avatarUrl = String(body.avatar);
@@ -95,8 +125,14 @@ export async function PUT(
     }
 
     // Field-level role permissions:
-    // KYC status can be updated by moderators or admins
-    if (isStaff && body.kycStatus !== undefined) {
+    // KYC status is administrator-only; moderators must not modify KYC status
+    if (body.kycStatus !== undefined) {
+      if (!isAdmin) {
+        return NextResponse.json(
+          { error: 'Forbidden: Only administrators can modify KYC verification status' },
+          { status: 403 }
+        );
+      }
       allowedFields.kycStatus = body.kycStatus;
     }
 

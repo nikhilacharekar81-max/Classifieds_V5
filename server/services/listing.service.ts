@@ -9,6 +9,7 @@ import {
 } from '@/server/repositories/listing.repository';
 import { adminRepository } from '@/server/repositories/admin.repository';
 import { userRepository } from '@/server/repositories/user.repository';
+import { categoryRepository } from '@/server/repositories/category.repository';
 import {
   invalidateLiveListingCountsCache,
   REFERENCE_CACHE_TAGS,
@@ -19,6 +20,45 @@ import { normalizeAdTitle, DUPLICATE_TITLE_ERROR_MESSAGE } from '@/lib/utils/adT
 
 export interface ListingFilterOptions extends ListingFilterQuery {
   userCoords?: { latitude: number; longitude: number } | null;
+}
+
+/**
+ * Validates that an image URL is structured correctly:
+ * supports standard http/https URLs and base64 data URLs.
+ */
+export function isValidListingImageUrl(url: unknown): boolean {
+  if (typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+
+  if (trimmed.startsWith('data:image/')) {
+    return /^data:image\/(jpeg|jpg|png|webp|gif|svg\+xml);base64,[A-Za-z0-9+/=]+$/.test(trimmed);
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && Boolean(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Compares two coordinate values to detect meaningful geographic shifts (> ~11 meters).
+ */
+export function areCoordinatesDifferent(newVal: any, oldVal: any): boolean {
+  const isNewEmpty = newVal === undefined || newVal === null || String(newVal).trim() === '';
+  const isOldEmpty = oldVal === undefined || oldVal === null || String(oldVal).trim() === '';
+
+  if (isNewEmpty && isOldEmpty) return false;
+  if (isNewEmpty !== isOldEmpty) return true;
+
+  const n1 = Number(newVal);
+  const n2 = Number(oldVal);
+  if (isNaN(n1) && isNaN(n2)) return false;
+  if (isNaN(n1) !== isNaN(n2)) return true;
+
+  return Math.abs(n1 - n2) > 0.0001;
 }
 
 const fetchCachedLatestListingsInternal = unstable_cache(
@@ -276,6 +316,50 @@ export class ListingService {
       return { success: false, error: 'Seller authentication required', status: 401 };
     }
 
+    // Validate category existence
+    if (!data.categoryId || typeof data.categoryId !== 'string' || !data.categoryId.trim()) {
+      return { success: false, error: 'Category ID is required', status: 400 };
+    }
+    const cleanCategoryId = data.categoryId.trim();
+    const existingCategory = await categoryRepository.findById(cleanCategoryId);
+    if (!existingCategory) {
+      return { success: false, error: `Category '${data.categoryId}' does not exist`, status: 400 };
+    }
+
+    let cleanSubcategoryId: string | null = null;
+    if (data.subcategoryId) {
+      cleanSubcategoryId = String(data.subcategoryId).trim();
+      const existingSubcategory = await categoryRepository.findById(cleanSubcategoryId);
+      if (!existingSubcategory || existingSubcategory.parentId !== cleanCategoryId) {
+        return {
+          success: false,
+          error: `Subcategory '${data.subcategoryId}' does not exist or does not belong to category '${data.categoryId}'`,
+          status: 400,
+        };
+      }
+    }
+
+    // Validate images if provided
+    let validImages: string[] = [];
+    if (data.images !== undefined) {
+      if (!Array.isArray(data.images)) {
+        return { success: false, error: 'Images must be an array of URLs', status: 400 };
+      }
+      if (data.images.length > 5) {
+        return { success: false, error: 'A maximum of 5 images is allowed per listing', status: 400 };
+      }
+      for (const img of data.images) {
+        if (!isValidListingImageUrl(img)) {
+          return {
+            success: false,
+            error: `Invalid or malformed image URL: ${typeof img === 'string' ? img.slice(0, 50) : 'not a string'}`,
+            status: 400,
+          };
+        }
+      }
+      validImages = data.images.map((s: any) => String(s).trim());
+    }
+
     // Validate price (optional: missing/empty price becomes null; zero is preserved)
     let priceNum: number | null = null;
     if (data.price !== undefined && data.price !== null && String(data.price).trim() !== '') {
@@ -320,8 +404,8 @@ export class ListingService {
         sellerId,
         sellerName: actorMeta?.name || data.sellerName || 'Authenticated User',
         sellerPhone: data.sellerPhone || '',
-        categoryId: data.categoryId,
-        subcategoryId: data.subcategoryId,
+        categoryId: cleanCategoryId,
+        subcategoryId: cleanSubcategoryId || undefined,
         title: data.title,
         description: data.description,
         price: priceNum,
@@ -330,7 +414,7 @@ export class ListingService {
         locality: data.location?.locality || 'Locality',
         latitude: data.location?.latitude,
         longitude: data.location?.longitude,
-        images: data.images || [],
+        images: validImages,
         customAttributes: data.customAttributes || {},
         status: data.status || 'pending',
         expiresAt,
@@ -458,11 +542,35 @@ export class ListingService {
       if (typeof updatedData.categoryId !== 'string' || !updatedData.categoryId.trim()) {
         return { success: false, error: 'Category ID cannot be empty', status: 400 };
       }
-      safeFields.categoryId = updatedData.categoryId.trim();
+      const cleanCategoryId = updatedData.categoryId.trim();
+      if (cleanCategoryId !== existing.categoryId) {
+        const cat = await categoryRepository.findById(cleanCategoryId);
+        if (!cat) {
+          return { success: false, error: `Category '${updatedData.categoryId}' does not exist`, status: 400 };
+        }
+      }
+      safeFields.categoryId = cleanCategoryId;
     }
 
+    const effectiveCategoryId = safeFields.categoryId || existing.categoryId;
+
     if (updatedData.subcategoryId !== undefined) {
-      safeFields.subcategoryId = updatedData.subcategoryId ? String(updatedData.subcategoryId).trim() : null;
+      if (updatedData.subcategoryId === null || String(updatedData.subcategoryId).trim() === '') {
+        safeFields.subcategoryId = null;
+      } else {
+        const cleanSubcategoryId = String(updatedData.subcategoryId).trim();
+        if (cleanSubcategoryId !== existing.subcategoryId || safeFields.categoryId !== undefined) {
+          const sub = await categoryRepository.findById(cleanSubcategoryId);
+          if (!sub || sub.parentId !== effectiveCategoryId) {
+            return {
+              success: false,
+              error: `Subcategory '${updatedData.subcategoryId}' does not exist or does not belong to category '${effectiveCategoryId}'`,
+              status: 400,
+            };
+          }
+        }
+        safeFields.subcategoryId = cleanSubcategoryId;
+      }
     }
 
     // Validate images if updated
@@ -470,10 +578,19 @@ export class ListingService {
       if (!Array.isArray(updatedData.images)) {
         return { success: false, error: 'Images must be an array of URLs', status: 400 };
       }
-      const validImages = updatedData.images
-        .filter((img: any) => typeof img === 'string' && (img.startsWith('http://') || img.startsWith('https://')))
-        .slice(0, 5);
-      safeFields.images = validImages;
+      if (updatedData.images.length > 5) {
+        return { success: false, error: 'A maximum of 5 images is allowed per listing', status: 400 };
+      }
+      for (const img of updatedData.images) {
+        if (!isValidListingImageUrl(img)) {
+          return {
+            success: false,
+            error: `Invalid or malformed image URL: ${typeof img === 'string' ? img.slice(0, 50) : 'not a string'}`,
+            status: 400,
+          };
+        }
+      }
+      safeFields.images = updatedData.images.map((s: any) => String(s).trim());
     }
 
     // Validate price if updated
@@ -536,11 +653,15 @@ export class ListingService {
         const isCustomAttrsChanged = updatedData.customAttributes !== undefined && (
           JSON.stringify(updatedData.customAttributes) !== JSON.stringify(existing.customAttributes || {})
         );
+        const isLatitudeChanged = updatedData.location?.latitude !== undefined && areCoordinatesDifferent(updatedData.location.latitude, existing.location?.latitude);
+        const isLongitudeChanged = updatedData.location?.longitude !== undefined && areCoordinatesDifferent(updatedData.location.longitude, existing.location?.longitude);
         const isLocationChanged = Boolean(
           updatedData.location && (
             (updatedData.location.city && updatedData.location.city.trim() !== (existing.location?.city || '').trim()) ||
             (updatedData.location.state && updatedData.location.state.trim() !== (existing.location?.state || '').trim()) ||
-            (updatedData.location.locality && updatedData.location.locality.trim() !== (existing.location?.locality || '').trim())
+            (updatedData.location.locality && updatedData.location.locality.trim() !== (existing.location?.locality || '').trim()) ||
+            isLatitudeChanged ||
+            isLongitudeChanged
           )
         );
 
