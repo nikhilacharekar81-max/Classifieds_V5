@@ -289,14 +289,7 @@ export const MyAccountDropdown: React.FC = () => {
         },
       }) : null);
 
-      if (activeUser) {
-        setLocalAuthUser(activeUser);
-        setHasCheckedSession(true);
-        app?.setAuthUser(activeUser);
-        app?.setCurrentUserId(activeUser.id);
-        window.dispatchEvent(new CustomEvent('auth_state_changed', { detail: { user: activeUser } }));
-      }
-
+      // Do not authenticate the unverified user!
       setSuccessMsg(data.message || 'Account created. Please check your email for verification.');
       setSignUpName('');
       setSignUpEmail('');
