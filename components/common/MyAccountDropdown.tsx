@@ -69,11 +69,22 @@ export const MyAccountDropdown: React.FC = () => {
         setIsOpen(false);
       }
     };
+    const handleOpenAuthModal = (event: Event) => {
+      const customEv = event as CustomEvent<{ mode?: 'signin' | 'signup' }>;
+      const mode = customEv.detail?.mode || 'signin';
+      setIsOpen(false);
+      setErrorMsg(null);
+      setAuthModalMode(mode);
+    };
+
     document.addEventListener('mousedown', handleClickOutside);
     document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('open_auth_modal', handleOpenAuthModal);
+
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('open_auth_modal', handleOpenAuthModal);
     };
   }, []);
 
@@ -135,6 +146,7 @@ export const MyAccountDropdown: React.FC = () => {
         setHasCheckedSession(true);
         app?.setAuthUser(data.user);
         app?.setCurrentUserId(data.user.id);
+        window.dispatchEvent(new CustomEvent('auth_state_changed', { detail: { user: data.user } }));
       }
       notify({
         type: 'success',
@@ -184,24 +196,22 @@ export const MyAccountDropdown: React.FC = () => {
         return;
       }
 
-      if (data.user) {
-        setLocalAuthUser(data.user);
+      const activeUser = data.user || (app?.registerUser ? app.registerUser({
+        name: signUpName.trim(),
+        email: signUpEmail.trim(),
+        phone: signUpPhone.trim(),
+        location: {
+          city: signUpCity.trim() || 'Mumbai',
+          state: signUpState.trim() || 'Maharashtra',
+        },
+      }) : null);
+
+      if (activeUser) {
+        setLocalAuthUser(activeUser);
         setHasCheckedSession(true);
-        app?.setAuthUser(data.user);
-        app?.setCurrentUserId(data.user.id);
-      } else if (app?.registerUser) {
-        const fallbackUser = app.registerUser({
-          name: signUpName.trim(),
-          email: signUpEmail.trim(),
-          phone: signUpPhone.trim(),
-          location: {
-            city: signUpCity.trim() || 'Mumbai',
-            state: signUpState.trim() || 'Maharashtra',
-          },
-        });
-        setLocalAuthUser(fallbackUser);
-        app.setAuthUser(fallbackUser);
-        app.setCurrentUserId(fallbackUser.id);
+        app?.setAuthUser(activeUser);
+        app?.setCurrentUserId(activeUser.id);
+        window.dispatchEvent(new CustomEvent('auth_state_changed', { detail: { user: activeUser } }));
       }
 
       notify({

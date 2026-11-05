@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { MessageCircle, Send, ShieldCheck } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { MessageCircle, Send, ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
 import { Listing } from '@/lib/types';
 import { useAppOptional } from '@/context/AppContextInstance';
+import { dispatchPublicToast } from '@/components/common/ChunkErrorRecovery';
 
 export interface SellerLiveChatBoxProps {
   listing: Listing;
@@ -11,21 +12,54 @@ export interface SellerLiveChatBoxProps {
 
 export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing }) => {
   const app = useAppOptional();
+  const currentUser = app?.currentUser || null;
+
   const [chatMessages, setChatMessages] = useState<
     Array<{ id: string; sender: 'user' | 'seller'; text: string; time: string }>
   >([]);
   const [newChatInput, setNewChatInput] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [sending, setSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let isMounted = true;
+  const notify = useCallback(
+    (payload: { type: 'success' | 'error' | 'warning' | 'info'; title: string; message?: string }) => {
+      if (app?.addToast) {
+        app.addToast(payload);
+      } else {
+        dispatchPublicToast(payload);
+      }
+    },
+    [app]
+  );
+
+  const loadChatMessages = useCallback(async () => {
     setLoading(true);
-    fetch(`/api/chat?listingId=${encodeURIComponent(listing.id)}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!isMounted || !data || !Array.isArray(data.messages)) return;
+    setChatError(null);
+    try {
+      const res = await fetch(`/api/chat?listingId=${encodeURIComponent(listing.id)}`, {
+        cache: 'no-store',
+      });
+
+      if (res.status === 401) {
+        setIsAuthenticated(false);
+        setChatMessages([]);
+        setLoading(false);
+        return;
+      }
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setChatError(data?.error || 'Failed to load chat messages.');
+        setIsAuthenticated(false);
+        setLoading(false);
+        return;
+      }
+
+      const data = await res.json().catch(() => null);
+      if (data && Array.isArray(data.messages)) {
+        setIsAuthenticated(true);
         setChatMessages(
           data.messages.map((m: any) => ({
             id: m.id,
@@ -34,18 +68,39 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
             time: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           }))
         );
-      })
-      .catch((err) => {
-        console.error('Failed to load chat messages:', err);
-      })
-      .finally(() => {
-        if (isMounted) setLoading(false);
-      });
-
-    return () => {
-      isMounted = false;
-    };
+      } else {
+        setIsAuthenticated(true);
+        setChatMessages([]);
+      }
+    } catch (err: any) {
+      console.error('Failed to load chat messages:', err);
+      setIsAuthenticated(false);
+    } finally {
+      setLoading(false);
+    }
   }, [listing.id, listing.sellerId]);
+
+  useEffect(() => {
+    loadChatMessages();
+  }, [loadChatMessages, currentUser?.id]);
+
+  useEffect(() => {
+    const handleAuthStateChanged = () => {
+      loadChatMessages();
+    };
+    window.addEventListener('auth_state_changed', handleAuthStateChanged);
+    return () => {
+      window.removeEventListener('auth_state_changed', handleAuthStateChanged);
+    };
+  }, [loadChatMessages]);
+
+  const handleOpenSignUp = () => {
+    window.dispatchEvent(new CustomEvent('open_auth_modal', { detail: { mode: 'signup' } }));
+  };
+
+  const handleOpenSignIn = () => {
+    window.dispatchEvent(new CustomEvent('open_auth_modal', { detail: { mode: 'signin' } }));
+  };
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,14 +124,15 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
 
       if (!res.ok) {
         if (res.status === 401) {
-          setChatError('Please sign in to message this seller.');
-          app?.addToast?.({
+          setIsAuthenticated(false);
+          setChatError('Sign in or create an account to start chatting with sellers.');
+          notify({
             type: 'warning',
             title: 'Sign In Required',
-            message: 'You must be signed in to send messages to sellers.',
+            message: 'Your session has expired. Please sign in to message this seller.',
           });
         } else {
-          setChatError(data?.error || 'Failed to send message.');
+          setChatError(data?.error || 'Failed to send message. Please try again.');
         }
         return;
       }
@@ -102,57 +158,109 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
   };
 
   return (
-    <div className="bg-white rounded-xl border border-[#dadce0] overflow-hidden shadow-2xs">
-      <div className="bg-[#f8f9fa] border-b border-[#dadce0] text-[#202124] px-5 py-3 flex items-center justify-between">
+    <div className="bg-white dark:bg-slate-900 rounded-xl border border-[#dadce0] dark:border-slate-800 overflow-hidden shadow-2xs">
+      <div className="bg-[#f8f9fa] dark:bg-slate-800/80 border-b border-[#dadce0] dark:border-slate-800 text-[#202124] dark:text-white px-5 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <MessageCircle className="w-4 h-4 text-[#1dbf73]" />
           <span className="font-bold text-xs">Message {listing.sellerName}</span>
         </div>
-        <span className="text-[11px] text-[#137333] font-semibold">Available</span>
+        <span className="text-[11px] text-[#137333] dark:text-emerald-400 font-semibold">Available</span>
       </div>
 
-      <div className="p-4 bg-white space-y-3 h-64 overflow-y-auto text-xs">
-        {chatMessages.map((msg, index) => (
-          <div
-            key={index}
-            className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}
-          >
-            <div
-              className={`max-w-[85%] p-3 rounded-xl ${
-                msg.sender === 'user'
-                  ? 'bg-[#1dbf73] text-white rounded-br-none'
-                  : 'bg-[#f8f9fa] text-[#202124] border border-[#dadce0] rounded-bl-none'
-              }`}
-            >
-              <p>{msg.text}</p>
-            </div>
-            <span className="text-[9px] text-[#5f6368] mt-0.5 px-1 font-mono tabular-nums">
-              {msg.time}
-            </span>
+      {chatError && (
+        <div className="mx-4 mt-3 p-2.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 text-xs rounded-lg flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+          <span>{chatError}</span>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="p-4 bg-white dark:bg-slate-900 flex items-center justify-center h-64 text-slate-400 gap-2 text-xs font-medium">
+          <Loader2 className="w-4 h-4 animate-spin text-[#1dbf73]" />
+          <span>Checking chat availability...</span>
+        </div>
+      ) : !isAuthenticated ? (
+        <div className="p-6 bg-slate-50/80 dark:bg-slate-800/40 flex flex-col items-center justify-center text-center h-64 space-y-3">
+          <div className="p-3 bg-emerald-100 dark:bg-emerald-950/60 text-[#1dbf73] rounded-full">
+            <MessageCircle className="w-6 h-6" />
           </div>
-        ))}
-      </div>
+          <div className="space-y-1">
+            <p className="font-bold text-slate-800 dark:text-slate-100 text-sm">
+              Sign in or create a free account to start chatting.
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs">
+              Direct buyer-seller messaging is enabled for all registered members.
+            </p>
+          </div>
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              type="button"
+              onClick={handleOpenSignUp}
+              className="px-4 py-2 bg-[#1dbf73] hover:bg-[#19a463] text-white font-bold text-xs rounded-lg shadow-sm cursor-pointer transition-colors"
+            >
+              Sign Up
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenSignIn}
+              className="px-4 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs rounded-lg shadow-sm hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition-colors"
+            >
+              Log In
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="p-4 bg-white dark:bg-slate-900 space-y-3 h-64 overflow-y-auto text-xs">
+            {chatMessages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-slate-400 text-center space-y-1">
+                <p className="font-semibold text-slate-600 dark:text-slate-300">No previous messages</p>
+                <p className="text-[11px] text-slate-400">Ask a question or propose an offer to start the conversation.</p>
+              </div>
+            ) : (
+              chatMessages.map((msg, index) => (
+                <div
+                  key={index}
+                  className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}
+                >
+                  <div
+                    className={`max-w-[85%] p-3 rounded-xl ${
+                      msg.sender === 'user'
+                        ? 'bg-[#1dbf73] text-white rounded-br-none'
+                        : 'bg-[#f8f9fa] dark:bg-slate-800 text-[#202124] dark:text-slate-100 border border-[#dadce0] dark:border-slate-700 rounded-bl-none'
+                    }`}
+                  >
+                    <p>{msg.text}</p>
+                  </div>
+                  <span className="text-[9px] text-[#5f6368] dark:text-slate-400 mt-0.5 px-1 font-mono tabular-nums">
+                    {msg.time}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
 
-      {/* Chat Input */}
-      <form
-        onSubmit={handleSendMessage}
-        className="p-3 bg-[#f8f9fa] border-t border-[#dadce0] flex gap-2"
-      >
-        <input
-          type="text"
-          value={newChatInput}
-          onChange={(e) => setNewChatInput(e.target.value)}
-          placeholder="Ask a question or propose an offer..."
-          className="flex-1 text-xs bg-white border border-[#dadce0] rounded-md px-3 py-2 focus:border-[#202124] focus:outline-none"
-        />
-        <button
-          type="submit"
-          disabled={!newChatInput.trim()}
-          className="px-3.5 py-2 bg-[#1dbf73] hover:bg-[#19a463] disabled:opacity-50 text-white rounded-md text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
-        >
-          <Send className="w-3.5 h-3.5" />
-        </button>
-      </form>
+          <form
+            onSubmit={handleSendMessage}
+            className="p-3 bg-[#f8f9fa] dark:bg-slate-800/80 border-t border-[#dadce0] dark:border-slate-800 flex gap-2"
+          >
+            <input
+              type="text"
+              value={newChatInput}
+              onChange={(e) => setNewChatInput(e.target.value)}
+              placeholder="Ask a question or propose an offer..."
+              className="flex-1 text-xs bg-white dark:bg-slate-900 border border-[#dadce0] dark:border-slate-700 text-slate-900 dark:text-white rounded-md px-3 py-2 focus:border-[#202124] dark:focus:border-emerald-500 focus:outline-none"
+            />
+            <button
+              type="submit"
+              disabled={!newChatInput.trim() || sending}
+              className="px-3.5 py-2 bg-[#1dbf73] hover:bg-[#19a463] disabled:opacity-50 text-white rounded-md text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+            >
+              {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+            </button>
+          </form>
+        </>
+      )}
     </div>
   );
 };
