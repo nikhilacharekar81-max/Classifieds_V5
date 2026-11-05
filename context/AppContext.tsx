@@ -72,6 +72,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
 
   const latestRequestIdRef = React.useRef(0);
 
+  const updateAuth = (user: UserAccount | null, admin: AdminUser | null, userId: string | null) => {
+    // Invalidate stale pending auth requests
+    latestRequestIdRef.current = Date.now();
+    setAuthUser(user);
+    setCurrentAdmin(admin);
+    setActiveUserId(userId);
+  };
+
   useEffect(() => {
     const requestId = Date.now();
     latestRequestIdRef.current = requestId;
@@ -87,35 +95,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
         if (latestRequestIdRef.current !== requestId) return;
         setIsAuthChecking(false);
         if (data && data.authenticated && data.user) {
-          setAuthUser(data.user);
-          setActiveUserId(data.user.id);
-          if (data.isAdmin || data.isModerator) {
-            setCurrentAdmin({
-              id: data.user.id,
-              name: data.user.name,
-              email: data.user.email,
-              avatar: data.user.avatar || 'https://picsum.photos/seed/admin/100/100',
-              role: data.adminRole || (data.isAdmin ? 'super_admin' : 'moderator'),
-              twoFactorEnabled: false,
-              lastLogin: 'Just now',
-              ipAddress: '127.0.0.1',
-              status: 'active',
-            });
-          } else {
-            setCurrentAdmin(null);
-          }
+          const admin = (data.isAdmin || data.isModerator) ? {
+            id: data.user.id,
+            name: data.user.name,
+            email: data.user.email,
+            avatar: data.user.avatar || 'https://picsum.photos/seed/admin/100/100',
+            role: data.adminRole || (data.isAdmin ? 'super_admin' : 'moderator'),
+            twoFactorEnabled: false,
+            lastLogin: 'Just now',
+            ipAddress: '127.0.0.1',
+            status: 'active',
+          } : null;
+          updateAuth(data.user, admin, data.user.id);
         } else {
-          setAuthUser(null);
-          setCurrentAdmin(null);
-          setActiveUserId(null);
+          updateAuth(null, null, null);
         }
       })
       .catch(() => {
         if (latestRequestIdRef.current !== requestId) return;
         setIsAuthChecking(false);
-        setAuthUser(null);
-        setCurrentAdmin(null);
-        setActiveUserId(null);
+        updateAuth(null, null, null);
       });
   }, []);
 

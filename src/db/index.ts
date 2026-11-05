@@ -253,6 +253,30 @@ export async function ensurePgSchemaApplied(): Promise<void> {
         }
       }
 
+      // Safe migration for existing databases
+      const migrationSql = `
+DO $$ 
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='email_verified') THEN
+    ALTER TABLE "users" ADD COLUMN "email_verified" boolean DEFAULT false NOT NULL;
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='email_verified_at') THEN
+    ALTER TABLE "users" ADD COLUMN "email_verified_at" timestamp with time zone;
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS "email_verification_tokens" (
+    "id" varchar(64) PRIMARY KEY NOT NULL,
+    "user_id" varchar(64) NOT NULL REFERENCES "users"("id") ON DELETE cascade,
+    "token_hash" varchar(128) NOT NULL,
+    "expires_at" timestamp with time zone NOT NULL,
+    "used_at" timestamp with time zone,
+    "created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+`;
+      await adminPool.query(migrationSql);
+
       if (process.env.SQL_USER && process.env.SQL_USER !== adminUser) {
         await adminPool.query(`GRANT USAGE ON SCHEMA public TO "${process.env.SQL_USER}";`);
         await adminPool.query(`GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "${process.env.SQL_USER}";`);
