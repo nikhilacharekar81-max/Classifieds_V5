@@ -615,7 +615,7 @@ export function useListingActions({
 
   const addListing = async (
     newListingData: Omit<Listing, 'id' | 'createdAt' | 'views' | 'likes' | 'chatsCount'>
-  ): Promise<Listing | null> => {
+  ): Promise<{ listing: Listing | null; error?: string; code?: string }> => {
     const duplicateCheck = checkDuplicateAdTitle({
       title: newListingData.title,
       sellerId: newListingData.sellerId,
@@ -628,7 +628,7 @@ export function useListingActions({
         title: 'Duplicate Ad Title Detected',
         message: DUPLICATE_TITLE_ERROR_MESSAGE,
       });
-      return null;
+      return { listing: null, error: DUPLICATE_TITLE_ERROR_MESSAGE, code: 'DUPLICATE_TITLE' };
     }
 
     try {
@@ -645,15 +645,16 @@ export function useListingActions({
           message: 'Your session has expired. Please log in again to post your ad.',
         });
         window.dispatchEvent(new CustomEvent('open_auth_modal', { detail: { mode: 'signin' } }));
-        return null;
+        return { listing: null, error: 'Unauthorized', code: 'UNAUTHORIZED' };
       }
+
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to create listing');
+        throw { message: data.error || 'Failed to create listing', code: data.code || 'VALIDATION_ERROR' };
       }
 
-      const createdListing: Listing = await res.json();
+      const createdListing: Listing = data;
 
       setListings((prev) => [createdListing, ...prev]);
       recordAuditLog(
@@ -672,7 +673,7 @@ export function useListingActions({
             : 'Ad submitted for verification in the moderation queue.',
       });
 
-      return createdListing;
+      return { listing: createdListing };
     } catch (err: any) {
       console.error('Failed to create listing:', err);
       addToast({
@@ -680,7 +681,7 @@ export function useListingActions({
         title: 'Posting Failed',
         message: err.message || 'There was an error saving your ad.',
       });
-      return null;
+      return { listing: null, error: err.message, code: err.code };
     }
   };
 

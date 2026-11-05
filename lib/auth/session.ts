@@ -80,7 +80,7 @@ export async function getAuthenticatedUser(req: NextRequest): Promise<Authentica
       userId: dbSession.user.id,
       sessionId: token,
       adminRole: role || null,
-      isAdmin: role === 'admin' || role === 'super_admin',
+      isAdmin: role === 'admin' || role === 'super_admin' || role === 'support_agent' || role === 'content_manager',
       isSuperAdmin: role === 'super_admin',
       isModerator: role === 'moderator' || role === 'super_admin',
       isFinance: role === 'finance_user' || role === 'super_admin',

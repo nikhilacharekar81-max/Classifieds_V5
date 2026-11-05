@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { getAuthenticatedUser } from '@/lib/auth/session';
+import { uploadImage } from '@/lib/storage';
 
 export async function POST(req: NextRequest) {
   try {
@@ -8,8 +9,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // In a real application, you would save the file to a storage service (S3, GCS, etc.)
-    // and return the URL. For this fix, we will simulate the upload.
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
     
@@ -17,11 +16,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
     }
 
-    // Return a mock URL
-    const mockUrl = `/uploads/${Date.now()}_${file.name}`;
+    if (!file.type.startsWith('image/')) {
+        return NextResponse.json({ error: 'Only image files allowed' }, { status: 400 });
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+        return NextResponse.json({ error: 'File too large' }, { status: 400 });
+    }
+
+    const url = await uploadImage(file);
     
-    return NextResponse.json({ url: mockUrl }, { status: 200 });
+    return NextResponse.json({ url }, { status: 200 });
   } catch (err: any) {
-    return NextResponse.json({ error: 'Upload failed' }, { status: 500 });
+    console.error('Upload failed:', err);
+    return NextResponse.json({ error: err.message || 'Upload failed' }, { status: 500 });
   }
 }
+

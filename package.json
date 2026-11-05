@@ -15,6 +15,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1162.0",
     "@electric-sql/pglite": "^0.5.15",
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",

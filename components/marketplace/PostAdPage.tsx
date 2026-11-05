@@ -283,7 +283,7 @@ export const PostAdPage: React.FC = () => {
       }
     }
 
-    const newAd = await addListing({
+    const { listing: newAd, error, code } = await addListing({
       title: postForm.title,
       categoryId: postForm.categoryId,
       subcategoryId: postForm.subcategoryId || undefined,
@@ -295,7 +295,7 @@ export const PostAdPage: React.FC = () => {
       price: parsedPrice as any,
       description: postForm.description,
       images: finalImages,
-      status: requiresPayment ? 'approved' : 'pending',
+      status: 'pending',
       isFeatured: wantFeatured,
       featuredUntil: wantFeatured ? new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0] : undefined,
       isBoosted: wantFeatured,
@@ -309,24 +309,24 @@ export const PostAdPage: React.FC = () => {
     });
 
     if (!newAd) {
-      setTitleError(DUPLICATE_TITLE_ERROR_MESSAGE);
-      titleInputRef.current?.focus();
+      if (code === 'DUPLICATE_TITLE') {
+        setTitleError(error || DUPLICATE_TITLE_ERROR_MESSAGE);
+        titleInputRef.current?.focus();
+        titleInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
       return;
     }
 
     if (requiresPayment) {
-      const quotaDetails = isVolumeQuotaExceeded
-        ? ` (includes ₹${volumeQuotaFee} Volume Quota Fee for ad #${userActiveListingsCount + 1})`
-        : '';
       addToast({
-        title: `Payment Processed: ₹${totalFee}`,
-        message: `Payment of ₹${totalFee}${quotaDetails} received via ${paymentMethod.toUpperCase()}. Your ad #${newAd.id} is now live!`,
-        type: 'success',
+        title: 'Ad Submitted',
+        message: `Your ad #${newAd.id} has been submitted. Payment of ₹${totalFee} is required to activate paid features. Please complete the payment to proceed.`,
+        type: 'info',
       });
     } else {
       addToast({
         title: 'Free Classified Ad Submitted!',
-        message: `Your ad #${newAd.id} was posted using your free quota (${userActiveListingsCount + 1}/${freeQuotaLimit} active ads used).`,
+        message: `Your ad #${newAd.id} was posted using your free quota (${userActiveListingsCount + 1}/${freeQuotaLimit} active ads used). It is now awaiting moderation.`,
         type: 'success',
       });
     }
