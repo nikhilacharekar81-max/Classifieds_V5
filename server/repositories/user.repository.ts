@@ -46,8 +46,8 @@ export class UserRepository {
       let lastIp = sessionIp && sessionIp !== 'unknown' ? sessionIp : 'Not recorded';
 
       try {
-        const statsRows = (await withDbRetry(() =>
-          db
+        const statsRows = (await withDbRetry(async () =>
+          await db
             .select({
               total: sql<number>`count(*)::int`,
               active: sql<number>`sum(case when ${schema.listings.status} = 'approved' and ${schema.listings.expiresAt} >= now() then 1 else 0 end)::int`,
@@ -66,14 +66,14 @@ export class UserRepository {
 
       if (lastIp === 'Not recorded') {
         try {
-          const sessionRows = (await withDbRetry(() =>
-            db
+          const sessionRows = (await withDbRetry(async () =>
+            await db
               .select({
                 ipAddress: schema.userSessions.ipAddress,
               })
               .from(schema.userSessions)
               .where(eq(schema.userSessions.userId, user.id))
-              .orderBy(desc(schema.userSessions.lastSeenAt))
+              .orderBy(desc(schema.userSessions.createdAt))
               .limit(1)
           )) as any[];
 
@@ -203,7 +203,7 @@ export class UserRepository {
             ipAddress: schema.userSessions.ipAddress,
           })
           .from(schema.userSessions)
-          .orderBy(desc(schema.userSessions.lastSeenAt))
+          .orderBy(desc(schema.userSessions.createdAt))
       )) as any[];
 
       const ipByUserId = new Map<string, string>();
