@@ -18,6 +18,8 @@ import { AccountSettingsTab } from './AccountSettingsTab';
 import { KycDocumentModal, EditListingModal } from './UserPanelModals';
 import { BoostAdModal } from '@/components/marketplace/BoostAdModal';
 import { FeatureAdModal } from '@/components/marketplace/FeatureAdModal';
+import { SellerLiveChatBox } from '@/components/marketplace/detail/SellerLiveChatBox';
+import { X } from 'lucide-react';
 
 export const UserPanelPage: React.FC = () => {
   const {
@@ -52,6 +54,7 @@ export const UserPanelPage: React.FC = () => {
   const [editTitleError, setEditTitleError] = useState<string | null>(null);
   const [boostTargetListing, setBoostTargetListing] = useState<Listing | null>(null);
   const [featureModalListing, setFeatureModalListing] = useState<Listing | null>(null);
+  const [sellerChatListing, setSellerChatListing] = useState<Listing | null>(null);
 
   const [kycModalOpen, setKycModalOpen] = useState(false);
   const [kycDocType, setKycDocType] = useState<'Aadhaar' | 'PAN' | 'GSTIN' | 'Passport'>('Aadhaar');
@@ -521,12 +524,8 @@ export const UserPanelPage: React.FC = () => {
         {activeTab === 'messages' && (
           <MessagesEnquiriesTab
             userListings={userListings}
-            onReplyToBuyers={(title) => {
-              addToast({
-                type: 'info',
-                title: 'Chat Messenger Opened',
-                message: `Connecting to buyer inbox thread for "${title.substring(0, 30)}..."`,
-              });
+            onReplyToBuyers={(listing) => {
+              setSellerChatListing(listing);
             }}
           />
         )}
@@ -579,6 +578,32 @@ export const UserPanelPage: React.FC = () => {
           onClose={() => setFeatureModalListing(null)}
           onSuccess={() => setFeatureModalListing(null)}
         />
+      )}
+
+      {sellerChatListing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4 overflow-y-auto font-sans">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-xl w-full shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-auto">
+            <div className="p-4 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+              <div>
+                <h3 className="font-extrabold text-sm text-slate-900 dark:text-white">
+                  Seller Inbox: {sellerChatListing.title}
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  Buyer enquiry threads for Ad #{sellerChatListing.id}
+                </p>
+              </div>
+              <button
+                onClick={() => setSellerChatListing(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4">
+              <SellerLiveChatBox listing={sellerChatListing} />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

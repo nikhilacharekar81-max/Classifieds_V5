@@ -35,10 +35,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Inactive/suspended accounts cannot authenticate
+    // Banned / suspended accounts
+    if (userRow.status === 'banned' || userRow.status === 'suspended') {
+      return addSecurityHeaders(
+        NextResponse.json(
+          {
+            error: 'Your account has been suspended.',
+            isBanned: true,
+            banReason: (userRow as any).banReason || 'Violated terms of service',
+            userId: userRow.id,
+            email: userRow.email,
+          },
+          { status: 403 }
+        )
+      );
+    }
+
     if (userRow.status !== 'active') {
       return addSecurityHeaders(
-        NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
+        NextResponse.json({ error: 'Account is not active' }, { status: 401 })
       );
     }
 

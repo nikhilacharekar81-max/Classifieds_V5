@@ -166,11 +166,45 @@ export class BoostRepository {
             eq(schema.boostOrders.status, 'pending')
           )
         )
+        .orderBy(desc(schema.boostOrders.createdAt))
         .limit(1);
-      return rows[0] || null;
+
+      if (!rows.length) return null;
+
+      const order = rows[0];
+      const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000);
+      if (order.createdAt < thirtyMinsAgo) {
+        await db
+          .update(schema.boostOrders)
+          .set({ status: 'expired' })
+          .where(eq(schema.boostOrders.orderId, order.orderId));
+        return null;
+      }
+
+      return order;
     } catch (error) {
       console.error(`BoostRepository.findPendingOrderByListingId error:`, error);
       return null;
+    }
+  }
+
+  public async cancelOrder(orderId: string, userId: string): Promise<boolean> {
+    try {
+      const res = await db
+        .update(schema.boostOrders)
+        .set({ status: 'cancelled' })
+        .where(
+          and(
+            eq(schema.boostOrders.orderId, orderId),
+            eq(schema.boostOrders.userId, userId),
+            eq(schema.boostOrders.status, 'pending')
+          )
+        )
+        .returning({ id: schema.boostOrders.id });
+      return res.length > 0;
+    } catch (error) {
+      console.error(`BoostRepository.cancelOrder error for ${orderId}:`, error);
+      return false;
     }
   }
 

@@ -25,6 +25,7 @@ export const users = pgTable('users', {
   avatarUrl: text('avatar_url'),
   type: varchar('type', { length: 32 }).notNull().default('user'),
   status: varchar('status', { length: 32 }).notNull().default('active'),
+  banReason: text('ban_reason'),
   kycStatus: varchar('kyc_status', { length: 32 }).notNull().default('unsubmitted'),
   emailSubscribed: boolean('email_subscribed').notNull().default(true),
   emailUnsubscribedAt: timestamp('email_unsubscribed_at', { withTimezone: true }),

@@ -636,6 +636,10 @@ export class ListingService {
     if (!isPrivileged) {
       if (updatedData.status === 'sold') {
         safeFields.status = 'sold';
+      } else if (existing.status === 'rejected') {
+        // Corrected rejected listing resubmitted by seller for moderation
+        safeFields.status = 'pending';
+        safeFields.rejectionReason = null;
       } else if (existing.status === 'approved') {
         // Detect meaningful changes to content, price (supporting 0), attributes, and location
         const isTitleChanged = updatedData.title !== undefined && normalizeAdTitle(updatedData.title) !== normalizeAdTitle(existing.title);

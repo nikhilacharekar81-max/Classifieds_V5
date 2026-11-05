@@ -135,7 +135,9 @@ export class ListingRepository {
       },
       images: (row.images as string[]) || [],
       customAttributes: (row.customAttributes as Record<string, any>) || {},
-      status: row.status as any,
+      status: (row.status === 'approved' || row.status === 'pending') && row.expiresAt && row.expiresAt <= new Date()
+        ? ('expired' as const)
+        : (row.status as any),
       rejectionReason: row.rejectionReason || undefined,
       isFeatured: Boolean(row.isFeatured && (!row.featuredUntil || row.featuredUntil > new Date())),
       featuredUntil: row.featuredUntil ? row.featuredUntil.toISOString() : undefined,
@@ -212,7 +214,8 @@ export class ListingRepository {
       const conditions = [
         eq(schema.listings.sellerId, sellerId),
         sql`LOWER(REGEXP_REPLACE(TRIM(${schema.listings.title}), '\\s+', ' ', 'g')) = ${normalized}`,
-        notInArray(schema.listings.status, ['sold', 'expired']),
+        inArray(schema.listings.status, ['approved', 'pending']),
+        gte(schema.listings.expiresAt, new Date()),
       ];
 
       if (excludeListingId) {

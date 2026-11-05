@@ -18,55 +18,73 @@ export const ReportModal: React.FC<ReportModalProps> = ({ reportConfig, onClose 
   const initialType: 'listing' | 'user' = activeConfig?.type === 'user' ? 'user' : 'listing';
   const [targetType, setTargetType] = useState<'listing' | 'user'>(initialType);
   const [targetId, setTargetId] = useState<string>(activeConfig?.targetId || '');
-  const [reason, setReason] = useState<string>('Fraud / Advance Payment Scam');
-  const [comments, setComments] = useState<string>('');
-
-  if (!activeConfig || !activeConfig.open) return null;
-
   const adReasons = [
-    'Fraud / Advance Payment Scam',
-    'Fake / Counterfeit Product',
-    'Prohibited / Illegal Goods',
-    'Misleading Price / Clickbait Title',
-    'Duplicate Listing',
-    'Offensive Photos / Inappropriate Content',
-    'Expired / Sold Item Still Active',
-    'Other Safety Concern',
+    { label: 'Fraud / Advance Payment Scam', key: 'fraud_scam' },
+    { label: 'Prohibited / Illegal Goods or Counterfeit', key: 'prohibited_item' },
+    { label: 'Misleading Price / Category Clickbait', key: 'wrong_category' },
+    { label: 'Duplicate Listing', key: 'duplicate' },
+    { label: 'Offensive Content / Harassment', key: 'offensive' },
+    { label: 'Other Safety Concern', key: 'spam' },
   ];
 
   const userReasons = [
-    'User Asking for Advance Token via UPI',
-    'Sending Phishing / Fake Courier Links in Chat',
-    'Abusive Language / Threats / Harassment',
-    'Impersonating Army / Defense Personnel',
-    'Repeated Spam Messaging',
-    'Other Fraudulent Activity',
+    { label: 'User Asking for Advance Token via UPI', key: 'fraud_scam' },
+    { label: 'Sending Phishing / Fake Links in Chat', key: 'fraud_scam' },
+    { label: 'Abusive Language / Threats / Harassment', key: 'offensive' },
+    { label: 'Impersonating Army / Defense Personnel', key: 'fraud_scam' },
+    { label: 'Repeated Spam Messaging', key: 'spam' },
   ];
 
   const activeReasons = targetType === 'listing' ? adReasons : userReasons;
+  const [reason, setReason] = useState<string>(adReasons[0].key);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const cleanId =
       targetId.trim() || (targetType === 'listing' ? 'ad_unspecified' : 'usr_unspecified');
     const displayTitle = targetType === 'listing' ? `Ad ID: ${cleanId}` : `User ID: ${cleanId}`;
 
-    if (app?.submitReport) {
-      app.submitReport({
-        targetType,
-        targetId: cleanId,
-        targetTitle: displayTitle,
-        reason,
-        comments,
-      });
-    } else {
+    try {
+      if (app?.submitReport) {
+        await app.submitReport({
+          targetType,
+          targetId: cleanId,
+          targetTitle: displayTitle,
+          reason,
+          comments,
+        });
+      } else {
+        const res = await fetch('/api/reports', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            targetType,
+            targetId: cleanId,
+            targetTitle: displayTitle,
+            reason,
+            notes: comments || 'User submitted report',
+          }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `Failed to submit report (HTTP ${res.status})`);
+        }
+
+        dispatchPublicToast({
+          type: 'success',
+          title: 'Safety Report Submitted',
+          message: `Thank you. Our Trust & Safety team has received your report for ${displayTitle}.`,
+        });
+        closeReportModal();
+      }
+    } catch (err: any) {
       dispatchPublicToast({
-        type: 'success',
-        title: 'Safety Report Submitted',
-        message: `Thank you. Our 24/7 Trust & Safety team has received your report for ${displayTitle}.`,
+        type: 'error',
+        title: 'Report Submission Failed',
+        message: err.message || 'Unable to submit report. Please try again.',
       });
-      closeReportModal();
     }
   };
 
@@ -106,7 +124,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({ reportConfig, onClose 
               onClick={() => {
                 setTargetType('listing');
                 setTargetId('');
-                setReason(adReasons[0]);
+                setReason(adReasons[0].key);
               }}
               className={`flex-1 py-2 rounded-lg font-bold transition text-center min-h-[44px] ${
                 targetType === 'listing'
@@ -121,7 +139,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({ reportConfig, onClose 
               onClick={() => {
                 setTargetType('user');
                 setTargetId('');
-                setReason(userReasons[0]);
+                setReason(userReasons[0].key);
               }}
               className={`flex-1 py-2 rounded-lg font-bold transition text-center min-h-[44px] ${
                 targetType === 'user'
@@ -175,8 +193,8 @@ export const ReportModal: React.FC<ReportModalProps> = ({ reportConfig, onClose 
               className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-xs text-slate-800 dark:text-slate-200 font-semibold min-h-[44px]"
             >
               {activeReasons.map((r, i) => (
-                <option key={i} value={r}>
-                  {r}
+                <option key={i} value={r.key}>
+                  {r.label}
                 </option>
               ))}
             </select>

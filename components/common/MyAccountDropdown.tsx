@@ -35,6 +35,7 @@ export const MyAccountDropdown: React.FC = () => {
   const [showResendButton, setShowResendButton] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [bannedInfo, setBannedInfo] = useState<{ userId: string; reason: string } | null>(null);
 
   // Sign In form state
   const [signInEmail, setSignInEmail] = useState('');
@@ -216,12 +217,18 @@ export const MyAccountDropdown: React.FC = () => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        if (res.status === 401 && data.error?.includes('verification')) {
+        if (data.isBanned) {
+          setErrorMsg(`Account Suspended: ${data.banReason || 'Violated terms of service'}`);
+          setBannedInfo({ userId: data.userId, reason: data.banReason || 'Violated terms of service' });
+          setShowResendButton(false);
+        } else if (res.status === 401 && data.error?.includes('verification')) {
           setErrorMsg('Email verification is required. Please check your email.');
           setShowResendButton(true);
+          setBannedInfo(null);
         } else {
           setErrorMsg(data.error || 'Invalid email or password.');
           setShowResendButton(false);
+          setBannedInfo(null);
         }
         setIsSubmitting(false);
         return;
@@ -586,6 +593,26 @@ export const MyAccountDropdown: React.FC = () => {
                         className="text-xs font-bold text-rose-800 hover:underline cursor-pointer block"
                       >
                         {isResending ? 'Sending...' : 'Resend Verification Email'}
+                      </button>
+                    )}
+                    {bannedInfo && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuthModalMode(null);
+                          if (app?.openReportModal) {
+                            app.openReportModal('user', bannedInfo.userId, `Appeal Ban for User ${bannedInfo.userId}`);
+                          } else {
+                            window.dispatchEvent(
+                              new CustomEvent('open_report_modal', {
+                                detail: { reportType: 'user', targetId: bannedInfo.userId },
+                              })
+                            );
+                          }
+                        }}
+                        className="mt-2 px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white font-bold rounded-lg text-xs cursor-pointer block"
+                      >
+                        Submit Appeal to Moderation Team
                       </button>
                     )}
                   </div>

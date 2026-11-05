@@ -71,9 +71,17 @@ export function checkDuplicateAdTitle({
       return false;
     }
 
-    // Ignore sold or deleted ads
-    if (listing.status === 'sold') {
+    // Ignore sold, rejected, or expired ads
+    if (listing.status === 'sold' || listing.status === 'rejected' || listing.status === 'expired') {
       return false;
+    }
+
+    // Ignore ads whose expiration date has passed
+    if ((listing as any).expiresAt) {
+      const expTime = new Date((listing as any).expiresAt).getTime();
+      if (!isNaN(expTime) && expTime <= Date.now()) {
+        return false;
+      }
     }
 
     // Compare normalized titles

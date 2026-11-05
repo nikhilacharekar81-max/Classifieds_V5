@@ -84,7 +84,7 @@ export const OrdersReceiptsTab: React.FC<OrdersReceiptsTabProps> = ({
 
 interface MessagesEnquiriesTabProps {
   userListings: Listing[];
-  onReplyToBuyers: (listingTitle: string) => void;
+  onReplyToBuyers: (listing: Listing) => void;
 }
 
 export const MessagesEnquiriesTab: React.FC<MessagesEnquiriesTabProps> = ({
@@ -114,7 +114,7 @@ export const MessagesEnquiriesTab: React.FC<MessagesEnquiriesTabProps> = ({
             </div>
 
             <button
-              onClick={() => onReplyToBuyers(l.title)}
+              onClick={() => onReplyToBuyers(l)}
               className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer"
             >
               <MessageSquare className="w-3.5 h-3.5" /> Reply to Buyers

@@ -55,7 +55,7 @@ export class UserService {
     const user = await userRepository.findById(userId);
     if (!user) return false;
 
-    await userRepository.update(userId, { status: 'banned' });
+    await userRepository.update(userId, { status: 'banned', banReason: reason });
 
     await adminRepository.createAuditLog({
       adminId: actor?.id || 'system',

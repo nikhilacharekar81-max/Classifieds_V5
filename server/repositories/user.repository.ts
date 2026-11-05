@@ -472,6 +472,35 @@ export class UserRepository {
     }
   }
 
+  public async anonymizeAndDeleteUser(userId: string): Promise<boolean> {
+    try {
+      await db
+        .update(schema.listings)
+        .set({ status: 'expired', updatedAt: new Date() })
+        .where(eq(schema.listings.sellerId, userId));
+
+      await db
+        .update(schema.users)
+        .set({
+          name: 'Deleted User',
+          email: `deleted_${userId.slice(0, 12)}@deleted.invalid`,
+          phone: '0000000000',
+          passwordHash: null,
+          avatarUrl: null,
+          status: 'deleted',
+          emailVerified: false,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.users.id, userId));
+
+      await this.deleteUserSessions(userId);
+      return true;
+    } catch (error) {
+      console.error(`UserRepository.anonymizeAndDeleteUser error for ${userId}:`, error);
+      return false;
+    }
+  }
+
   public async deleteOtherUserSessions(userId: string, keepSessionId: string): Promise<boolean> {
     try {
       await db

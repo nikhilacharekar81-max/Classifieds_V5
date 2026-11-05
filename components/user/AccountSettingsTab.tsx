@@ -524,6 +524,55 @@ export const AccountSettingsTab: React.FC<AccountSettingsTabProps> = ({
             <span>Log Out All Sessions</span>
           </button>
         </div>
+
+        {/* Delete Account Card */}
+        <div className="bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-950 rounded-2xl p-6 shadow-sm space-y-3 text-xs">
+          <div className="flex items-center gap-2 text-rose-700 dark:text-rose-400 font-extrabold text-sm">
+            <AlertCircle className="w-5 h-5 text-rose-600" />
+            <span>Delete Account</span>
+          </div>
+          <p className="text-slate-500 dark:text-slate-400 text-[11px]">
+            Permanently close your account, invalidate all active listings, and revoke access. Financial records are retained safely.
+          </p>
+
+          <button
+            type="button"
+            onClick={async () => {
+              if (
+                window.confirm(
+                  'Are you sure you want to delete your account? All active listings will be closed and you will be logged out immediately.'
+                )
+              ) {
+                try {
+                  const res = await fetch('/api/user/account', { method: 'DELETE' });
+                  if (res.ok) {
+                    notify({
+                      type: 'info',
+                      title: 'Account Deleted',
+                      message: 'Your account has been deleted successfully.',
+                    });
+                    window.location.href = '/';
+                  } else {
+                    notify({
+                      type: 'error',
+                      title: 'Error',
+                      message: 'Failed to delete account. Please try again.',
+                    });
+                  }
+                } catch {
+                  notify({
+                    type: 'error',
+                    title: 'Error',
+                    message: 'Network error while attempting account deletion.',
+                  });
+                }
+              }
+            }}
+            className="w-full py-2.5 bg-slate-100 hover:bg-rose-50 text-rose-700 dark:bg-slate-800 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-900 font-bold rounded-xl text-xs transition-colors cursor-pointer flex items-center justify-center gap-2"
+          >
+            <span>Delete My Account</span>
+          </button>
+        </div>
       </div>
     </div>
   );

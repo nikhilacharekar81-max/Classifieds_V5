@@ -36,6 +36,11 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
     [app]
   );
 
+  const [rawMessages, setRawMessages] = useState<any[]>([]);
+  const [selectedBuyerId, setSelectedBuyerId] = useState<string | null>(null);
+
+  const isSellerUser = Boolean(currentUser?.id && currentUser.id === listing.sellerId);
+
   const loadChatMessages = useCallback(async () => {
     setLoading(true);
     setChatError(null);
@@ -64,12 +69,36 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
       const data = await res.json().catch(() => null);
       if (data && Array.isArray(data.messages)) {
         setAuthState('authenticated');
+        setRawMessages(data.messages);
+
+        const msgs = data.messages;
+        let buyerId = selectedBuyerId;
+
+        if (isSellerUser) {
+          const buyers = Array.from(
+            new Set(
+              msgs.map((m: any) => (m.senderId === listing.sellerId ? m.receiverId : m.senderId))
+            )
+          ).filter((id): id is string => Boolean(id && id !== listing.sellerId));
+
+          if (!buyerId && buyers.length > 0) {
+            buyerId = buyers[0];
+            setSelectedBuyerId(buyerId);
+          }
+        }
+
+        const filtered = isSellerUser && buyerId
+          ? msgs.filter((m: any) => m.senderId === buyerId || m.receiverId === buyerId)
+          : msgs;
+
         setChatMessages(
-          data.messages.map((m: any) => ({
+          filtered.map((m: any) => ({
             id: m.id,
             sender: m.senderId === listing.sellerId ? 'seller' : 'user',
             text: m.messageText,
             time: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            senderId: m.senderId,
+            receiverId: m.receiverId,
           }))
         );
       } else {
@@ -85,7 +114,7 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
     } finally {
       setLoading(false);
     }
-  }, [listing.id, listing.sellerId, currentUser]);
+  }, [listing.id, listing.sellerId, currentUser, isSellerUser, selectedBuyerId]);
 
   useEffect(() => {
     loadChatMessages();
@@ -118,13 +147,19 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
     setSending(true);
 
     try {
+      const payload: any = {
+        listingId: listing.id,
+        messageText: userMsg,
+      };
+
+      if (isSellerUser && selectedBuyerId) {
+        payload.receiverId = selectedBuyerId;
+      }
+
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          listingId: listing.id,
-          messageText: userMsg,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json().catch(() => null);
@@ -153,6 +188,8 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
             sender: createdMsg.senderId === listing.sellerId ? 'seller' : 'user',
             text: createdMsg.messageText,
             time: new Date(createdMsg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            senderId: createdMsg.senderId,
+            receiverId: createdMsg.receiverId,
           },
         ]);
         setNewChatInput('');
