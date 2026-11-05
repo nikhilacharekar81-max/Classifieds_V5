@@ -70,14 +70,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
   const [activeUserId, setActiveUserId] = useState<string | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
 
+  const latestRequestIdRef = React.useRef(0);
+
   useEffect(() => {
-    let active = true;
     const requestId = Date.now();
-    
-    // We could store the latest request ID in a ref, but `active` is scoped 
-    // to the effect run. Let's use a local variable to capture the ID.
-    // If we have multiple effects, the latest one will set `active = false` 
-    // for all previous ones, which is what we want.
+    latestRequestIdRef.current = requestId;
     
     fetch('/api/auth/me')
       .then((res) => {
@@ -87,7 +84,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
         return res.json().catch(() => null);
       })
       .then((data) => {
-        if (!active) return;
+        if (latestRequestIdRef.current !== requestId) return;
         setIsAuthChecking(false);
         if (data && data.authenticated && data.user) {
           setAuthUser(data.user);
@@ -114,13 +111,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
         }
       })
       .catch(() => {
-        if (!active) return;
+        if (latestRequestIdRef.current !== requestId) return;
         setIsAuthChecking(false);
         setAuthUser(null);
         setCurrentAdmin(null);
         setActiveUserId(null);
       });
-    return () => { active = false; };
   }, []);
 
   // Collections (initialized from server-fetched PostgreSQL data during SSR when provided)

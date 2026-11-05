@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
 
       await userRepository.createEmailVerificationToken(tokenId, userRow.id, tokenHash, expiresAt);
 
+      const verifyUrl = `${req.nextUrl.origin}/verify-email?token=${rawToken}`;
       const emailResult = await emailService.sendCustomEmail({
         toEmail: cleanEmail,
         toName: userRow.name || 'User',
