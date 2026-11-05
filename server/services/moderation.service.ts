@@ -5,7 +5,7 @@ import { invalidateLiveListingCountsCache } from '@/server/cache/reference-data.
 import { ReportItem, ModerationRule } from '@/lib/types';
 import { db } from '@/src/db/index';
 import * as schema from '@/src/db/schema';
-import { eq, desc } from '@/src/db/pg-orm';
+import { eq, desc, and } from '@/src/db/pg-orm';
 
 export class ModerationService {
   public async getReports(statusFilter?: string): Promise<ReportItem[]> {
@@ -172,7 +172,7 @@ export class ModerationService {
           targetSummary: `Appeal for ${appeal.userEmail}`,
           details: `Decision: ${decision}. Notes: ${reviewNotes}. Unbanned: ${Boolean(unbanUser)}`,
           ipAddress: actor?.ipAddress || 'unknown',
-        });
+        }, tx);
 
         return true;
       });

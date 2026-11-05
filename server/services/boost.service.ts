@@ -5,6 +5,9 @@ import { adminRepository } from '@/server/repositories/admin.repository';
 import { invalidateLiveListingCountsCache } from '@/server/cache/reference-data.cache';
 import { PromotionalPackage, OrderTransaction, BoostAnalyticsSummary, Listing } from '@/lib/types';
 import crypto from 'node:crypto';
+import { db } from '@/src/db/index';
+import { sql } from '@/src/db/pg-orm';
+
 
 export class BoostService {
   public async getPackages(): Promise<PromotionalPackage[]> {
@@ -105,6 +108,8 @@ export class BoostService {
     }
 
     // 5. Check for existing pending order on this listing to prevent concurrent pending orders
+    // Use FOR UPDATE to lock the listing row and prevent concurrent checkouts
+    await db.execute(sql`SELECT id FROM listings WHERE id = ${listingId} FOR UPDATE`);
     const existingPending = await boostRepository.findPendingOrderByListingId(listingId);
     if (existingPending) {
       return {

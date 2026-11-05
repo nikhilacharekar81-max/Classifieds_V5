@@ -30,10 +30,11 @@ export class AdminRepository {
     targetSummary: string;
     details: string;
     ipAddress?: string;
-  }): Promise<AuditLog> {
+  }, executor?: any): Promise<AuditLog> {
     try {
       const id = `aud_${crypto.randomUUID()}`;
-      const inserted = await db
+      const dbExecutor = executor || db;
+      const inserted = await dbExecutor
         .insert(schema.auditLogs)
         .values({
           id,
