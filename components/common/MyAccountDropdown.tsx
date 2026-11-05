@@ -31,6 +31,8 @@ export const MyAccountDropdown: React.FC = () => {
   const [hasCheckedSession, setHasCheckedSession] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup' | 'forgot' | 'reset' | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [showResendButton, setShowResendButton] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
@@ -216,12 +218,15 @@ export const MyAccountDropdown: React.FC = () => {
       if (!res.ok) {
         if (res.status === 401 && data.error?.includes('verification')) {
           setErrorMsg('Email verification is required. Please check your email.');
+          setShowResendButton(true);
         } else {
           setErrorMsg(data.error || 'Invalid email or password.');
+          setShowResendButton(false);
         }
         setIsSubmitting(false);
         return;
       }
+      setShowResendButton(false);
 
       if (data.user) {
         setLocalAuthUser(data.user);
@@ -541,8 +546,37 @@ export const MyAccountDropdown: React.FC = () => {
                 </div>
 
                 {errorMsg && (
-                  <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs font-medium text-rose-700">
-                    {errorMsg}
+                  <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs font-medium text-rose-700 space-y-2">
+                    <p>{errorMsg}</p>
+                    {showResendButton && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setIsResending(true);
+                          try {
+                            const res = await fetch('/api/auth/verify-email/request', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ email: signInEmail.trim() }),
+                            });
+                            if (res.ok) {
+                              notify({ type: 'success', title: 'Email Sent', message: 'Verification email resent.' });
+                              setShowResendButton(false);
+                            } else {
+                              notify({ type: 'error', title: 'Error', message: 'Failed to resend.' });
+                            }
+                          } catch {
+                            notify({ type: 'error', title: 'Error', message: 'Failed to resend.' });
+                          } finally {
+                            setIsResending(false);
+                          }
+                        }}
+                        disabled={isResending}
+                        className="text-xs font-bold text-rose-800 hover:underline cursor-pointer block"
+                      >
+                        {isResending ? 'Sending...' : 'Resend Verification Email'}
+                      </button>
+                    )}
                   </div>
                 )}
 

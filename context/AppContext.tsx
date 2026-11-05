@@ -75,6 +75,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
   const updateAuth = (user: UserAccount | null, admin: AdminUser | null, userId: string | null) => {
     // Invalidate stale pending auth requests
     requestCounter.current++;
+    setIsAuthChecking(false);
     setAuthUser(user);
     setCurrentAdmin(admin);
     setActiveUserId(userId);
