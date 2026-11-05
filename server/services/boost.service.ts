@@ -104,9 +104,7 @@ export class BoostService {
       };
     }
 
-    // 5. Expire any stale uncompleted pending orders for this listing before checking
-    await boostRepository.expireStalePendingOrdersForListing(listingId);
-
+    // 5. Check for existing pending order on this listing to prevent concurrent pending orders
     const existingPending = await boostRepository.findPendingOrderByListingId(listingId);
     if (existingPending) {
       return {

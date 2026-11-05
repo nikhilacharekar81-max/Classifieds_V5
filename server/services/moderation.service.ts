@@ -3,6 +3,9 @@ import { listingRepository } from '@/server/repositories/listing.repository';
 import { adminRepository } from '@/server/repositories/admin.repository';
 import { invalidateLiveListingCountsCache } from '@/server/cache/reference-data.cache';
 import { ReportItem, ModerationRule } from '@/lib/types';
+import { db } from '@/src/db/index';
+import * as schema from '@/src/db/schema';
+import { eq, desc } from '@/src/db/pg-orm';
 
 export class ModerationService {
   public async getReports(statusFilter?: string): Promise<ReportItem[]> {
@@ -131,44 +134,48 @@ export class ModerationService {
   }): Promise<boolean> {
     const { appealId, decision, reviewNotes, unbanUser, actor } = params;
     try {
-      const appealRows = await db
-        .select()
-        .from(schema.banAppeals)
-        .where(eq(schema.banAppeals.id, appealId))
-        .limit(1);
+      return await db.transaction(async (tx) => {
+        const appealRows = await tx
+          .select()
+          .from(schema.banAppeals)
+          .where(and(eq(schema.banAppeals.id, appealId), eq(schema.banAppeals.status, 'pending')))
+          .limit(1);
 
-      if (!appealRows.length) return false;
-      const appeal = appealRows[0];
+        if (!appealRows.length) return false;
+        const appeal = appealRows[0];
 
-      await db
-        .update(schema.banAppeals)
-        .set({
-          status: decision,
-          reviewedBy: actor?.id || 'staff',
-          reviewNotes: reviewNotes || `Decision: ${decision}`,
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.banAppeals.id, appealId));
+        const updated = await tx
+          .update(schema.banAppeals)
+          .set({
+            status: decision,
+            reviewedBy: actor?.id || 'staff',
+            reviewNotes: reviewNotes || `Decision: ${decision}`,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(schema.banAppeals.id, appealId), eq(schema.banAppeals.status, 'pending')));
 
-      if (decision === 'accepted' && unbanUser) {
-        await db
-          .update(schema.users)
-          .set({ status: 'active', banReason: null, updatedAt: new Date() })
-          .where(eq(schema.users.id, appeal.userId));
-      }
+        if (updated.length === 0) return false;
 
-      await adminRepository.createAuditLog({
-        adminId: actor?.id || 'staff',
-        adminName: actor?.name || 'Moderator',
-        action: 'BAN_APPEAL_REVIEWED',
-        module: 'Moderation',
-        targetId: appealId,
-        targetSummary: `Appeal for ${appeal.userEmail}`,
-        details: `Decision: ${decision}. Notes: ${reviewNotes}. Unbanned: ${Boolean(unbanUser)}`,
-        ipAddress: actor?.ipAddress || 'unknown',
+        if (decision === 'accepted' && unbanUser) {
+          await tx
+            .update(schema.users)
+            .set({ status: 'active', banReason: null, updatedAt: new Date() })
+            .where(eq(schema.users.id, appeal.userId));
+        }
+
+        await adminRepository.createAuditLog({
+          adminId: actor?.id || 'staff',
+          adminName: actor?.name || 'Moderator',
+          action: 'BAN_APPEAL_REVIEWED',
+          module: 'Moderation',
+          targetId: appealId,
+          targetSummary: `Appeal for ${appeal.userEmail}`,
+          details: `Decision: ${decision}. Notes: ${reviewNotes}. Unbanned: ${Boolean(unbanUser)}`,
+          ipAddress: actor?.ipAddress || 'unknown',
+        });
+
+        return true;
       });
-
-      return true;
     } catch (error) {
       console.error('ModerationService.reviewBanAppeal error:', error);
       return false;

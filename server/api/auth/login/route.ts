@@ -16,12 +16,24 @@ export async function POST(req: NextRequest) {
 
     const cleanEmail = String(email).toLowerCase().trim();
     const ipAddress = getRequestIp(req);
+    const rateLimitKey = `login_attempt_${cleanEmail}_${ipAddress}`;
+
+    const { allowed, retryAfterSeconds } = await userRepository.checkRateLimit(rateLimitKey);
+    if (!allowed) {
+      return addSecurityHeaders(
+        NextResponse.json(
+          { error: `Too many login attempts. Please try again in ${retryAfterSeconds} seconds.` },
+          { status: 429 }
+        )
+      );
+    }
 
     const userRow = await userRepository.findByEmail(cleanEmail);
 
     // Timing-Safe Password Verification to prevent account enumeration
     if (!userRow || !userRow.passwordHash) {
       await verifyPassword(String(password), DUMMY_PASSWORD_HASH);
+      await userRepository.recordFailedAttempt(rateLimitKey);
       return addSecurityHeaders(
         NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
       );
@@ -30,11 +42,14 @@ export async function POST(req: NextRequest) {
     const isValid = await verifyPassword(String(password), userRow.passwordHash);
 
     if (!isValid) {
+      await userRepository.recordFailedAttempt(rateLimitKey);
       return addSecurityHeaders(
         NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
       );
     }
 
+    // Successful Authentication
+    await userRepository.clearRateLimit(rateLimitKey);
     // Banned / suspended accounts
     if (userRow.status === 'banned' || userRow.status === 'suspended') {
       return addSecurityHeaders(
