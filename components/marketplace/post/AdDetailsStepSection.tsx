@@ -206,22 +206,25 @@ export const AdDetailsStepSection: React.FC<AdDetailsStepSectionProps> = ({
 
         <div className="max-w-xs">
           <label className="block text-xs font-semibold text-slate-700 mb-1">
-            Asking Price in Rupees *
+            Asking Price in Rupees (Optional)
           </label>
           <div className="relative">
             <span className="absolute left-3.5 top-2.5 text-slate-500 font-bold text-sm">₹</span>
             <input
               type="number"
-              required
               value={price}
               onChange={(e) => onPriceChange(e.target.value)}
-              placeholder="e.g. 850000"
+              placeholder="e.g. 850000 (leave blank if unspecified)"
               className="w-full text-base font-bold pl-8 pr-4 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
             />
           </div>
-          {price && (
+          {price !== undefined && price !== null && String(price).trim() !== '' ? (
             <span className="text-[11px] text-emerald-600 font-semibold mt-1 block">
               ₹{Number(price).toLocaleString('en-IN')}
+            </span>
+          ) : (
+            <span className="text-[11px] text-slate-400 font-medium mt-1 block">
+              Price on request (optional)
             </span>
           )}
         </div>

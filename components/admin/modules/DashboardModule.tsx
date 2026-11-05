@@ -225,7 +225,7 @@ export const DashboardModule: React.FC = () => {
                       <div className="font-semibold text-sm text-[#202124] dark:text-white truncate">{item.title}</div>
                       <div className="text-xs text-[#5f6368] dark:text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
                         <span className="font-mono tabular-nums font-semibold text-[#202124] dark:text-white">
-                          ₹{item.price.toLocaleString('en-IN')}
+                          {item.price !== null && item.price !== undefined ? `₹${item.price.toLocaleString('en-IN')}` : 'Price on request'}
                         </span>
                         <span aria-hidden="true">·</span>
                         <span>{item.location.city}</span>

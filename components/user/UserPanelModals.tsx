@@ -183,13 +183,19 @@ export const EditListingModal: React.FC<EditListingModalProps> = ({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block font-bold mb-1">Price (₹)</label>
+              <label className="block font-bold mb-1">Price (₹) (Optional)</label>
               <input
                 type="number"
-                value={editingListing.price}
-                onChange={(e) => onChangeListing({ ...editingListing, price: Number(e.target.value) })}
+                value={editingListing.price !== null && editingListing.price !== undefined ? editingListing.price : ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  onChangeListing({
+                    ...editingListing,
+                    price: val === '' ? null : Number(val),
+                  });
+                }}
+                placeholder="Leave blank for Price on Request"
                 className="w-full text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 font-medium"
-                required
               />
             </div>
 
@@ -228,7 +234,7 @@ export const EditListingModal: React.FC<EditListingModalProps> = ({
           <div className="p-3 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2">
             <div className="flex items-center justify-between">
               <label className="font-bold text-xs text-slate-800 dark:text-slate-200">
-                Listing Photos ({editingListing.images.length}/5 Max)
+                Listing Photos ({editingListing.images.length}/5 Max - Optional)
               </label>
               {editingListing.images.length < 5 && (
                 <button
@@ -260,18 +266,16 @@ export const EditListingModal: React.FC<EditListingModalProps> = ({
                     placeholder={`Photo URL #${idx + 1}`}
                     className="flex-1 text-[11px] border border-slate-300 dark:border-slate-700 rounded p-1.5 bg-white dark:bg-slate-900 font-mono"
                   />
-                  {editingListing.images.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const updated = editingListing.images.filter((_, i) => i !== idx);
-                        onChangeListing({ ...editingListing, images: updated });
-                      }}
-                      className="text-[10px] font-bold text-rose-600 hover:underline px-1 cursor-pointer"
-                    >
-                      Delete
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated = editingListing.images.filter((_, i) => i !== idx);
+                      onChangeListing({ ...editingListing, images: updated });
+                    }}
+                    className="text-[10px] font-bold text-rose-600 hover:underline px-1 cursor-pointer"
+                  >
+                    Delete
+                  </button>
                 </div>
               ))}
             </div>

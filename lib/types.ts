@@ -85,7 +85,7 @@ export interface Listing {
   id: string;
   title: string;
   description: string;
-  price: number;
+  price: number | null;
   categoryId: string;
   subcategoryId?: string;
   sellerId: string;

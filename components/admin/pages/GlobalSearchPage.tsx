@@ -174,7 +174,7 @@ export const GlobalSearchPage: React.FC = () => {
                       </div>
                       <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
                         <span className="font-semibold text-emerald-600">
-                          ₹{item.price.toLocaleString('en-IN')}
+                          {item.price !== null && item.price !== undefined ? `₹${item.price.toLocaleString('en-IN')}` : 'Price on request'}
                         </span>
                         <span>•</span>
                         <span>{item.location.city}</span>

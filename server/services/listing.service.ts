@@ -271,14 +271,19 @@ export class ListingService {
     }
 
     const sellerId = authenticatedUserId || data.sellerId;
+    console.log('DEBUG createListing data:', data);
     if (!sellerId) {
       return { success: false, error: 'Seller authentication required', status: 401 };
     }
 
-    // Validate price
-    const priceNum = Number(data.price);
-    if (isNaN(priceNum) || !isFinite(priceNum) || priceNum < 0) {
-      return { success: false, error: 'Price must be a non-negative number', status: 400 };
+    // Validate price (optional: missing/empty price becomes null; zero is preserved)
+    let priceNum: number | null = null;
+    if (data.price !== undefined && data.price !== null && String(data.price).trim() !== '') {
+      const parsed = Number(data.price);
+      if (isNaN(parsed) || !isFinite(parsed) || parsed < 0) {
+        return { success: false, error: 'Price must be a non-negative number', status: 400 };
+      }
+      priceNum = parsed;
     }
 
     // Validate location coordinates if supplied
@@ -425,11 +430,18 @@ export class ListingService {
     const targetTitle = updatedData.title !== undefined ? updatedData.title : existing.title;
     const sellerId = existing.sellerId;
 
+    const safeFields: any = {};
+
     // Validate price if updated
     if (updatedData.price !== undefined) {
-      const p = Number(updatedData.price);
-      if (isNaN(p) || !isFinite(p) || p < 0) {
-        return { success: false, error: 'Price must be a non-negative number', status: 400 };
+      if (updatedData.price === null || String(updatedData.price).trim() === '') {
+        safeFields.price = null;
+      } else {
+        const p = Number(updatedData.price);
+        if (isNaN(p) || !isFinite(p) || p < 0) {
+          return { success: false, error: 'Price must be a non-negative number', status: 400 };
+        }
+        safeFields.price = String(p);
       }
     }
 
@@ -442,10 +454,8 @@ export class ListingService {
     }
 
     // Field allowlist: regular sellers can edit content, mark as sold
-    const safeFields: any = {};
     if (updatedData.title !== undefined) safeFields.title = updatedData.title;
     if (updatedData.description !== undefined) safeFields.description = updatedData.description;
-    if (updatedData.price !== undefined) safeFields.price = String(updatedData.price);
     if (updatedData.categoryId !== undefined) safeFields.categoryId = updatedData.categoryId;
     if (updatedData.subcategoryId !== undefined) safeFields.subcategoryId = updatedData.subcategoryId || null;
     if (updatedData.images !== undefined) safeFields.images = updatedData.images;

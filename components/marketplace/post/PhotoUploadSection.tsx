@@ -18,7 +18,7 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
       <div className="flex items-center justify-between pb-2 border-b border-slate-100">
         <h2 className="text-sm font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
           <ImageIcon className="w-4 h-4 text-blue-600" />
-          5. Upload Listing Photos (Up to 5 Photos Max)
+          5. Upload Listing Photos (Optional - Up to 5 Photos Max)
         </h2>
         <span
           className={`px-3 py-1 rounded-full text-xs font-black ${
@@ -32,7 +32,7 @@ export const PhotoUploadSection: React.FC<PhotoUploadSectionProps> = ({
       </div>
 
       <p className="text-xs text-slate-500">
-        Upload actual photographs of your item or service directly from your device. Photo #1 serves as the primary cover image.
+        Upload actual photographs of your item or service directly from your device (optional). Photo #1 serves as the primary cover image if provided.
       </p>
 
       {/* Custom Device File Upload Zone */}

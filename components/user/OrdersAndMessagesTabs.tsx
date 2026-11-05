@@ -105,7 +105,9 @@ export const MessagesEnquiriesTab: React.FC<MessagesEnquiriesTabProps> = ({
               <ImageWithFallback src={l.images[0]} alt={l.title} categoryId={l.categoryId} className="w-12 h-12 rounded-lg object-cover" />
               <div>
                 <div className="font-extrabold text-xs text-slate-900 dark:text-white">{l.title}</div>
-                <div className="text-[11px] text-slate-500">₹{l.price.toLocaleString('en-IN')} • {l.chatsCount} Enquiry Messages</div>
+                <div className="text-[11px] text-slate-500">
+                  {l.price !== null && l.price !== undefined ? `₹${l.price.toLocaleString('en-IN')}` : 'Price on request'} • {l.chatsCount} Enquiry Messages
+                </div>
               </div>
             </div>
 

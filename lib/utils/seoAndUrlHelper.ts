@@ -695,14 +695,17 @@ export function updateSeoAndCanonical(
   const cityLabel = parsedRoute.city && parsedRoute.city !== 'All India' ? parsedRoute.city : 'India';
 
   if (parsedRoute.routeType === 'listing' && listing) {
-    const priceFormatted = new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      maximumFractionDigits: 0,
-    }).format(listing.price);
+    const priceFormatted =
+      listing.price !== null && listing.price !== undefined
+        ? new Intl.NumberFormat('en-IN', {
+            style: 'currency',
+            currency: 'INR',
+            maximumFractionDigits: 0,
+          }).format(listing.price)
+        : 'Price on request';
 
     pageTitle = `${listing.title} in ${listing.location.locality ? `${listing.location.locality}, ` : ''}${listing.location.city} | ${priceFormatted} - ${siteName}`;
-    metaDesc = `${listing.description.substring(0, 150)}... Buy ${listing.title} for ${priceFormatted} in ${listing.location.city}. Direct contact with verified seller ${listing.sellerName}.`;
+    metaDesc = `${listing.description.substring(0, 150)}... ${listing.title} (${priceFormatted}) in ${listing.location.city}. Direct contact with verified seller ${listing.sellerName}.`;
   } else if (parsedRoute.routeType === 'category') {
     let catName = 'Classifieds';
     let matchedCategory: Category | undefined;
@@ -766,7 +769,7 @@ export function updateSeoAndCanonical(
   setMetaTag('meta[name="twitter:description"]', 'name', 'twitter:description', metaDesc);
   setMetaTag('meta[name="twitter:image"]', 'name', 'twitter:image', primaryImage);
 
-  if (listing) {
+  if (listing && listing.price !== null && listing.price !== undefined) {
     setMetaTag('meta[property="product:price:amount"]', 'property', 'product:price:amount', listing.price.toString());
     setMetaTag('meta[property="product:price:currency"]', 'property', 'product:price:currency', 'INR');
   }
@@ -800,7 +803,7 @@ export function updateSeoAndCanonical(
       offers: {
         '@type': 'Offer',
         url: canonicalUrl,
-        price: listing.price,
+        price: listing.price !== null && listing.price !== undefined ? listing.price : undefined,
         priceCurrency: 'INR',
         itemCondition: 'https://schema.org/UsedCondition',
         availability: listing.status === 'sold' ? 'https://schema.org/OutOfStock' : 'https://schema.org/InStock',

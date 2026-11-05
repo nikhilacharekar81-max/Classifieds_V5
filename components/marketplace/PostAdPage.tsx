@@ -195,10 +195,10 @@ export const PostAdPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!postForm.title || !postForm.price) {
+    if (!postForm.title) {
       addToast({
-        title: 'Required Fields Missing',
-        message: 'Please provide at least a title and valid price in ₹.',
+        title: 'Title Required',
+        message: 'Please provide at least a title for your ad.',
         type: 'warning',
       });
       return;
@@ -235,16 +235,15 @@ export const PostAdPage: React.FC = () => {
       currentUser?.avatar ||
       'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80';
 
-    if (postForm.images.length === 0) {
-      addToast({
-        title: 'Photo Required',
-        message: 'Please upload at least 1 photo of your item or service from your device.',
-        type: 'warning',
-      });
-      return;
-    }
-
     const finalImages = postForm.images.slice(0, 5);
+
+    let parsedPrice: number | null = null;
+    if (postForm.price !== undefined && postForm.price !== null && String(postForm.price).trim() !== '') {
+      const p = Number(postForm.price);
+      if (!isNaN(p) && isFinite(p) && p >= 0) {
+        parsedPrice = p;
+      }
+    }
 
     const newAd = await addListing({
       title: postForm.title,
@@ -255,7 +254,7 @@ export const PostAdPage: React.FC = () => {
       sellerType,
       sellerPhone,
       sellerAvatar,
-      price: Number(postForm.price),
+      price: parsedPrice as any,
       description: postForm.description || 'Genuine item, well maintained and used with care.',
       images: finalImages,
       status: requiresPayment ? 'approved' : 'pending',

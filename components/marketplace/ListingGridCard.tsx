@@ -177,8 +177,14 @@ export const ListingGridCard: React.FC<ListingGridCardProps> = ({
             {isRental ? 'Monthly' : 'Price'}
           </span>
           <div className="text-sm font-bold font-mono tabular-nums text-[#202124]">
-            ₹{listing.price.toLocaleString('en-IN')}
-            {isRental && <span className="text-[11px] font-normal text-[#5f6368]">/mo</span>}
+            {listing.price !== null && listing.price !== undefined ? (
+              <>
+                ₹{listing.price.toLocaleString('en-IN')}
+                {isRental && <span className="text-[11px] font-normal text-[#5f6368]">/mo</span>}
+              </>
+            ) : (
+              <span className="text-xs font-semibold text-[#137333]">Price on request</span>
+            )}
           </div>
         </NavLink>
       </div>

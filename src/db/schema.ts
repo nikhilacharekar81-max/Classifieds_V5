@@ -154,7 +154,7 @@ export const listings = pgTable(
     subcategoryId: varchar('subcategory_id', { length: 64 }),
     title: varchar('title', { length: 255 }).notNull(),
     description: text('description').notNull(),
-    price: numeric('price', { precision: 12, scale: 2 }).notNull(),
+    price: numeric('price', { precision: 12, scale: 2 }),
     state: varchar('state', { length: 128 }).notNull(),
     city: varchar('city', { length: 128 }).notNull(),
     locality: varchar('locality', { length: 128 }).notNull(),

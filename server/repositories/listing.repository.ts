@@ -125,7 +125,7 @@ export class ListingRepository {
       subcategoryId: row.subcategoryId || undefined,
       title: row.title,
       description: row.description,
-      price: Number(row.price),
+      price: row.price !== null && row.price !== undefined ? Number(row.price) : null,
       location: {
         city: row.city,
         state: row.state,
@@ -468,7 +468,7 @@ export class ListingRepository {
     subcategoryId?: string;
     title: string;
     description: string;
-    price: number;
+    price?: number | null;
     state: string;
     city: string;
     locality: string;
@@ -494,7 +494,7 @@ export class ListingRepository {
             subcategoryId: data.subcategoryId || null,
             title: data.title,
             description: data.description,
-            price: String(data.price),
+            price: data.price !== undefined && data.price !== null ? String(data.price) : null,
             state: data.state,
             city: data.city,
             locality: data.locality,

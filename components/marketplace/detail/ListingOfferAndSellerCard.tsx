@@ -114,9 +114,15 @@ export const ListingOfferAndSellerCard: React.FC<ListingOfferAndSellerCardProps>
 
           <div>
             <div className="text-3xl font-extrabold font-mono tabular-nums text-[#202124] flex items-baseline gap-1.5">
-              <span>₹{listing.price.toLocaleString('en-IN')}</span>
-              {isRental && (
-                <span className="text-sm font-semibold text-[#5f6368] font-sans">/ month</span>
+              {listing.price !== null && listing.price !== undefined ? (
+                <>
+                  <span>₹{listing.price.toLocaleString('en-IN')}</span>
+                  {isRental && (
+                    <span className="text-sm font-semibold text-[#5f6368] font-sans">/ month</span>
+                  )}
+                </>
+              ) : (
+                <span className="text-2xl font-bold text-[#137333]">Price on request</span>
               )}
             </div>
             <h1 className="text-base font-bold text-[#202124] mt-2 leading-snug">

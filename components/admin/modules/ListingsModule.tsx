@@ -839,7 +839,7 @@ export const ListingsModule: React.FC<ListingsModuleProps> = ({
                       {/* Price in ₹ */}
                       {showColumns.price && (
                         <td className="p-3 font-bold text-slate-900 dark:text-white">
-                          ₹{item.price.toLocaleString('en-IN')}
+                          {item.price !== null && item.price !== undefined ? `₹${item.price.toLocaleString('en-IN')}` : 'Price on request'}
                         </td>
                       )}
 

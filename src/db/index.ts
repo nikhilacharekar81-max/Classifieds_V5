@@ -36,6 +36,11 @@ async function getInitializedPglite(): Promise<PGlite> {
           }
         }
       }
+      try {
+        await pg.exec('ALTER TABLE "listings" ALTER COLUMN "price" DROP NOT NULL;');
+      } catch {
+        // Ignore if already dropped or table created without NOT NULL
+      }
     }
 
     const rawExecutor = {
@@ -252,6 +257,12 @@ export async function ensurePgSchemaApplied(): Promise<void> {
         await adminPool.query(`GRANT USAGE ON SCHEMA public TO "${process.env.SQL_USER}";`);
         await adminPool.query(`GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "${process.env.SQL_USER}";`);
         await adminPool.query(`GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "${process.env.SQL_USER}";`);
+      }
+
+      try {
+        await adminPool.query('ALTER TABLE "listings" ALTER COLUMN "price" DROP NOT NULL;');
+      } catch {
+        // Ignore if already dropped or table created without NOT NULL
       }
     } finally {
       await adminPool.end().catch(() => {});

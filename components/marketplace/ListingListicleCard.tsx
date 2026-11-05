@@ -152,8 +152,14 @@ export const ListingListicleCard: React.FC<ListingListicleCardProps> = ({
             {isRental ? 'Monthly' : 'Price'}
           </span>
           <div className="text-base sm:text-lg font-extrabold font-mono tabular-nums text-[#202124]">
-            ₹{listing.price.toLocaleString('en-IN')}
-            {isRental && <span className="text-xs font-normal text-[#5f6368]">/mo</span>}
+            {listing.price !== null && listing.price !== undefined ? (
+              <>
+                ₹{listing.price.toLocaleString('en-IN')}
+                {isRental && <span className="text-xs font-normal text-[#5f6368]">/mo</span>}
+              </>
+            ) : (
+              <span className="text-xs font-semibold text-[#137333]">Price on request</span>
+            )}
           </div>
         </div>
 

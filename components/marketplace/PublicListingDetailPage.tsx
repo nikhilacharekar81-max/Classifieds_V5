@@ -164,7 +164,9 @@ export const PublicListingDetailPage: React.FC<PublicListingDetailPageProps> = (
             itemType="https://schema.org/Offer"
             className="hidden"
           >
-            <meta itemProp="price" content={String(listing.price)} />
+            {listing.price !== null && listing.price !== undefined && (
+              <meta itemProp="price" content={String(listing.price)} />
+            )}
             <meta itemProp="priceCurrency" content="INR" />
             <meta
               itemProp="availability"
@@ -194,7 +196,7 @@ export const PublicListingDetailPage: React.FC<PublicListingDetailPageProps> = (
               locality={listing.location.locality}
               state={listing.location.state}
               title={listing.title}
-              priceFormatted={`₹${listing.price.toLocaleString('en-IN')}`}
+              priceFormatted={listing.price !== null && listing.price !== undefined ? `₹${listing.price.toLocaleString('en-IN')}` : 'Price on request'}
             />
 
             <BuyerSafetyBanner />

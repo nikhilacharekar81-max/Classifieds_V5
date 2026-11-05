@@ -225,7 +225,7 @@ export const MyAdsTab: React.FC<MyAdsTabProps> = ({
                   </div>
 
                   <div className="text-base font-black text-blue-600 dark:text-blue-400">
-                    ₹{listing.price.toLocaleString('en-IN')}
+                    {listing.price !== null && listing.price !== undefined ? `₹${listing.price.toLocaleString('en-IN')}` : 'Price on request'}
                   </div>
 
                   <div className="flex items-center gap-4 text-xs text-slate-500 dark:text-slate-400 flex-wrap">

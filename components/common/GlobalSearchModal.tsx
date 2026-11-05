@@ -150,7 +150,7 @@ export const GlobalSearchModal: React.FC = () => {
                           {item.title}
                         </div>
                         <div className="text-slate-400 text-xs">
-                          ₹{item.price.toLocaleString('en-IN')} • {item.location.city} • ID: {item.id}
+                          {item.price !== null && item.price !== undefined ? `₹${item.price.toLocaleString('en-IN')}` : 'Price on request'} • {item.location.city} • ID: {item.id}
                         </div>
                       </div>
                     </div>

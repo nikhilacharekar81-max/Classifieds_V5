@@ -176,18 +176,21 @@ export async function renderSsrPage(
   const pageSuffix = currentPage > 1 ? ` (Page ${currentPage})` : '';
 
   if (parsedRoute.routeType === 'listing' && initialListing) {
-    const priceFormatted = new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      maximumFractionDigits: 0,
-    }).format(initialListing.price);
+    const priceFormatted =
+      initialListing.price !== null && initialListing.price !== undefined
+        ? new Intl.NumberFormat('en-IN', {
+            style: 'currency',
+            currency: 'INR',
+            maximumFractionDigits: 0,
+          }).format(initialListing.price)
+        : 'Price on request';
 
     pageTitle = `${initialListing.title} in ${
       initialListing.location.locality ? `${initialListing.location.locality}, ` : ''
     }${initialListing.location.city} | ${priceFormatted} - ${siteName}`;
-    metaDesc = `${initialListing.description.substring(0, 150)}... Buy ${
+    metaDesc = `${initialListing.description.substring(0, 150)}... ${
       initialListing.title
-    } for ${priceFormatted} in ${initialListing.location.city}. Direct contact with verified seller ${
+    } (${priceFormatted}) in ${initialListing.location.city}. Direct contact with verified seller ${
       initialListing.sellerName
     }.`;
   } else if (parsedRoute.routeType === 'category') {
@@ -256,7 +259,7 @@ export async function renderSsrPage(
       offers: {
         '@type': 'Offer',
         url: canonicalUrl,
-        price: initialListing.price,
+        price: initialListing.price !== null && initialListing.price !== undefined ? initialListing.price : undefined,
         priceCurrency: 'INR',
         itemCondition: 'https://schema.org/UsedCondition',
         availability:

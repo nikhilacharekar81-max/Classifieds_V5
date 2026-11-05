@@ -188,7 +188,7 @@ CREATE TABLE "listings" (
 	"subcategory_id" varchar(64),
 	"title" varchar(255) NOT NULL,
 	"description" text NOT NULL,
-	"price" numeric(12, 2) NOT NULL,
+	"price" numeric(12, 2),
 	"state" varchar(128) NOT NULL,
 	"city" varchar(128) NOT NULL,
 	"locality" varchar(128) NOT NULL,
