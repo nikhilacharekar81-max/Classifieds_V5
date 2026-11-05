@@ -70,19 +70,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
   const [activeUserId, setActiveUserId] = useState<string | null>(null);
   const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
 
-  const latestRequestIdRef = React.useRef(0);
+  const requestCounter = React.useRef(0);
 
   const updateAuth = (user: UserAccount | null, admin: AdminUser | null, userId: string | null) => {
     // Invalidate stale pending auth requests
-    latestRequestIdRef.current = Date.now();
+    requestCounter.current++;
     setAuthUser(user);
     setCurrentAdmin(admin);
     setActiveUserId(userId);
   };
 
   useEffect(() => {
-    const requestId = Date.now();
-    latestRequestIdRef.current = requestId;
+    const requestId = ++requestCounter.current;
     
     fetch('/api/auth/me')
       .then((res) => {
@@ -92,7 +91,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
         return res.json().catch(() => null);
       })
       .then((data) => {
-        if (latestRequestIdRef.current !== requestId) return;
+        if (requestCounter.current !== requestId) return;
         setIsAuthChecking(false);
         if (data && data.authenticated && data.user) {
           const admin = (data.isAdmin || data.isModerator) ? {
@@ -112,7 +111,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
         }
       })
       .catch(() => {
-        if (latestRequestIdRef.current !== requestId) return;
+        if (requestCounter.current !== requestId) return;
         setIsAuthChecking(false);
         updateAuth(null, null, null);
       });
