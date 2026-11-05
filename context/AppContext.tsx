@@ -71,6 +71,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
   const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
 
   useEffect(() => {
+    let active = true;
     fetch('/api/auth/me')
       .then((res) => {
         if (!res.ok) return null;
@@ -79,6 +80,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
         return res.json().catch(() => null);
       })
       .then((data) => {
+        if (!active) return;
         setIsAuthChecking(false);
         if (data && data.authenticated && data.user) {
           setAuthUser(data.user);
@@ -105,11 +107,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
         }
       })
       .catch(() => {
+        if (!active) return;
         setIsAuthChecking(false);
         setAuthUser(null);
         setCurrentAdmin(null);
         setActiveUserId(null);
       });
+      return () => { active = false; };
   }, []);
 
   // Collections (initialized from server-fetched PostgreSQL data during SSR when provided)

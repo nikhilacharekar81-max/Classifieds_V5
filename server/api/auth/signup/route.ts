@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { userRepository } from '@/server/repositories/user.repository';
+import { emailService } from '@/server/services/email.service';
 import { hashPassword } from '@/lib/auth/password';
 import { getRequestIp } from '@/lib/auth/session';
 import { safeErrorResponse, addSecurityHeaders } from '@/lib/auth/security';
@@ -48,27 +49,34 @@ export async function POST(req: NextRequest) {
       state: state || 'Maharashtra',
     });
 
-    const sessionId = `sess_${crypto.randomUUID()}`;
-    const ipAddress = getRequestIp(req);
-    const userAgent = req.headers.get('user-agent') || undefined;
+    // Verification token
+    const token = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    await userRepository.createEmailVerificationToken(`vet_${crypto.randomUUID()}`, userId, tokenHash, expiresAt);
 
-    const { expiresAt } = await userRepository.createSession(sessionId, userObj.id, ipAddress, userAgent);
+    // Send email
+    const verificationUrl = `${req.nextUrl.origin}/verify-email?token=${token}`;
+    const emailResult = await emailService.sendCustomEmail({
+      toEmail: cleanEmail,
+      toName: userObj.name,
+      subject: 'Verify your Chillyads account',
+      body: `Welcome to Chillyads! Please click the link below to verify your email address:\n\n${verificationUrl}`,
+      type: 'verify_email',
+      relatedUserId: userId,
+    });
 
     const response = NextResponse.json(
       {
         success: true,
         user: userObj,
+        emailSent: emailResult.status === 'delivered',
+        message: emailResult.status === 'delivered'
+          ? 'Account created. Check your email for verification.'
+          : 'Account created, but verification email failed to send. Please request a new one.',
       },
       { status: 201 }
     );
-
-    response.cookies.set('chillyads_session', sessionId, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      expires: expiresAt,
-      path: '/',
-    });
 
     return addSecurityHeaders(response);
   } catch (error: any) {

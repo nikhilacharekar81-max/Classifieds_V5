@@ -42,6 +42,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (!userRow.emailVerified) {
+      return addSecurityHeaders(
+        NextResponse.json(
+          { error: 'Email verification is required to log in. Please check your email for the verification link.' },
+          { status: 401 }
+        )
+      );
+    }
+
     // Successful Authentication
     const sessionId = `sess_${crypto.randomUUID()}`;
     const userAgent = req.headers.get('user-agent') || undefined;

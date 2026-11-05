@@ -309,7 +309,7 @@ export class UserRepository {
       const user = userRows[0];
 
       // Security Gate: Inactive or banned users cannot authenticate
-      if (user.status !== 'active') {
+      if (user.status !== 'active' || !user.emailVerified) {
         await this.deleteSession(sessionId);
         return null;
       }

@@ -36,16 +36,7 @@ export const UserPanelPage: React.FC = () => {
     currentUser: authUser,
   } = useApp();
 
-  const [activeUserId, setActiveUserId] = useState<string>(() => {
-    return (
-      authUser?.id ||
-      users.find((u) => u.type === 'user' || u.type === 'business')?.id ||
-      users[0]?.id ||
-      'usr_101'
-    );
-  });
-
-  const currentUser = users.find((u) => u.id === activeUserId) || users[0];
+  const currentUser = authUser;
 
   const [activeTab, setActiveTab] = useState<
     'my-ads' | 'saved-ads' | 'orders-receipts' | 'messages' | 'email-notifications' | 'account-settings'

@@ -214,7 +214,11 @@ export const MyAccountDropdown: React.FC = () => {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setErrorMsg(data.error || 'Invalid email or password.');
+        if (res.status === 401 && data.error?.includes('verification')) {
+          setErrorMsg('Email verification is required. Please check your email.');
+        } else {
+          setErrorMsg(data.error || 'Invalid email or password.');
+        }
         setIsSubmitting(false);
         return;
       }
@@ -293,17 +297,12 @@ export const MyAccountDropdown: React.FC = () => {
         window.dispatchEvent(new CustomEvent('auth_state_changed', { detail: { user: activeUser } }));
       }
 
-      notify({
-        type: 'success',
-        title: 'Account Created',
-        message: `Welcome to Chillyads, ${signUpName.trim()}!`,
-      });
+      setSuccessMsg(data.message || 'Account created. Please check your email for verification.');
       setSignUpName('');
       setSignUpEmail('');
       setSignUpPassword('');
       setSignUpPhone('');
       setIsSubmitting(false);
-      setAuthModalMode(null);
     } catch (err: any) {
       setErrorMsg(err?.message || 'Unable to complete registration. Please try again.');
       setIsSubmitting(false);
@@ -639,6 +638,12 @@ export const MyAccountDropdown: React.FC = () => {
                 {errorMsg && (
                   <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs font-medium text-rose-700">
                     {errorMsg}
+                  </div>
+                )}
+
+                {successMsg && (
+                  <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-800">
+                    {successMsg}
                   </div>
                 )}
 
