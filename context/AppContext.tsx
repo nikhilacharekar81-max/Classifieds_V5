@@ -81,6 +81,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
   };
 
   useEffect(() => {
+    let active = true;
     const requestId = ++requestCounter.current;
     
     fetch('/api/auth/me')
@@ -91,7 +92,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
         return res.json().catch(() => null);
       })
       .then((data) => {
-        if (requestCounter.current !== requestId) return;
+        if (!active || requestCounter.current !== requestId) return;
         setIsAuthChecking(false);
         if (data && data.authenticated && data.user) {
           const admin = (data.isAdmin || data.isModerator) ? {
@@ -111,10 +112,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
         }
       })
       .catch(() => {
-        if (requestCounter.current !== requestId) return;
+        if (!active || requestCounter.current !== requestId) return;
         setIsAuthChecking(false);
         updateAuth(null, null, null);
       });
+      
+    return () => { active = false; };
   }, []);
 
   // Collections (initialized from server-fetched PostgreSQL data during SSR when provided)
