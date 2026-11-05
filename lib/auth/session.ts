@@ -19,26 +19,32 @@ export interface AuthenticatedContext {
  * Extracts client IP address safely without trusting arbitrary client-supplied headers.
  */
 export function getRequestIp(req?: NextRequest | Request | null): string {
-  if (!req || !req.headers) return 'unknown';
+  if (!req) return '127.0.0.1';
 
-  const forwardedFor = req.headers.get('x-forwarded-for');
-  if (forwardedFor) {
-    // Take the last untampered IP if proxied or first valid format
-    const ips = forwardedFor.split(',').map((ip) => ip.trim()).filter(Boolean);
-    if (ips.length > 0) {
-      const clientIp = ips[0];
-      if (/^[a-fA-F0-9:.]+$/.test(clientIp)) {
-        return clientIp;
+  if (process.env.TRUST_PROXY && req.headers) {
+    const forwardedFor = req.headers.get('x-forwarded-for');
+    if (forwardedFor) {
+      const ips = forwardedFor.split(',').map((ip) => ip.trim()).filter(Boolean);
+      if (ips.length > 0) {
+        const clientIp = ips[0];
+        if (/^[a-fA-F0-9:.]+$/.test(clientIp)) {
+          return clientIp;
+        }
       }
+    }
+
+    const realIp = req.headers.get('x-real-ip')?.trim();
+    if (realIp && /^[a-fA-F0-9:.]+$/.test(realIp)) {
+      return realIp;
     }
   }
 
-  const realIp = req.headers.get('x-real-ip')?.trim();
-  if (realIp && /^[a-fA-F0-9:.]+$/.test(realIp)) {
-    return realIp;
+  const socketIp = (req as any)?.socket?.remoteAddress || (req as any)?.connection?.remoteAddress;
+  if (socketIp && typeof socketIp === 'string' && /^[a-fA-F0-9:.]+$/.test(socketIp)) {
+    return socketIp;
   }
 
-  return 'unknown';
+  return '127.0.0.1';
 }
 
 /**

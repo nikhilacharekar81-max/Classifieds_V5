@@ -89,13 +89,53 @@ export const MyAccountDropdown: React.FC = () => {
     document.addEventListener('keydown', handleKeyDown);
     window.addEventListener('open_auth_modal', handleOpenAuthModal);
 
-    // Auto-detect reset link URL parameters and open reset modal
+    // Auto-detect reset link or email verification URL parameters
     if (typeof window !== 'undefined') {
       const searchParams = new URLSearchParams(window.location.search);
       const urlToken = searchParams.get('token');
       const urlTab = searchParams.get('tab');
 
-      if (urlToken || urlTab === 'reset-password') {
+      if (urlTab === 'verify-email' && urlToken) {
+        // Handle email verification token confirmation directly
+        fetch('/api/auth/verify-email/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: urlToken }),
+        })
+          .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+          .then(({ ok, data }) => {
+            if (ok) {
+              notify({
+                type: 'success',
+                title: 'Email Verified',
+                message: data.message || 'Your email address has been successfully verified.',
+              });
+            } else {
+              notify({
+                type: 'error',
+                title: 'Verification Failed',
+                message: data.error || 'Invalid or expired email verification link.',
+              });
+            }
+          })
+          .catch((err) => {
+            notify({
+              type: 'error',
+              title: 'Verification Error',
+              message: err?.message || 'Failed to verify email address.',
+            });
+          });
+
+        // Strip token and tab parameters from visible browser URL
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('token');
+        cleanUrl.searchParams.delete('tab');
+        window.history.replaceState(
+          {},
+          document.title,
+          cleanUrl.pathname + (cleanUrl.searchParams.toString() ? '?' + cleanUrl.searchParams.toString() : '')
+        );
+      } else if (urlToken || urlTab === 'reset-password') {
         if (urlToken) {
           setResetToken(urlToken);
         }

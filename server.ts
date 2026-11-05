@@ -84,7 +84,9 @@ async function startServer() {
   await initializePostgreSQL();
 
   const app = express();
-  app.set('trust proxy', true);
+  if (process.env.TRUST_PROXY) {
+    app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? true : process.env.TRUST_PROXY);
+  }
   const PORT = 3000;
 
   // Preserve raw body for webhook HMAC verification while parsing JSON

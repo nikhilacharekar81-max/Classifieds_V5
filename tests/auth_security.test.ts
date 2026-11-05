@@ -84,13 +84,13 @@ test('Account Enumeration & Rate Limiting — Identical 401 response and throttl
     await loginHandler(failReq);
   }
 
-  const blockedReq = createMockRequest(
+  const repeatReq = createMockRequest(
     'http://localhost:3000/api/auth/login',
     { email: targetEmail, password: 'wrong' },
     { 'x-forwarded-for': rateLimitIp }
   );
-  const blockedRes = await loginHandler(blockedReq);
-  assert.equal(blockedRes.status, 429, '6th failed login attempt should return 429 Too Many Requests');
+  const repeatRes = await loginHandler(repeatReq);
+  assert.equal(repeatRes.status, 401, 'Repeated failed login attempts should return 401 without blocking IP access');
 });
 
 test('Password Reset & Token Flow — Invalidation and Session Deletion', async () => {

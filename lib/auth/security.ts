@@ -29,4 +29,4 @@ export function safeErrorResponse(
  * preventing email enumeration through timing attacks.
  */
 export const DUMMY_PASSWORD_HASH =
-  'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6:e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4';
+  '00112233445566778899aabbccddeeff:2f8b0994c8a19b84196df62d1b75f8920ceac228e32627f7a4febe90a5492c5f2c82e3398d17b69db7dd38e28e2bab003a8b8ec59350981e93fcfe01f525188f';

@@ -262,6 +262,18 @@ export function ne(left: any, right: any): SqlExpr<boolean> {
   });
 }
 
+export function isNull(operand: any): SqlExpr<boolean> {
+  return new SqlExpr<boolean>((params, opts) => {
+    return `${renderOperand(operand, params, opts)} IS NULL`;
+  });
+}
+
+export function isNotNull(operand: any): SqlExpr<boolean> {
+  return new SqlExpr<boolean>((params, opts) => {
+    return `${renderOperand(operand, params, opts)} IS NOT NULL`;
+  });
+}
+
 export function gt(left: any, right: any): SqlExpr<boolean> {
   return new SqlExpr<boolean>((params, opts) => {
     const hint = isColumn(left) ? left : undefined;

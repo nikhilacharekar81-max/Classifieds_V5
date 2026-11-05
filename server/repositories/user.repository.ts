@@ -1,6 +1,6 @@
 import { db, withDbRetry } from '@/src/db/index';
 import * as schema from '@/src/db/schema';
-import { eq, desc, and, ne, gt } from '@/src/db/pg-orm';
+import { eq, desc, and, ne, gt, isNull } from '@/src/db/pg-orm';
 import { UserAccount } from '@/lib/types';
 
 export class UserRepository {
@@ -390,7 +390,7 @@ export class UserRepository {
           .where(
             and(
               eq(schema.passwordResetTokens.id, tokenRecord.id),
-              eq(schema.passwordResetTokens.usedAt, null as any)
+              isNull(schema.passwordResetTokens.usedAt)
             )
           )
           .returning({ id: schema.passwordResetTokens.id });
@@ -451,7 +451,7 @@ export class UserRepository {
           .where(
             and(
               eq(schema.emailVerificationTokens.id, tokenRecord.id),
-              eq(schema.emailVerificationTokens.usedAt, null as any)
+              isNull(schema.emailVerificationTokens.usedAt)
             )
           )
           .returning({ id: schema.emailVerificationTokens.id });
