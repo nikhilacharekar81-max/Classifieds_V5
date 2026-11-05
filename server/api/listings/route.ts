@@ -159,11 +159,6 @@ export async function POST(req: NextRequest) {
       priceNum = p;
     }
 
-    // Sanitize image URLs array
-    const validImages = Array.isArray(body.images)
-      ? body.images.filter((img: any) => typeof img === 'string' && (img.startsWith('http://') || img.startsWith('https://'))).slice(0, 5)
-      : [];
-
     // Require authenticated seller account phone; do not accept arbitrary body.sellerPhone override
     const sellerAccountPhone = authContext.user.phone ? authContext.user.phone.trim() : '';
     if (!sellerAccountPhone) {
@@ -185,7 +180,7 @@ export async function POST(req: NextRequest) {
         state: body.state ? String(body.state).trim() : (authContext.user.location?.state || ''),
         locality: body.locality ? String(body.locality).trim() : '',
       },
-      images: validImages,
+      images: body.images,
       customAttributes: body.customAttributes && typeof body.customAttributes === 'object' ? body.customAttributes : {},
       sellerName: authContext.user.name,
       sellerPhone: sellerAccountPhone,

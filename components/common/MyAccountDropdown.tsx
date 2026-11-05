@@ -45,8 +45,8 @@ export const MyAccountDropdown: React.FC = () => {
   const [signUpEmail, setSignUpEmail] = useState('');
   const [signUpPassword, setSignUpPassword] = useState('');
   const [signUpPhone, setSignUpPhone] = useState('');
-  const [signUpCity, setSignUpCity] = useState('Mumbai');
-  const [signUpState, setSignUpState] = useState('Maharashtra');
+  const [signUpCity, setSignUpCity] = useState('');
+  const [signUpState, setSignUpState] = useState('');
 
   // Forgot Password / Reset form state
   const [forgotEmail, setForgotEmail] = useState('');
@@ -308,6 +308,8 @@ export const MyAccountDropdown: React.FC = () => {
       setSignUpEmail('');
       setSignUpPassword('');
       setSignUpPhone('');
+      setSignUpCity('');
+      setSignUpState('');
       setIsSubmitting(false);
     } catch (err: any) {
       setErrorMsg(err?.message || 'Unable to complete registration. Please try again.');
