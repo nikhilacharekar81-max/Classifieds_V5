@@ -24,21 +24,19 @@ export async function POST(req: NextRequest) {
     }
 
     const tokenHash = crypto.createHash('sha256').update(token.trim()).digest('hex');
-    const tokenRecord = await userRepository.findPasswordResetToken(tokenHash);
-
-    if (!tokenRecord || tokenRecord.usedAt) {
-      return addSecurityHeaders(
-        NextResponse.json({ error: 'Invalid or expired password reset token' }, { status: 400 })
-      );
-    }
-
     const newPasswordHash = await hashPassword(newPassword);
 
-    await userRepository.updatePassword(tokenRecord.userId, newPasswordHash);
-    await userRepository.markPasswordResetTokenUsed(tokenRecord.id);
+    // Atomic transaction: locks token, marks used, updates password, and deletes active sessions
+    const result = await userRepository.consumePasswordResetTokenAndSetPassword(tokenHash, newPasswordHash);
 
-    // Invalidate all active sessions so old sessions cannot continue using previous credential
-    await userRepository.deleteUserSessions(tokenRecord.userId);
+    if (!result.success) {
+      return addSecurityHeaders(
+        NextResponse.json(
+          { error: result.error || 'Invalid or expired password reset token' },
+          { status: 400 }
+        )
+      );
+    }
 
     return addSecurityHeaders(
       NextResponse.json({

@@ -56,10 +56,7 @@ export async function POST(req: NextRequest) {
           type: 'email_verification',
         });
       } catch (emailErr) {
-        console.warn('[VerifyEmail] Email delivery skipped or unconfigured. Verification Token generated:', {
-          email: cleanEmail,
-          rawToken,
-        });
+        console.warn('[VerifyEmail] Email delivery attempt failed or unconfigured.');
       }
     }
 

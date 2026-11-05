@@ -114,6 +114,26 @@ export class EmailService {
     });
   }
 
+  public async sendCustomEmail(data: {
+    toEmail: string;
+    toName?: string;
+    subject: string;
+    body: string;
+    type: string;
+    listingId?: string;
+    relatedUserId?: string;
+  }): Promise<EmailLog> {
+    return await this.sendEmail({
+      toEmail: data.toEmail,
+      toName: data.toName || 'User',
+      subject: data.subject,
+      body: data.body,
+      type: data.type,
+      listingId: data.listingId,
+      relatedUserId: data.relatedUserId,
+    });
+  }
+
   public async getNewsletters(): Promise<NewsletterCampaign[]> {
     return await emailRepository.findAllCampaigns();
   }

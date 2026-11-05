@@ -14,19 +14,16 @@ export async function POST(req: NextRequest) {
     }
 
     const tokenHash = crypto.createHash('sha256').update(token.trim()).digest('hex');
-    const tokenRecord = await userRepository.findEmailVerificationToken(tokenHash);
+    const result = await userRepository.consumeEmailVerificationToken(tokenHash);
 
-    if (!tokenRecord || tokenRecord.usedAt) {
+    if (!result.success) {
       return addSecurityHeaders(
         NextResponse.json(
-          { error: 'Invalid or expired email verification token' },
+          { error: result.error || 'Invalid or expired email verification token' },
           { status: 400 }
         )
       );
     }
-
-    await userRepository.markEmailVerified(tokenRecord.userId);
-    await userRepository.markEmailVerificationTokenUsed(tokenRecord.id);
 
     return addSecurityHeaders(
       NextResponse.json({

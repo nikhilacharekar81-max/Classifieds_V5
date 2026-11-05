@@ -320,23 +320,27 @@ export class UserRepository {
     }
   }
 
-  public async deleteSession(sessionId: string) {
+  public async deleteSession(sessionId: string): Promise<boolean> {
     try {
       await db.delete(schema.userSessions).where(eq(schema.userSessions.id, sessionId));
+      return true;
     } catch (error) {
       console.error('UserRepository.deleteSession error:', error);
+      return false;
     }
   }
 
-  public async deleteUserSessions(userId: string) {
+  public async deleteUserSessions(userId: string): Promise<boolean> {
     try {
       await db.delete(schema.userSessions).where(eq(schema.userSessions.userId, userId));
+      return true;
     } catch (error) {
       console.error('UserRepository.deleteUserSessions error:', error);
+      throw new Error('Failed to delete user sessions', { cause: error });
     }
   }
 
-  public async deleteOtherUserSessions(userId: string, keepSessionId: string) {
+  public async deleteOtherUserSessions(userId: string, keepSessionId: string): Promise<boolean> {
     try {
       await db
         .delete(schema.userSessions)
@@ -346,9 +350,165 @@ export class UserRepository {
             ne(schema.userSessions.id, keepSessionId)
           )
         );
+      return true;
     } catch (error) {
       console.error('UserRepository.deleteOtherUserSessions error:', error);
+      throw new Error('Failed to delete other user sessions', { cause: error });
     }
+  }
+
+  public async consumePasswordResetTokenAndSetPassword(
+    tokenHash: string,
+    newPasswordHash: string
+  ): Promise<{ success: boolean; userId?: string; error?: string }> {
+    return await withDbRetry(async () => {
+      return await db.transaction(async (tx) => {
+        const now = new Date();
+        const tokenRows = await tx
+          .select()
+          .from(schema.passwordResetTokens)
+          .where(
+            and(
+              eq(schema.passwordResetTokens.tokenHash, tokenHash),
+              gt(schema.passwordResetTokens.expiresAt, now)
+            )
+          )
+          .limit(1);
+
+        if (!tokenRows.length) {
+          return { success: false, error: 'Invalid or expired password reset token' };
+        }
+
+        const tokenRecord = tokenRows[0];
+        if (tokenRecord.usedAt) {
+          return { success: false, error: 'Password reset token has already been used' };
+        }
+
+        const markRes = await tx
+          .update(schema.passwordResetTokens)
+          .set({ usedAt: now })
+          .where(
+            and(
+              eq(schema.passwordResetTokens.id, tokenRecord.id),
+              eq(schema.passwordResetTokens.usedAt, null as any)
+            )
+          )
+          .returning({ id: schema.passwordResetTokens.id });
+
+        if (!markRes.length) {
+          return { success: false, error: 'Password reset token has already been used' };
+        }
+
+        const userUpdateRes = await tx
+          .update(schema.users)
+          .set({
+            passwordHash: newPasswordHash,
+            updatedAt: now,
+          })
+          .where(eq(schema.users.id, tokenRecord.userId))
+          .returning({ id: schema.users.id });
+
+        if (!userUpdateRes.length) {
+          throw new Error('Failed to update user password');
+        }
+
+        await tx.delete(schema.userSessions).where(eq(schema.userSessions.userId, tokenRecord.userId));
+
+        return { success: true, userId: tokenRecord.userId };
+      });
+    });
+  }
+
+  public async consumeEmailVerificationToken(
+    tokenHash: string
+  ): Promise<{ success: boolean; userId?: string; error?: string }> {
+    return await withDbRetry(async () => {
+      return await db.transaction(async (tx) => {
+        const now = new Date();
+        const tokenRows = await tx
+          .select()
+          .from(schema.emailVerificationTokens)
+          .where(
+            and(
+              eq(schema.emailVerificationTokens.tokenHash, tokenHash),
+              gt(schema.emailVerificationTokens.expiresAt, now)
+            )
+          )
+          .limit(1);
+
+        if (!tokenRows.length) {
+          return { success: false, error: 'Invalid or expired email verification token' };
+        }
+
+        const tokenRecord = tokenRows[0];
+        if (tokenRecord.usedAt) {
+          return { success: false, error: 'Email verification token has already been used' };
+        }
+
+        const markRes = await tx
+          .update(schema.emailVerificationTokens)
+          .set({ usedAt: now })
+          .where(
+            and(
+              eq(schema.emailVerificationTokens.id, tokenRecord.id),
+              eq(schema.emailVerificationTokens.usedAt, null as any)
+            )
+          )
+          .returning({ id: schema.emailVerificationTokens.id });
+
+        if (!markRes.length) {
+          return { success: false, error: 'Email verification token has already been used' };
+        }
+
+        await tx
+          .update(schema.users)
+          .set({
+            emailVerified: true,
+            emailVerifiedAt: now,
+            updatedAt: now,
+          })
+          .where(eq(schema.users.id, tokenRecord.userId));
+
+        return { success: true, userId: tokenRecord.userId };
+      });
+    });
+  }
+
+  public async changePasswordAndInvalidateOtherSessions(
+    userId: string,
+    newPasswordHash: string,
+    keepSessionId: string
+  ): Promise<{ success: boolean; error?: string }> {
+    return await withDbRetry(async () => {
+      return await db.transaction(async (tx) => {
+        const now = new Date();
+        const updateRes = await tx
+          .update(schema.users)
+          .set({
+            passwordHash: newPasswordHash,
+            updatedAt: now,
+          })
+          .where(eq(schema.users.id, userId))
+          .returning({ id: schema.users.id });
+
+        if (!updateRes.length) {
+          return { success: false, error: 'User account not found' };
+        }
+
+        if (keepSessionId) {
+          await tx
+            .delete(schema.userSessions)
+            .where(
+              and(
+                eq(schema.userSessions.userId, userId),
+                ne(schema.userSessions.id, keepSessionId)
+              )
+            );
+        }
+
+        return { success: true };
+      });
+    });
   }
 
   public async updatePassword(userId: string, passwordHash: string): Promise<boolean> {

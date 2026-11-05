@@ -89,6 +89,33 @@ export const MyAccountDropdown: React.FC = () => {
     document.addEventListener('keydown', handleKeyDown);
     window.addEventListener('open_auth_modal', handleOpenAuthModal);
 
+    // Auto-detect reset link URL parameters and open reset modal
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      const urlToken = searchParams.get('token');
+      const urlTab = searchParams.get('tab');
+
+      if (urlToken || urlTab === 'reset-password') {
+        if (urlToken) {
+          setResetToken(urlToken);
+        }
+        setIsOpen(false);
+        setErrorMsg(null);
+        setSuccessMsg(null);
+        setAuthModalMode('reset');
+
+        // Strip sensitive token from visible browser URL
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('token');
+        cleanUrl.searchParams.delete('tab');
+        window.history.replaceState(
+          {},
+          document.title,
+          cleanUrl.pathname + (cleanUrl.searchParams.toString() ? '?' + cleanUrl.searchParams.toString() : '')
+        );
+      }
+    }
+
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleKeyDown);

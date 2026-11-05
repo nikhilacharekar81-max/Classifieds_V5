@@ -18,6 +18,12 @@ import * as authLoginRoute from './server/api/auth/login/route.ts';
 import * as authLogoutRoute from './server/api/auth/logout/route.ts';
 import * as authSignupRoute from './server/api/auth/signup/route.ts';
 import * as authMeRoute from './server/api/auth/me/route.ts';
+import * as authForgotPasswordRoute from './server/api/auth/forgot-password/route.ts';
+import * as authResetPasswordRoute from './server/api/auth/reset-password/route.ts';
+import * as authChangePasswordRoute from './server/api/auth/change-password/route.ts';
+import * as authVerifyEmailRequestRoute from './server/api/auth/verify-email/request/route.ts';
+import * as authVerifyEmailConfirmRoute from './server/api/auth/verify-email/confirm/route.ts';
+import * as authLogoutAllRoute from './server/api/auth/logout-all/route.ts';
 import * as listingsRoute from './server/api/listings/route.ts';
 import * as listingsByIdRoute from './server/api/listings/[id]/route.ts';
 import * as listingsRevealPhoneRoute from './server/api/listings/[id]/reveal-phone/route.ts';
@@ -78,6 +84,7 @@ async function startServer() {
   await initializePostgreSQL();
 
   const app = express();
+  app.set('trust proxy', true);
   const PORT = 3000;
 
   // Preserve raw body for webhook HMAC verification while parsing JSON
@@ -106,6 +113,12 @@ async function startServer() {
   app.all('/api/auth/logout', createExpressRouteHandler(authLogoutRoute));
   app.all('/api/auth/signup', createExpressRouteHandler(authSignupRoute));
   app.all('/api/auth/me', createExpressRouteHandler(authMeRoute));
+  app.all('/api/auth/forgot-password', createExpressRouteHandler(authForgotPasswordRoute));
+  app.all('/api/auth/reset-password', createExpressRouteHandler(authResetPasswordRoute));
+  app.all('/api/auth/change-password', createExpressRouteHandler(authChangePasswordRoute));
+  app.all('/api/auth/verify-email/request', createExpressRouteHandler(authVerifyEmailRequestRoute));
+  app.all('/api/auth/verify-email/confirm', createExpressRouteHandler(authVerifyEmailConfirmRoute));
+  app.all('/api/auth/logout-all', createExpressRouteHandler(authLogoutAllRoute));
 
   // Listings Routes
   app.all('/api/listings/check-duplicate', createExpressRouteHandler(listingsCheckDuplicateRoute));

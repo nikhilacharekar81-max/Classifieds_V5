@@ -48,11 +48,16 @@ export async function POST(req: NextRequest) {
     }
 
     const newPasswordHash = await hashPassword(String(newPassword));
-    await userRepository.updatePassword(authContext.userId, newPasswordHash);
+    const result = await userRepository.changePasswordAndInvalidateOtherSessions(
+      authContext.userId,
+      newPasswordHash,
+      authContext.sessionId
+    );
 
-    // Invalidate other active sessions while handling the current session safely
-    if (authContext.sessionId) {
-      await userRepository.deleteOtherUserSessions(authContext.userId, authContext.sessionId);
+    if (!result.success) {
+      return addSecurityHeaders(
+        NextResponse.json({ error: result.error || 'Failed to change password' }, { status: 400 })
+      );
     }
 
     return addSecurityHeaders(

@@ -177,7 +177,7 @@ export function createExpressRouteHandler(routeModule: Record<string, any>) {
     } catch (error: any) {
       console.error(`[ExpressRouteAdapter] Error in ${req.method} ${req.originalUrl}:`, error);
       if (!res.headersSent) {
-        res.status(500).json({ error: error?.message || 'Internal Server Error' });
+        res.status(500).json({ error: 'An unexpected server error occurred. Please try again later.' });
       }
     }
   };

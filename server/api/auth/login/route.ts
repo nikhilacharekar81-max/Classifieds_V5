@@ -17,19 +17,16 @@ export async function POST(req: NextRequest) {
     const cleanEmail = String(email).toLowerCase().trim();
     const ipAddress = getRequestIp(req);
     const ipKey = `ip:${ipAddress}`;
-    const emailKey = `email:${cleanEmail}`;
 
-    // 1. Rate Limiting Check
-    const ipLimit = await userRepository.checkRateLimit(ipKey, 5, 15 * 60 * 1000, 15 * 60 * 1000);
-    const emailLimit = await userRepository.checkRateLimit(emailKey, 5, 15 * 60 * 1000, 15 * 60 * 1000);
+    // 1. IP-Based Rate Limiting Check (Does not lock user accounts)
+    const ipLimit = await userRepository.checkRateLimit(ipKey, 10, 15 * 60 * 1000, 15 * 60 * 1000);
 
-    if (!ipLimit.allowed || !emailLimit.allowed) {
-      const retryAfter = Math.max(ipLimit.retryAfterSeconds, emailLimit.retryAfterSeconds) || 900;
+    if (!ipLimit.allowed) {
       const res = NextResponse.json(
-        { error: 'Too many failed login attempts. Please try again later in 15 minutes.' },
+        { error: 'Too many failed login attempts from your connection. Please try again in 15 minutes.' },
         { status: 429 }
       );
-      res.headers.set('Retry-After', String(retryAfter));
+      res.headers.set('Retry-After', String(ipLimit.retryAfterSeconds || 900));
       return addSecurityHeaders(res);
     }
 
@@ -39,7 +36,6 @@ export async function POST(req: NextRequest) {
     if (!userRow || !userRow.passwordHash) {
       await verifyPassword(String(password), DUMMY_PASSWORD_HASH);
       await userRepository.recordFailedAttempt(ipKey);
-      await userRepository.recordFailedAttempt(emailKey);
       return addSecurityHeaders(
         NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
       );
@@ -49,7 +45,6 @@ export async function POST(req: NextRequest) {
 
     if (!isValid) {
       await userRepository.recordFailedAttempt(ipKey);
-      await userRepository.recordFailedAttempt(emailKey);
       return addSecurityHeaders(
         NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
       );
@@ -58,7 +53,6 @@ export async function POST(req: NextRequest) {
     // Preserve rule: inactive/suspended accounts cannot authenticate
     if (userRow.status !== 'active') {
       await userRepository.recordFailedAttempt(ipKey);
-      await userRepository.recordFailedAttempt(emailKey);
       return addSecurityHeaders(
         NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
       );
@@ -66,7 +60,6 @@ export async function POST(req: NextRequest) {
 
     // 3. Successful Authentication
     await userRepository.clearRateLimit(ipKey);
-    await userRepository.clearRateLimit(emailKey);
 
     const sessionId = `sess_${crypto.randomUUID()}`;
     const userAgent = req.headers.get('user-agent') || undefined;

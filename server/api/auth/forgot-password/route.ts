@@ -55,10 +55,7 @@ export async function POST(req: NextRequest) {
           type: 'password_reset',
         });
       } catch (emailErr) {
-        console.warn('[ForgotPassword] Email delivery skipped or unconfigured. Reset Token generated:', {
-          email: cleanEmail,
-          rawToken,
-        });
+        console.warn('[ForgotPassword] Email delivery attempt failed or unconfigured.');
       }
     }
 
