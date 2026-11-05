@@ -252,6 +252,23 @@ export function eq(left: any, right: any): SqlExpr<boolean> {
   });
 }
 
+export function ne(left: any, right: any): SqlExpr<boolean> {
+  return new SqlExpr<boolean>((params, opts) => {
+    if (right === null) {
+      return `${renderOperand(left, params, opts)} IS NOT NULL`;
+    }
+    const hint = isColumn(left) ? left : undefined;
+    return `${renderOperand(left, params, opts)} <> ${renderOperand(right, params, opts, hint)}`;
+  });
+}
+
+export function gt(left: any, right: any): SqlExpr<boolean> {
+  return new SqlExpr<boolean>((params, opts) => {
+    const hint = isColumn(left) ? left : undefined;
+    return `${renderOperand(left, params, opts)} > ${renderOperand(right, params, opts, hint)}`;
+  });
+}
+
 export function gte(left: any, right: any): SqlExpr<boolean> {
   return new SqlExpr<boolean>((params, opts) => {
     const hint = isColumn(left) ? left : undefined;

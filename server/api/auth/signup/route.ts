@@ -1,24 +1,37 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { userRepository } from '@/server/repositories/user.repository';
 import { hashPassword } from '@/lib/auth/password';
+import { getRequestIp } from '@/lib/auth/session';
+import { safeErrorResponse, addSecurityHeaders } from '@/lib/auth/security';
 import crypto from 'node:crypto';
 
 export async function POST(req: NextRequest) {
   try {
-    const { name, email, password, phone, city, state, type } = await req.json();
+    const { name, email, password, phone, city, state, type } = await req.json().catch(() => ({}));
 
     if (!name || !email || !password) {
-      return NextResponse.json({ error: 'Name, email, and password are required' }, { status: 400 });
+      return addSecurityHeaders(
+        NextResponse.json({ error: 'Name, email, and password are required' }, { status: 400 })
+      );
     }
 
     const cleanEmail = String(email).toLowerCase().trim();
-    if (typeof password !== 'string' || password.length < 6) {
-      return NextResponse.json({ error: 'Password must be a string and at least 6 characters long' }, { status: 400 });
+
+    // Password policy: exactly 4 to 20 characters, no complexity rules enforced
+    if (typeof password !== 'string' || password.length < 4 || password.length > 20) {
+      return addSecurityHeaders(
+        NextResponse.json(
+          { error: 'Password must be between 4 and 20 characters long' },
+          { status: 400 }
+        )
+      );
     }
 
     const existing = await userRepository.findByEmail(cleanEmail);
     if (existing) {
-      return NextResponse.json({ error: 'An account with this email already exists' }, { status: 409 });
+      return addSecurityHeaders(
+        NextResponse.json({ error: 'An account with this email already exists' }, { status: 409 })
+      );
     }
 
     const passwordHash = await hashPassword(String(password));
@@ -36,7 +49,7 @@ export async function POST(req: NextRequest) {
     });
 
     const sessionId = `sess_${crypto.randomUUID()}`;
-    const ipAddress = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+    const ipAddress = getRequestIp(req);
     const userAgent = req.headers.get('user-agent') || undefined;
 
     const { expiresAt } = await userRepository.createSession(sessionId, userObj.id, ipAddress, userAgent);
@@ -57,9 +70,8 @@ export async function POST(req: NextRequest) {
       path: '/',
     });
 
-    return response;
+    return addSecurityHeaders(response);
   } catch (error: any) {
-    console.error('API /api/auth/signup error:', error);
-    return NextResponse.json({ error: error.message || 'Registration failed' }, { status: 500 });
+    return safeErrorResponse(error, 'Registration failed. Please try again.');
   }
 }

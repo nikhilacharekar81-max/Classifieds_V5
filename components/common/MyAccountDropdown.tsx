@@ -14,6 +14,7 @@ import {
   Phone,
   MapPin,
   Loader2,
+  KeyRound,
 } from 'lucide-react';
 import { useAppOptional } from '@/context/AppContextInstance';
 import { UserAccount } from '@/lib/types';
@@ -28,9 +29,10 @@ export const MyAccountDropdown: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [localAuthUser, setLocalAuthUser] = useState<UserAccount | null>(null);
   const [hasCheckedSession, setHasCheckedSession] = useState(false);
-  const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup' | null>(null);
+  const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup' | 'forgot' | 'reset' | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // Sign In form state
   const [signInEmail, setSignInEmail] = useState('');
@@ -43,6 +45,11 @@ export const MyAccountDropdown: React.FC = () => {
   const [signUpPhone, setSignUpPhone] = useState('');
   const [signUpCity, setSignUpCity] = useState('Mumbai');
   const [signUpState, setSignUpState] = useState('Maharashtra');
+
+  // Forgot Password / Reset form state
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [resetToken, setResetToken] = useState('');
+  const [resetNewPassword, setResetNewPassword] = useState('');
 
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -70,10 +77,11 @@ export const MyAccountDropdown: React.FC = () => {
       }
     };
     const handleOpenAuthModal = (event: Event) => {
-      const customEv = event as CustomEvent<{ mode?: 'signin' | 'signup' }>;
+      const customEv = event as CustomEvent<{ mode?: 'signin' | 'signup' | 'forgot' | 'reset' }>;
       const mode = customEv.detail?.mode || 'signin';
       setIsOpen(false);
       setErrorMsg(null);
+      setSuccessMsg(null);
       setAuthModalMode(mode);
     };
 
@@ -104,9 +112,10 @@ export const MyAccountDropdown: React.FC = () => {
     }
   };
 
-  const openModal = (mode: 'signin' | 'signup') => {
+  const openModal = (mode: 'signin' | 'signup' | 'forgot' | 'reset') => {
     setIsOpen(false);
     setErrorMsg(null);
+    setSuccessMsg(null);
     setAuthModalMode(mode);
   };
 
@@ -114,11 +123,13 @@ export const MyAccountDropdown: React.FC = () => {
     if (isSubmitting) return;
     setAuthModalMode(null);
     setErrorMsg(null);
+    setSuccessMsg(null);
   };
 
   const handleSignInSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    setSuccessMsg(null);
     if (!signInEmail.trim() || !signInPassword) {
       setErrorMsg('Please enter both email and password.');
       return;
@@ -166,12 +177,13 @@ export const MyAccountDropdown: React.FC = () => {
   const handleSignUpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    setSuccessMsg(null);
     if (!signUpName.trim() || !signUpEmail.trim() || !signUpPassword) {
       setErrorMsg('Name, email, and password are required.');
       return;
     }
-    if (signUpPassword.length < 6) {
-      setErrorMsg('Password must be at least 6 characters long.');
+    if (signUpPassword.length < 4 || signUpPassword.length > 20) {
+      setErrorMsg('Password must be between 4 and 20 characters long.');
       return;
     }
 
@@ -227,6 +239,78 @@ export const MyAccountDropdown: React.FC = () => {
       setAuthModalMode(null);
     } catch (err: any) {
       setErrorMsg(err?.message || 'Unable to complete registration. Please try again.');
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    if (!forgotEmail.trim()) {
+      setErrorMsg('Please enter your email address.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotEmail.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setIsSubmitting(false);
+      if (!res.ok) {
+        setErrorMsg(data.error || 'Failed to request password reset.');
+        return;
+      }
+      setSuccessMsg(data.message || 'If an account exists with that email, password reset instructions have been sent.');
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Unable to request password reset. Please try again.');
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    if (!resetToken.trim() || !resetNewPassword) {
+      setErrorMsg('Reset token and new password are required.');
+      return;
+    }
+    if (resetNewPassword.length < 4 || resetNewPassword.length > 20) {
+      setErrorMsg('New password must be between 4 and 20 characters long.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: resetToken.trim(),
+          newPassword: resetNewPassword,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setIsSubmitting(false);
+      if (!res.ok) {
+        setErrorMsg(data.error || 'Failed to reset password.');
+        return;
+      }
+      notify({
+        type: 'success',
+        title: 'Password Reset Successful',
+        message: 'Your password has been reset. Please sign in with your new password.',
+      });
+      setResetToken('');
+      setResetNewPassword('');
+      setAuthModalMode('signin');
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Unable to reset password. Please try again.');
       setIsSubmitting(false);
     }
   };
@@ -342,7 +426,7 @@ export const MyAccountDropdown: React.FC = () => {
         )}
       </div>
 
-      {/* Sign In / Sign Up Modal */}
+      {/* Sign In / Sign Up / Forgot Password Modal */}
       {authModalMode && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
           <div className="bg-white rounded-2xl border border-[#dadce0] shadow-2xl w-full max-w-md overflow-hidden">
@@ -353,6 +437,7 @@ export const MyAccountDropdown: React.FC = () => {
                   type="button"
                   onClick={() => {
                     setErrorMsg(null);
+                    setSuccessMsg(null);
                     setAuthModalMode('signin');
                   }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
@@ -367,6 +452,7 @@ export const MyAccountDropdown: React.FC = () => {
                   type="button"
                   onClick={() => {
                     setErrorMsg(null);
+                    setSuccessMsg(null);
                     setAuthModalMode('signup');
                   }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
@@ -421,9 +507,22 @@ export const MyAccountDropdown: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-[#3c4043] mb-1">
-                      Password
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-semibold text-[#3c4043]">
+                        Password
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setErrorMsg(null);
+                          setSuccessMsg(null);
+                          setAuthModalMode('forgot');
+                        }}
+                        className="text-xs text-[#1a73e8] hover:underline font-medium cursor-pointer"
+                      >
+                        Forgot Password?
+                      </button>
+                    </div>
                     <div className="relative">
                       <Lock className="w-4 h-4 text-[#5f6368] absolute left-3 top-2.5" />
                       <input
@@ -452,6 +551,7 @@ export const MyAccountDropdown: React.FC = () => {
                     type="button"
                     onClick={() => {
                       setErrorMsg(null);
+                      setSuccessMsg(null);
                       setAuthModalMode('signup');
                     }}
                     className="text-xs text-[#1a73e8] hover:underline font-medium cursor-pointer"
@@ -460,7 +560,7 @@ export const MyAccountDropdown: React.FC = () => {
                   </button>
                 </div>
               </form>
-            ) : (
+            ) : authModalMode === 'signup' ? (
               <form onSubmit={handleSignUpSubmit} className="p-6 space-y-4">
                 <div>
                   <h3 className="text-base font-bold text-[#202124]">Create your Chillyads Account</h3>
@@ -546,17 +646,18 @@ export const MyAccountDropdown: React.FC = () => {
 
                   <div>
                     <label className="block text-xs font-semibold text-[#3c4043] mb-1">
-                      Password (min. 6 characters)
+                      Password (4 to 20 characters)
                     </label>
                     <div className="relative">
                       <Lock className="w-4 h-4 text-[#5f6368] absolute left-3 top-2.5" />
                       <input
                         type="password"
                         required
-                        minLength={6}
+                        minLength={4}
+                        maxLength={20}
                         value={signUpPassword}
                         onChange={(e) => setSignUpPassword(e.target.value)}
-                        placeholder="Create a password"
+                        placeholder="Create a password (4-20 chars)"
                         className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-[#dadce0] focus:outline-none focus:border-[#1dbf73] text-[#202124]"
                       />
                     </div>
@@ -577,11 +678,169 @@ export const MyAccountDropdown: React.FC = () => {
                     type="button"
                     onClick={() => {
                       setErrorMsg(null);
+                      setSuccessMsg(null);
                       setAuthModalMode('signin');
                     }}
                     className="text-xs text-[#1a73e8] hover:underline font-medium cursor-pointer"
                   >
                     Already have an account? Sign In
+                  </button>
+                </div>
+              </form>
+            ) : authModalMode === 'forgot' ? (
+              <form onSubmit={handleForgotPasswordSubmit} className="p-6 space-y-4">
+                <div>
+                  <h3 className="text-base font-bold text-[#202124]">Forgot Password</h3>
+                  <p className="text-xs text-[#5f6368] mt-0.5">
+                    Enter your registered email address to receive password reset instructions.
+                  </p>
+                </div>
+
+                {errorMsg && (
+                  <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs font-medium text-rose-700">
+                    {errorMsg}
+                  </div>
+                )}
+
+                {successMsg && (
+                  <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-800 space-y-2">
+                    <p>{successMsg}</p>
+                    <button
+                      type="button"
+                      onClick={() => setAuthModalMode('reset')}
+                      className="text-xs font-bold text-[#137333] hover:underline cursor-pointer block"
+                    >
+                      Have a reset token? Click here to set new password
+                    </button>
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#3c4043] mb-1">
+                      Registered Email Address
+                    </label>
+                    <div className="relative">
+                      <Mail className="w-4 h-4 text-[#5f6368] absolute left-3 top-2.5" />
+                      <input
+                        type="email"
+                        required
+                        value={forgotEmail}
+                        onChange={(e) => setForgotEmail(e.target.value)}
+                        placeholder="you@example.com"
+                        className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-[#dadce0] focus:outline-none focus:border-[#1dbf73] text-[#202124]"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full py-2.5 bg-[#1dbf73] hover:bg-[#19a463] disabled:opacity-60 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                  <span>Send Reset Instructions</span>
+                </button>
+
+                <div className="flex items-center justify-between text-xs pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setErrorMsg(null);
+                      setSuccessMsg(null);
+                      setAuthModalMode('signin');
+                    }}
+                    className="text-[#1a73e8] hover:underline font-medium cursor-pointer"
+                  >
+                    Back to Sign In
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setErrorMsg(null);
+                      setSuccessMsg(null);
+                      setAuthModalMode('reset');
+                    }}
+                    className="text-[#5f6368] hover:underline font-medium cursor-pointer"
+                  >
+                    Enter Reset Token
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={handleResetPasswordSubmit} className="p-6 space-y-4">
+                <div>
+                  <h3 className="text-base font-bold text-[#202124]">Reset Your Password</h3>
+                  <p className="text-xs text-[#5f6368] mt-0.5">
+                    Enter the reset token sent to your email and your new password (4–20 chars).
+                  </p>
+                </div>
+
+                {errorMsg && (
+                  <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs font-medium text-rose-700">
+                    {errorMsg}
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#3c4043] mb-1">
+                      Reset Token
+                    </label>
+                    <div className="relative">
+                      <KeyRound className="w-4 h-4 text-[#5f6368] absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        required
+                        value={resetToken}
+                        onChange={(e) => setResetToken(e.target.value)}
+                        placeholder="Paste reset token here"
+                        className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-[#dadce0] focus:outline-none focus:border-[#1dbf73] text-[#202124]"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-[#3c4043] mb-1">
+                      New Password (4 to 20 characters)
+                    </label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-[#5f6368] absolute left-3 top-2.5" />
+                      <input
+                        type="password"
+                        required
+                        minLength={4}
+                        maxLength={20}
+                        value={resetNewPassword}
+                        onChange={(e) => setResetNewPassword(e.target.value)}
+                        placeholder="Enter new password (4-20 chars)"
+                        className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-[#dadce0] focus:outline-none focus:border-[#1dbf73] text-[#202124]"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full py-2.5 bg-[#1dbf73] hover:bg-[#19a463] disabled:opacity-60 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                  <span>Confirm Reset Password</span>
+                </button>
+
+                <div className="text-center pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setErrorMsg(null);
+                      setSuccessMsg(null);
+                      setAuthModalMode('signin');
+                    }}
+                    className="text-xs text-[#1a73e8] hover:underline font-medium cursor-pointer"
+                  >
+                    Back to Sign In
                   </button>
                 </div>
               </form>

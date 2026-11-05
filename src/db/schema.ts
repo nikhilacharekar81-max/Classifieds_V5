@@ -37,7 +37,38 @@ export const users = pgTable('users', {
   verifiedBusiness: boolean('verified_business').notNull().default(false),
   adminRole: varchar('admin_role', { length: 64 }),
   twoFactorEnabled: boolean('two_factor_enabled').notNull().default(false),
+  emailVerified: boolean('email_verified').notNull().default(false),
+  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// 1b. Password Reset Tokens
+export const passwordResetTokens = pgTable('password_reset_tokens', {
+  id: varchar('id', { length: 64 }).primaryKey(),
+  userId: varchar('user_id', { length: 64 }).notNull().references(() => users.id, { onDelete: 'cascade' }),
+  tokenHash: varchar('token_hash', { length: 128 }).notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// 1c. Email Verification Tokens
+export const emailVerificationTokens = pgTable('email_verification_tokens', {
+  id: varchar('id', { length: 64 }).primaryKey(),
+  userId: varchar('user_id', { length: 64 }).notNull().references(() => users.id, { onDelete: 'cascade' }),
+  tokenHash: varchar('token_hash', { length: 128 }).notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// 1d. Login Rate Limits
+export const loginRateLimits = pgTable('login_rate_limits', {
+  id: varchar('id', { length: 128 }).primaryKey(),
+  attempts: integer('attempts').notNull().default(0),
+  firstAttemptAt: timestamp('first_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+  blockedUntil: timestamp('blocked_until', { withTimezone: true }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

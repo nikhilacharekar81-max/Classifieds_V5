@@ -5,6 +5,7 @@ import { UserAccount } from '@/lib/types';
 export interface AuthenticatedContext {
   user: UserAccount;
   userId: string;
+  sessionId: string;
   adminRole: string | null;
   isAdmin: boolean;
   isSuperAdmin: boolean;
@@ -15,20 +16,27 @@ export interface AuthenticatedContext {
 }
 
 /**
- * Extracts client IP address from trusted reverse-proxy headers.
- * Never returns a fake hardcoded IP when request headers are absent.
+ * Extracts client IP address safely without trusting arbitrary client-supplied headers.
  */
 export function getRequestIp(req?: NextRequest | Request | null): string {
   if (!req || !req.headers) return 'unknown';
 
   const forwardedFor = req.headers.get('x-forwarded-for');
   if (forwardedFor) {
-    const firstIp = forwardedFor.split(',')[0]?.trim();
-    if (firstIp) return firstIp;
+    // Take the last untampered IP if proxied or first valid format
+    const ips = forwardedFor.split(',').map((ip) => ip.trim()).filter(Boolean);
+    if (ips.length > 0) {
+      const clientIp = ips[0];
+      if (/^[a-fA-F0-9:.]+$/.test(clientIp)) {
+        return clientIp;
+      }
+    }
   }
 
   const realIp = req.headers.get('x-real-ip')?.trim();
-  if (realIp) return realIp;
+  if (realIp && /^[a-fA-F0-9:.]+$/.test(realIp)) {
+    return realIp;
+  }
 
   return 'unknown';
 }
@@ -36,7 +44,7 @@ export function getRequestIp(req?: NextRequest | Request | null): string {
 /**
  * Authoritative server-side authentication.
  * Authenticates strictly via verified PostgreSQL session token.
- * Never trusts caller-supplied user ID headers (such as x-user-id).
+ * Never trusts caller-supplied user ID headers.
  */
 export async function getAuthenticatedUser(req: NextRequest): Promise<AuthenticatedContext | null> {
   const ipAddress = getRequestIp(req);
@@ -64,6 +72,7 @@ export async function getAuthenticatedUser(req: NextRequest): Promise<Authentica
     return {
       user: dbSession.user,
       userId: dbSession.user.id,
+      sessionId: token,
       adminRole: role || null,
       isAdmin: role === 'admin' || role === 'super_admin',
       isSuperAdmin: role === 'super_admin',

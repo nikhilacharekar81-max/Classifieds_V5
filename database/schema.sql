@@ -331,9 +331,37 @@ CREATE TABLE "users" (
 	"verified_business" boolean DEFAULT false NOT NULL,
 	"admin_role" varchar(64),
 	"two_factor_enabled" boolean DEFAULT false NOT NULL,
+	"email_verified" boolean DEFAULT false NOT NULL,
+	"email_verified_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "users_email_unique" UNIQUE("email")
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "password_reset_tokens" (
+	"id" varchar(64) PRIMARY KEY NOT NULL,
+	"user_id" varchar(64) NOT NULL,
+	"token_hash" varchar(128) NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL,
+	"used_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "email_verification_tokens" (
+	"id" varchar(64) PRIMARY KEY NOT NULL,
+	"user_id" varchar(64) NOT NULL,
+	"token_hash" varchar(128) NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL,
+	"used_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "login_rate_limits" (
+	"id" varchar(128) PRIMARY KEY NOT NULL,
+	"attempts" integer DEFAULT 0 NOT NULL,
+	"first_attempt_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"blocked_until" timestamp with time zone,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "cache_invalidation_outbox" (

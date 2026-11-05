@@ -1,6 +1,6 @@
 import { db, withDbRetry } from '@/src/db/index';
 import * as schema from '@/src/db/schema';
-import { eq, desc } from '@/src/db/pg-orm';
+import { eq, desc, and, ne, gt } from '@/src/db/pg-orm';
 import { UserAccount } from '@/lib/types';
 
 export class UserRepository {
@@ -15,6 +15,9 @@ export class UserRepository {
       status: row.status as any,
       kycStatus: row.kycStatus as any,
       emailSubscribed: row.emailSubscribed,
+      emailUnsubscribedAt: row.emailUnsubscribedAt ? row.emailUnsubscribedAt.toISOString() : undefined,
+      emailVerified: row.emailVerified,
+      emailVerifiedAt: row.emailVerifiedAt ? row.emailVerifiedAt.toISOString() : undefined,
       location: {
         city: row.city,
         state: row.state,
@@ -330,6 +333,242 @@ export class UserRepository {
       await db.delete(schema.userSessions).where(eq(schema.userSessions.userId, userId));
     } catch (error) {
       console.error('UserRepository.deleteUserSessions error:', error);
+    }
+  }
+
+  public async deleteOtherUserSessions(userId: string, keepSessionId: string) {
+    try {
+      await db
+        .delete(schema.userSessions)
+        .where(
+          and(
+            eq(schema.userSessions.userId, userId),
+            ne(schema.userSessions.id, keepSessionId)
+          )
+        );
+    } catch (error) {
+      console.error('UserRepository.deleteOtherUserSessions error:', error);
+    }
+  }
+
+  public async updatePassword(userId: string, passwordHash: string): Promise<boolean> {
+    try {
+      const res = await db
+        .update(schema.users)
+        .set({
+          passwordHash,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.users.id, userId))
+        .returning({ id: schema.users.id });
+      return res.length > 0;
+    } catch (error) {
+      console.error(`UserRepository.updatePassword error for ${userId}:`, error);
+      throw error;
+    }
+  }
+
+  // Password Reset Token Management
+  public async createPasswordResetToken(id: string, userId: string, tokenHash: string, expiresAt: Date) {
+    try {
+      await db.insert(schema.passwordResetTokens).values({
+        id,
+        userId,
+        tokenHash,
+        expiresAt,
+      });
+    } catch (error) {
+      console.error('UserRepository.createPasswordResetToken error:', error);
+      throw error;
+    }
+  }
+
+  public async findPasswordResetToken(tokenHash: string) {
+    try {
+      const rows = await db
+        .select()
+        .from(schema.passwordResetTokens)
+        .where(
+          and(
+            eq(schema.passwordResetTokens.tokenHash, tokenHash),
+            gt(schema.passwordResetTokens.expiresAt, new Date())
+          )
+        )
+        .limit(1);
+      return rows[0] || null;
+    } catch (error) {
+      console.error('UserRepository.findPasswordResetToken error:', error);
+      return null;
+    }
+  }
+
+  public async markPasswordResetTokenUsed(tokenId: string) {
+    try {
+      await db
+        .update(schema.passwordResetTokens)
+        .set({ usedAt: new Date() })
+        .where(eq(schema.passwordResetTokens.id, tokenId));
+    } catch (error) {
+      console.error('UserRepository.markPasswordResetTokenUsed error:', error);
+    }
+  }
+
+  // Email Verification Token Management
+  public async createEmailVerificationToken(id: string, userId: string, tokenHash: string, expiresAt: Date) {
+    try {
+      await db.insert(schema.emailVerificationTokens).values({
+        id,
+        userId,
+        tokenHash,
+        expiresAt,
+      });
+    } catch (error) {
+      console.error('UserRepository.createEmailVerificationToken error:', error);
+      throw error;
+    }
+  }
+
+  public async findEmailVerificationToken(tokenHash: string) {
+    try {
+      const rows = await db
+        .select()
+        .from(schema.emailVerificationTokens)
+        .where(
+          and(
+            eq(schema.emailVerificationTokens.tokenHash, tokenHash),
+            gt(schema.emailVerificationTokens.expiresAt, new Date())
+          )
+        )
+        .limit(1);
+      return rows[0] || null;
+    } catch (error) {
+      console.error('UserRepository.findEmailVerificationToken error:', error);
+      return null;
+    }
+  }
+
+  public async markEmailVerificationTokenUsed(tokenId: string) {
+    try {
+      await db
+        .update(schema.emailVerificationTokens)
+        .set({ usedAt: new Date() })
+        .where(eq(schema.emailVerificationTokens.id, tokenId));
+    } catch (error) {
+      console.error('UserRepository.markEmailVerificationTokenUsed error:', error);
+    }
+  }
+
+  public async markEmailVerified(userId: string) {
+    try {
+      await db
+        .update(schema.users)
+        .set({
+          emailVerified: true,
+          emailVerifiedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.users.id, userId));
+    } catch (error) {
+      console.error('UserRepository.markEmailVerified error:', error);
+    }
+  }
+
+  // Persistent Rate Limiting
+  public async checkRateLimit(key: string, maxAttempts = 5, windowMs = 15 * 60 * 1000, blockMs = 15 * 60 * 1000): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+    try {
+      const now = new Date();
+      const rows = await db
+        .select()
+        .from(schema.loginRateLimits)
+        .where(eq(schema.loginRateLimits.id, key))
+        .limit(1);
+
+      if (!rows.length) {
+        return { allowed: true, retryAfterSeconds: 0 };
+      }
+
+      const record = rows[0];
+
+      if (record.blockedUntil && record.blockedUntil > now) {
+        const retryAfterSeconds = Math.ceil((record.blockedUntil.getTime() - now.getTime()) / 1000);
+        return { allowed: false, retryAfterSeconds };
+      }
+
+      if (now.getTime() - record.firstAttemptAt.getTime() > windowMs) {
+        await db
+          .update(schema.loginRateLimits)
+          .set({ attempts: 0, firstAttemptAt: now, blockedUntil: null, updatedAt: now })
+          .where(eq(schema.loginRateLimits.id, key));
+        return { allowed: true, retryAfterSeconds: 0 };
+      }
+
+      if (record.attempts >= maxAttempts) {
+        const blockedUntil = new Date(now.getTime() + blockMs);
+        await db
+          .update(schema.loginRateLimits)
+          .set({ blockedUntil, updatedAt: now })
+          .where(eq(schema.loginRateLimits.id, key));
+        const retryAfterSeconds = Math.ceil(blockMs / 1000);
+        return { allowed: false, retryAfterSeconds };
+      }
+
+      return { allowed: true, retryAfterSeconds: 0 };
+    } catch (error) {
+      console.error('UserRepository.checkRateLimit error:', error);
+      return { allowed: true, retryAfterSeconds: 0 };
+    }
+  }
+
+  public async recordFailedAttempt(key: string, windowMs = 15 * 60 * 1000, blockMs = 15 * 60 * 1000) {
+    try {
+      const now = new Date();
+      const rows = await db
+        .select()
+        .from(schema.loginRateLimits)
+        .where(eq(schema.loginRateLimits.id, key))
+        .limit(1);
+
+      if (!rows.length) {
+        await db.insert(schema.loginRateLimits).values({
+          id: key,
+          attempts: 1,
+          firstAttemptAt: now,
+          updatedAt: now,
+        });
+        return;
+      }
+
+      const record = rows[0];
+      if (now.getTime() - record.firstAttemptAt.getTime() > windowMs) {
+        await db
+          .update(schema.loginRateLimits)
+          .set({ attempts: 1, firstAttemptAt: now, blockedUntil: null, updatedAt: now })
+          .where(eq(schema.loginRateLimits.id, key));
+        return;
+      }
+
+      const newAttempts = record.attempts + 1;
+      let blockedUntil = record.blockedUntil;
+      if (newAttempts >= 5) {
+        blockedUntil = new Date(now.getTime() + blockMs);
+      }
+
+      await db
+        .update(schema.loginRateLimits)
+        .set({ attempts: newAttempts, blockedUntil, updatedAt: now })
+        .where(eq(schema.loginRateLimits.id, key));
+    } catch (error) {
+      console.error('UserRepository.recordFailedAttempt error:', error);
+    }
+  }
+
+  public async clearRateLimit(key: string) {
+    try {
+      await db
+        .delete(schema.loginRateLimits)
+        .where(eq(schema.loginRateLimits.id, key));
+    } catch (error) {
+      console.error('UserRepository.clearRateLimit error:', error);
     }
   }
 }

@@ -40,6 +40,8 @@ export interface UserAccount {
   kycStatus: KycStatus;
   emailSubscribed: boolean; // Captured & defaulted to true on registration
   emailUnsubscribedAt?: string;
+  emailVerified?: boolean;
+  emailVerifiedAt?: string;
   kycDocument?: {
     type: 'Aadhaar' | 'PAN' | 'GSTIN' | 'Passport';
     docNumber: string;
