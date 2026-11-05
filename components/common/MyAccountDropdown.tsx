@@ -95,7 +95,7 @@ export const MyAccountDropdown: React.FC = () => {
       const urlToken = searchParams.get('token');
       const urlTab = searchParams.get('tab');
 
-      if (urlTab === 'verify-email' && urlToken) {
+      if (urlToken && (!urlTab || urlTab === 'verify-email')) {
         // Handle email verification token confirmation directly
         fetch('/api/auth/verify-email/confirm', {
           method: 'POST',

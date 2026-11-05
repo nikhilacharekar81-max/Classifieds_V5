@@ -46,17 +46,16 @@ export async function POST(req: NextRequest) {
 
       await userRepository.createEmailVerificationToken(tokenId, userRow.id, tokenHash, expiresAt);
 
-      try {
-        const verifyUrl = `${req.nextUrl.origin}/my-account?tab=verify-email&token=${rawToken}`;
-        await emailService.sendCustomEmail({
-          toEmail: cleanEmail,
-          toName: userRow.name || 'User',
-          subject: 'Verify Your Email Address - Chillyads',
-          body: `<p>Hello ${userRow.name},</p><p>Please verify your email address by clicking the link below:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>This link expires in 24 hours.</p>`,
-          type: 'email_verification',
-        });
-      } catch (emailErr) {
-        console.warn('[VerifyEmail] Email delivery attempt failed or unconfigured.');
+      const emailResult = await emailService.sendCustomEmail({
+        toEmail: cleanEmail,
+        toName: userRow.name || 'User',
+        subject: 'Verify Your Email Address - Chillyads',
+        body: `<p>Hello ${userRow.name},</p><p>Please verify your email address by clicking the link below:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>This link expires in 24 hours.</p>`,
+        type: 'email_verification',
+      });
+
+      if (emailResult.status !== 'delivered') {
+        throw new Error('Failed to send verification email');
       }
     }
 

@@ -34,6 +34,7 @@ export const UserPanelPage: React.FC = () => {
     checkDuplicateTitle,
     settings,
     currentUser: authUser,
+    isAuthChecking,
   } = useApp();
 
   const currentUser = authUser;
@@ -365,6 +366,14 @@ export const UserPanelPage: React.FC = () => {
     }
   };
 
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans flex items-center justify-center p-6">
+        <p>Loading your dashboard...</p>
+      </div>
+    );
+  }
+
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans flex items-center justify-center p-6">
@@ -391,13 +400,13 @@ export const UserPanelPage: React.FC = () => {
     <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans pb-12 overflow-x-hidden">
       <UserProfileHeader
         users={users}
-        activeUserId={activeUserId}
+        activeUserId={currentUser?.id || ''}
         currentUser={currentUser}
         userListings={userListings}
         activeUserApprovedListingsCount={activeUserApprovedListingsCount}
         freeQuotaLimit={freeQuotaLimit}
         isQuotaExceeded={isQuotaExceeded}
-        onSelectUser={setActiveUserId}
+        onSelectUser={() => {}}
         onOpenKycModal={() => setKycModalOpen(true)}
       />
 
