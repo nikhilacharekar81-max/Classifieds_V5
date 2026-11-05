@@ -51,8 +51,10 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setChatError(data?.error || 'Failed to load chat messages.');
-        setIsAuthenticated(false);
+        setChatError(data?.error || `Failed to load chat messages (HTTP ${res.status}).`);
+        if (currentUser) {
+          setIsAuthenticated(true);
+        }
         setLoading(false);
         return;
       }
@@ -74,11 +76,14 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
       }
     } catch (err: any) {
       console.error('Failed to load chat messages:', err);
-      setIsAuthenticated(false);
+      setChatError(err?.message || 'Connection error. Unable to load chat messages.');
+      if (currentUser) {
+        setIsAuthenticated(true);
+      }
     } finally {
       setLoading(false);
     }
-  }, [listing.id, listing.sellerId]);
+  }, [listing.id, listing.sellerId, currentUser]);
 
   useEffect(() => {
     loadChatMessages();
@@ -168,9 +173,18 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
       </div>
 
       {chatError && (
-        <div className="mx-4 mt-3 p-2.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 text-xs rounded-lg flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
-          <span>{chatError}</span>
+        <div className="mx-4 mt-3 p-2.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 text-xs rounded-lg flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+            <span>{chatError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={loadChatMessages}
+            className="px-2.5 py-1 bg-rose-100 dark:bg-rose-900/60 hover:bg-rose-200 dark:hover:bg-rose-800 text-rose-800 dark:text-rose-200 text-xs font-semibold rounded shrink-0 transition-colors cursor-pointer"
+          >
+            Retry
+          </button>
         </div>
       )}
 
