@@ -573,6 +573,16 @@ export function useListingActions({
         body: JSON.stringify(newListingData),
       });
 
+      if (res.status === 401) {
+        addToast({
+          type: 'error',
+          title: 'Session Expired',
+          message: 'Your session has expired. Please log in again to post your ad.',
+        });
+        window.dispatchEvent(new CustomEvent('open_auth_modal', { detail: { mode: 'signin' } }));
+        return null;
+      }
+
       if (!res.ok) {
         throw new Error('Failed to create listing');
       }

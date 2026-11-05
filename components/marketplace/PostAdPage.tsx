@@ -24,6 +24,7 @@ export const PostAdPage: React.FC = () => {
     checkDuplicateTitle,
     settings,
     listings,
+    isAuthChecking,
   } = useApp();
 
   const states = locations.filter((l) => l.type === 'state');
@@ -346,7 +347,9 @@ export const PostAdPage: React.FC = () => {
 
       {/* Main Posting Form */}
       <main className="max-w-4xl mx-auto px-4 py-8">
-        {!isUserAuthenticated ? (
+        {isAuthChecking ? (
+          <div className="text-center py-20 text-slate-500">Loading authentication...</div>
+        ) : !isUserAuthenticated ? (
           <div className="bg-white rounded-2xl p-8 border border-slate-200 shadow-sm text-center">
             <h2 className="text-xl font-black text-slate-900 mb-4">Post Free Classified Ad</h2>
             <p className="text-slate-600 mb-6">Please log in or register to post your free ad. Registration is free.</p>

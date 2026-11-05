@@ -68,6 +68,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
   const [currentAdmin, setCurrentAdmin] = useState<AdminUser | null>(null);
   const [impersonatedUser, setImpersonatedUser] = useState<UserAccount | null>(null);
   const [activeUserId, setActiveUserId] = useState<string | null>(null);
+  const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -78,6 +79,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
         return res.json().catch(() => null);
       })
       .then((data) => {
+        setIsAuthChecking(false);
         if (data && data.authenticated && data.user) {
           setAuthUser(data.user);
           setActiveUserId(data.user.id);
@@ -103,6 +105,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
         }
       })
       .catch(() => {
+        setIsAuthChecking(false);
         setAuthUser(null);
         setCurrentAdmin(null);
         setActiveUserId(null);
@@ -520,6 +523,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
         authUser,
         setAuthUser,
         setCurrentUserId: setActiveUserId,
+        isAuthChecking,
         listings,
         categories,
         customFields,

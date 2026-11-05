@@ -48,6 +48,7 @@ export interface AppContextType {
   authUser: UserAccount | null;
   setAuthUser: (user: UserAccount | null) => void;
   setCurrentUserId: (id: string) => void;
+  isAuthChecking: boolean;
 
   // Data Collections
   listings: Listing[];
