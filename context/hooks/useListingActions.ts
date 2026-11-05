@@ -288,10 +288,11 @@ export function useListingActions({
     }
 
     try {
+      const { expiresAt: _omitExpiry, ...payloadWithoutExpiry } = updatedListing as any;
       const res = await fetch(`/api/listings/${updatedListing.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedListing),
+        body: JSON.stringify(payloadWithoutExpiry),
       });
 
       if (!res.ok) {
@@ -465,11 +466,12 @@ export function useListingActions({
 
   const bulkRenewListings = async (ids: string[], days = 30): Promise<boolean> => {
     if (ids.length === 0) return false;
+    const renewalDays = typeof days === 'number' && days > 0 ? days : 30;
     try {
       const res = await fetch('/api/listings/bulk-action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'renew', ids }),
+        body: JSON.stringify({ action: 'renew', ids, data: { days: renewalDays } }),
       });
 
       if (!res.ok) {
@@ -483,7 +485,7 @@ export function useListingActions({
       }
 
       const futureDate = new Date();
-      futureDate.setDate(futureDate.getDate() + 30);
+      futureDate.setDate(futureDate.getDate() + renewalDays);
       const newExpires = futureDate.toISOString().split('T')[0];
 
       setListings((prev) =>

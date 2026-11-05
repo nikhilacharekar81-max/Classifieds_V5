@@ -137,8 +137,8 @@ export class ListingRepository {
       customAttributes: (row.customAttributes as Record<string, any>) || {},
       status: row.status as any,
       rejectionReason: row.rejectionReason || undefined,
-      isFeatured: row.isFeatured,
-      featuredUntil: row.featuredUntil ? row.featuredUntil.toISOString().split('T')[0] : undefined,
+      isFeatured: Boolean(row.isFeatured && (!row.featuredUntil || row.featuredUntil > new Date())),
+      featuredUntil: row.featuredUntil ? row.featuredUntil.toISOString() : undefined,
       isBoosted: row.isBoosted && row.boostStatus === 'active' && (!row.boostExpiresAt || row.boostExpiresAt > new Date()),
       boostStatus: row.boostStatus as any,
       boostStartedAt: row.boostStartedAt ? row.boostStartedAt.toISOString() : undefined,
@@ -156,7 +156,7 @@ export class ListingRepository {
       chatsCount: row.chatsCount,
       spamScore: row.spamScore,
       createdAt: row.createdAt.toISOString(),
-      expiresAt: row.expiresAt.toISOString().split('T')[0],
+      expiresAt: row.expiresAt.toISOString(),
     };
   }
 
@@ -267,8 +267,8 @@ export class ListingRepository {
 
       // City filter (Strict city matching, excluding state to prevent Mumbai from matching entire Maharashtra)
       if (options.city && options.city !== 'All India' && options.city !== 'all-india' && options.city !== 'all') {
-        const cleanCity = options.city.replace(/[-_]/g, ' ').trim();
-        conditions.push(ilike(schema.listings.city, `%${cleanCity}%`));
+        const cleanCity = options.city.replace(/[-_]/g, ' ').trim().toLowerCase();
+        conditions.push(sql`LOWER(${schema.listings.city}) = ${cleanCity}`);
       }
 
       // Category filter (resolves child subcategory IDs in-memory from cached category hierarchy)
@@ -346,17 +346,30 @@ export class ListingRepository {
       }
       if (options.minArea !== undefined && !isNaN(Number(options.minArea)) && isFinite(Number(options.minArea)) && Number(options.minArea) > 0) {
         conditions.push(
-          sql`COALESCE(NULLIF(regexp_replace(${schema.listings.customAttributes}->>'carpet_area', '[^0-9.]', '', 'g'), '')::numeric, NULLIF(regexp_replace(${schema.listings.customAttributes}->>'built_up_area', '[^0-9.]', '', 'g'), '')::numeric, NULLIF(regexp_replace(${schema.listings.customAttributes}->>'plot_area', '[^0-9.]', '', 'g'), '')::numeric, 0) >= ${Number(options.minArea)}`
+          sql`COALESCE(
+            CASE WHEN regexp_replace(${schema.listings.customAttributes}->>'carpet_area', '[^0-9.]', '', 'g') ~ '^[0-9]+(\\.[0-9]+)?$' THEN regexp_replace(${schema.listings.customAttributes}->>'carpet_area', '[^0-9.]', '', 'g')::numeric ELSE NULL END,
+            CASE WHEN regexp_replace(${schema.listings.customAttributes}->>'built_up_area', '[^0-9.]', '', 'g') ~ '^[0-9]+(\\.[0-9]+)?$' THEN regexp_replace(${schema.listings.customAttributes}->>'built_up_area', '[^0-9.]', '', 'g')::numeric ELSE NULL END,
+            CASE WHEN regexp_replace(${schema.listings.customAttributes}->>'plot_area', '[^0-9.]', '', 'g') ~ '^[0-9]+(\\.[0-9]+)?$' THEN regexp_replace(${schema.listings.customAttributes}->>'plot_area', '[^0-9.]', '', 'g')::numeric ELSE NULL END,
+            0
+          ) >= ${Number(options.minArea)}`
         );
       }
       if (options.maxArea !== undefined && !isNaN(Number(options.maxArea)) && isFinite(Number(options.maxArea)) && Number(options.maxArea) > 0) {
         conditions.push(
-          sql`COALESCE(NULLIF(regexp_replace(${schema.listings.customAttributes}->>'carpet_area', '[^0-9.]', '', 'g'), '')::numeric, NULLIF(regexp_replace(${schema.listings.customAttributes}->>'built_up_area', '[^0-9.]', '', 'g'), '')::numeric, NULLIF(regexp_replace(${schema.listings.customAttributes}->>'plot_area', '[^0-9.]', '', 'g'), '')::numeric, 0) <= ${Number(options.maxArea)}`
+          sql`COALESCE(
+            CASE WHEN regexp_replace(${schema.listings.customAttributes}->>'carpet_area', '[^0-9.]', '', 'g') ~ '^[0-9]+(\\.[0-9]+)?$' THEN regexp_replace(${schema.listings.customAttributes}->>'carpet_area', '[^0-9.]', '', 'g')::numeric ELSE NULL END,
+            CASE WHEN regexp_replace(${schema.listings.customAttributes}->>'built_up_area', '[^0-9.]', '', 'g') ~ '^[0-9]+(\\.[0-9]+)?$' THEN regexp_replace(${schema.listings.customAttributes}->>'built_up_area', '[^0-9.]', '', 'g')::numeric ELSE NULL END,
+            CASE WHEN regexp_replace(${schema.listings.customAttributes}->>'plot_area', '[^0-9.]', '', 'g') ~ '^[0-9]+(\\.[0-9]+)?$' THEN regexp_replace(${schema.listings.customAttributes}->>'plot_area', '[^0-9.]', '', 'g')::numeric ELSE NULL END,
+            0
+          ) <= ${Number(options.maxArea)}`
         );
       }
       if (options.maxDeposit !== undefined && !isNaN(Number(options.maxDeposit)) && isFinite(Number(options.maxDeposit)) && Number(options.maxDeposit) > 0) {
         conditions.push(
-          sql`COALESCE(NULLIF(regexp_replace(${schema.listings.customAttributes}->>'security_deposit', '[^0-9.]', '', 'g'), '')::numeric, 0) <= ${Number(options.maxDeposit)}`
+          sql`COALESCE(
+            CASE WHEN regexp_replace(${schema.listings.customAttributes}->>'security_deposit', '[^0-9.]', '', 'g') ~ '^[0-9]+(\\.[0-9]+)?$' THEN regexp_replace(${schema.listings.customAttributes}->>'security_deposit', '[^0-9.]', '', 'g')::numeric ELSE NULL END,
+            0
+          ) <= ${Number(options.maxDeposit)}`
         );
       }
       if (options.brokerage && options.brokerage !== 'all') {
@@ -674,7 +687,7 @@ export class ListingRepository {
 
   public async bulkRenew(ids: string[], days = 30): Promise<{ renewedCount: number }> {
     try {
-      const validDays = 30;
+      const validDays = typeof days === 'number' && Number.isFinite(days) && days > 0 ? Math.floor(days) : 30;
       const newExpiry = new Date(Date.now() + validDays * 24 * 60 * 60 * 1000);
       return await db.transaction(async (tx) => {
         const res = await tx

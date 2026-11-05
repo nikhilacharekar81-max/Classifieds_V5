@@ -8,6 +8,7 @@ import {
   toPublicListingDetail,
 } from '@/server/repositories/listing.repository';
 import { adminRepository } from '@/server/repositories/admin.repository';
+import { userRepository } from '@/server/repositories/user.repository';
 import {
   invalidateLiveListingCountsCache,
   REFERENCE_CACHE_TAGS,
@@ -398,6 +399,14 @@ export class ListingService {
       return { success: false, error: 'Unauthorized: You do not own this listing', status: 403 };
     }
 
+    // Status validation
+    if (updatedData.status !== undefined) {
+      const allowedStatuses = ['pending', 'approved', 'rejected', 'sold', 'expired'];
+      if (!allowedStatuses.includes(updatedData.status)) {
+        return { success: false, error: `Invalid status: ${updatedData.status}`, status: 400 };
+      }
+    }
+
     // Role-based authorization for moderation fields
     if (updatedData.status !== undefined && (updatedData.status === 'approved' || updatedData.status === 'rejected')) {
       if (!isPrivileged) {
@@ -417,19 +426,55 @@ export class ListingService {
       };
     }
 
-    // Expiry date protection: ordinary sellers cannot modify expiresAt directly
-    if (!isPrivileged && updatedData.expiresAt !== undefined) {
-      return {
-        success: false,
-        error: 'Forbidden: Ordinary sellers cannot modify expiresAt directly. Expired listings must be renewed through the renewal endpoint.',
-        status: 400,
-      };
-    }
+    // Expiry date protection: ordinary sellers cannot modify expiresAt directly.
+    // If sent by an ordinary seller during ordinary edits, we safely ignore it rather than erroring or shortening expiry.
 
     const targetTitle = updatedData.title !== undefined ? updatedData.title : existing.title;
     const sellerId = existing.sellerId;
 
     const safeFields: any = {};
+
+    // Validate title if updated
+    if (updatedData.title !== undefined) {
+      if (typeof updatedData.title !== 'string' || updatedData.title.trim().length < 3) {
+        return { success: false, error: 'Title is required and must be at least 3 characters long', status: 400 };
+      }
+      if (updatedData.title.trim().length > 120) {
+        return { success: false, error: 'Title cannot exceed 120 characters', status: 400 };
+      }
+      safeFields.title = updatedData.title.trim();
+    }
+
+    // Validate description if updated
+    if (updatedData.description !== undefined) {
+      if (typeof updatedData.description !== 'string' || updatedData.description.length > 5000) {
+        return { success: false, error: 'Description cannot exceed 5000 characters', status: 400 };
+      }
+      safeFields.description = updatedData.description.trim();
+    }
+
+    // Validate categoryId if updated
+    if (updatedData.categoryId !== undefined) {
+      if (typeof updatedData.categoryId !== 'string' || !updatedData.categoryId.trim()) {
+        return { success: false, error: 'Category ID cannot be empty', status: 400 };
+      }
+      safeFields.categoryId = updatedData.categoryId.trim();
+    }
+
+    if (updatedData.subcategoryId !== undefined) {
+      safeFields.subcategoryId = updatedData.subcategoryId ? String(updatedData.subcategoryId).trim() : null;
+    }
+
+    // Validate images if updated
+    if (updatedData.images !== undefined) {
+      if (!Array.isArray(updatedData.images)) {
+        return { success: false, error: 'Images must be an array of URLs', status: 400 };
+      }
+      const validImages = updatedData.images
+        .filter((img: any) => typeof img === 'string' && (img.startsWith('http://') || img.startsWith('https://')))
+        .slice(0, 5);
+      safeFields.images = validImages;
+    }
 
     // Validate price if updated
     if (updatedData.price !== undefined) {
@@ -452,17 +497,16 @@ export class ListingService {
       }
     }
 
-    // Field allowlist: regular sellers can edit content, mark as sold
-    if (updatedData.title !== undefined) safeFields.title = updatedData.title;
-    if (updatedData.description !== undefined) safeFields.description = updatedData.description;
-    if (updatedData.categoryId !== undefined) safeFields.categoryId = updatedData.categoryId;
-    if (updatedData.subcategoryId !== undefined) safeFields.subcategoryId = updatedData.subcategoryId || null;
-    if (updatedData.images !== undefined) safeFields.images = updatedData.images;
-    if (updatedData.customAttributes !== undefined) safeFields.customAttributes = updatedData.customAttributes;
+    if (updatedData.customAttributes !== undefined) {
+      safeFields.customAttributes = typeof updatedData.customAttributes === 'object' && updatedData.customAttributes !== null
+        ? updatedData.customAttributes
+        : {};
+    }
+
     if (updatedData.location) {
-      if (updatedData.location.city) safeFields.city = updatedData.location.city;
-      if (updatedData.location.state) safeFields.state = updatedData.location.state;
-      if (updatedData.location.locality) safeFields.locality = updatedData.location.locality;
+      if (updatedData.location.city) safeFields.city = updatedData.location.city.trim();
+      if (updatedData.location.state) safeFields.state = updatedData.location.state.trim();
+      if (updatedData.location.locality) safeFields.locality = updatedData.location.locality.trim();
       if (updatedData.location.latitude !== undefined) {
         safeFields.latitude = updatedData.location.latitude !== null ? Number(updatedData.location.latitude) : null;
       }
@@ -475,17 +519,44 @@ export class ListingService {
     if (!isPrivileged) {
       if (updatedData.status === 'sold') {
         safeFields.status = 'sold';
-      } else if (
-        existing.status === 'approved' &&
-        (updatedData.title ||
-          updatedData.description ||
-          updatedData.price ||
-          updatedData.images ||
-          updatedData.categoryId !== undefined ||
-          updatedData.subcategoryId !== undefined)
-      ) {
-        // Reset approved ad to pending when key content is edited by seller
-        safeFields.status = 'pending';
+      } else if (existing.status === 'approved') {
+        // Detect meaningful changes to content, price (supporting 0), attributes, and location
+        const isTitleChanged = updatedData.title !== undefined && normalizeAdTitle(updatedData.title) !== normalizeAdTitle(existing.title);
+        const isDescChanged = updatedData.description !== undefined && updatedData.description.trim() !== (existing.description || '').trim();
+        const isPriceChanged = updatedData.price !== undefined && (
+          (updatedData.price === null || String(updatedData.price).trim() === '')
+            ? existing.price !== null
+            : (existing.price === null || Number(updatedData.price) !== Number(existing.price))
+        );
+        const isImagesChanged = updatedData.images !== undefined && (
+          JSON.stringify(safeFields.images || []) !== JSON.stringify(existing.images || [])
+        );
+        const isCategoryChanged = updatedData.categoryId !== undefined && updatedData.categoryId.trim() !== existing.categoryId;
+        const isSubcategoryChanged = updatedData.subcategoryId !== undefined && (updatedData.subcategoryId || null) !== (existing.subcategoryId || null);
+        const isCustomAttrsChanged = updatedData.customAttributes !== undefined && (
+          JSON.stringify(updatedData.customAttributes) !== JSON.stringify(existing.customAttributes || {})
+        );
+        const isLocationChanged = Boolean(
+          updatedData.location && (
+            (updatedData.location.city && updatedData.location.city.trim() !== (existing.location?.city || '').trim()) ||
+            (updatedData.location.state && updatedData.location.state.trim() !== (existing.location?.state || '').trim()) ||
+            (updatedData.location.locality && updatedData.location.locality.trim() !== (existing.location?.locality || '').trim())
+          )
+        );
+
+        if (
+          isTitleChanged ||
+          isDescChanged ||
+          isPriceChanged ||
+          isImagesChanged ||
+          isCategoryChanged ||
+          isSubcategoryChanged ||
+          isCustomAttrsChanged ||
+          isLocationChanged
+        ) {
+          // Reset approved ad to pending when key content is edited by seller
+          safeFields.status = 'pending';
+        }
       }
     }
 
@@ -501,7 +572,12 @@ export class ListingService {
         if (!updatedData.expiresAt) {
           return { success: false, error: 'expiresAt cannot be empty', status: 400 };
         }
-        const expDate = new Date(updatedData.expiresAt);
+        let expDate: Date;
+        if (typeof updatedData.expiresAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(updatedData.expiresAt.trim())) {
+          expDate = new Date(`${updatedData.expiresAt.trim()}T23:59:59.999Z`);
+        } else {
+          expDate = new Date(updatedData.expiresAt);
+        }
         if (isNaN(expDate.getTime())) {
           return { success: false, error: 'Invalid expiresAt date format', status: 400 };
         }
@@ -510,7 +586,12 @@ export class ListingService {
 
       if (updatedData.featuredUntil !== undefined) {
         if (updatedData.featuredUntil) {
-          const featDate = new Date(updatedData.featuredUntil);
+          let featDate: Date;
+          if (typeof updatedData.featuredUntil === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(updatedData.featuredUntil.trim())) {
+            featDate = new Date(`${updatedData.featuredUntil.trim()}T23:59:59.999Z`);
+          } else {
+            featDate = new Date(updatedData.featuredUntil);
+          }
           if (isNaN(featDate.getTime())) {
             return { success: false, error: 'Invalid featuredUntil date format', status: 400 };
           }
@@ -635,7 +716,8 @@ export class ListingService {
     if (!isListingPubliclyAccessible(listing)) {
       return null;
     }
-    return listing.sellerPhone || null;
+    const seller = await userRepository.findById(listing.sellerId);
+    return seller?.phone || null;
   }
 
   public async getSimilarListings(listingId: string, limit: number = 4): Promise<Listing[]> {

@@ -10,13 +10,52 @@ export async function POST(req: NextRequest) {
   try {
     const { name, email, password, phone, city, state, type } = await req.json().catch(() => ({}));
 
-    if (!name || !email || !password) {
+    if (!name || typeof name !== 'string' || !name.trim()) {
       return addSecurityHeaders(
-        NextResponse.json({ error: 'Name, email, and password are required' }, { status: 400 })
+        NextResponse.json({ error: 'Name is required' }, { status: 400 })
+      );
+    }
+
+    if (!email || typeof email !== 'string' || !email.trim()) {
+      return addSecurityHeaders(
+        NextResponse.json({ error: 'Email address is required' }, { status: 400 })
       );
     }
 
     const cleanEmail = String(email).toLowerCase().trim();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail) || cleanEmail.length > 100) {
+      return addSecurityHeaders(
+        NextResponse.json({ error: 'Please enter a valid email address' }, { status: 400 })
+      );
+    }
+
+    // Phone number is compulsory during signup
+    if (!phone || typeof phone !== 'string' || !phone.trim()) {
+      return addSecurityHeaders(
+        NextResponse.json({ error: 'Phone number is required' }, { status: 400 })
+      );
+    }
+
+    const rawPhone = phone.trim();
+    const digitsOnly = rawPhone.replace(/\D/g, '');
+    if (!/^\+?[0-9\s-]{10,15}$/.test(rawPhone) || digitsOnly.length < 10 || digitsOnly.length > 15) {
+      return addSecurityHeaders(
+        NextResponse.json({ error: 'Please enter a valid phone number (10 to 15 digits)' }, { status: 400 })
+      );
+    }
+    const cleanPhone = rawPhone.startsWith('+') ? `+${digitsOnly}` : digitsOnly;
+
+    // Account type validation (allowlist: 'user' or 'business' only)
+    let accountType: 'user' | 'business' = 'user';
+    if (type !== undefined && type !== null && type !== '') {
+      if (type !== 'user' && type !== 'business') {
+        return addSecurityHeaders(
+          NextResponse.json({ error: "Invalid account type. Allowed types are 'user' or 'business'" }, { status: 400 })
+        );
+      }
+      accountType = type;
+    }
 
     // Password policy: exactly 4 to 20 characters, no complexity rules enforced
     if (typeof password !== 'string' || password.length < 4 || password.length > 20) {
@@ -38,15 +77,19 @@ export async function POST(req: NextRequest) {
     const passwordHash = await hashPassword(String(password));
     const userId = `usr_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
 
+    // Do not fabricate or default city/state to 'Mumbai'/'Maharashtra'
+    const cleanCity = city && typeof city === 'string' ? city.trim() : '';
+    const cleanState = state && typeof state === 'string' ? state.trim() : '';
+
     const userObj = await userRepository.create({
       id: userId,
       name: String(name).trim(),
       email: cleanEmail,
-      phone: phone ? String(phone).trim() : '',
+      phone: cleanPhone,
       passwordHash,
-      type: type || 'user',
-      city: city || 'Mumbai',
-      state: state || 'Maharashtra',
+      type: accountType,
+      city: cleanCity,
+      state: cleanState,
     });
 
     // Verification token

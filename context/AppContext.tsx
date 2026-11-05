@@ -270,28 +270,55 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
   const fetchGpsLocation = () => {
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
-        (position) => {
+        async (position) => {
           const lat = position.coords.latitude;
           const lon = position.coords.longitude;
+          let detectedCity = '';
+          let detectedArea = `GPS: ${lat.toFixed(2)}, ${lon.toFixed(2)}`;
+
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
+            const res = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10`,
+              { signal: controller.signal }
+            ).catch(() => null);
+            clearTimeout(timeoutId);
+            if (res && res.ok) {
+              const data = await res.json().catch(() => null);
+              const addr = data?.address || {};
+              const resolvedCity = addr.city || addr.town || addr.village || addr.county || addr.state_district;
+              if (resolvedCity) {
+                detectedCity = resolvedCity;
+                detectedArea = addr.suburb || addr.neighbourhood || detectedCity;
+              }
+            }
+          } catch {
+            // graceful fallback to coordinates
+          }
+
+          const finalCity = detectedCity || 'Current Location';
           setUserLocation({
             latitude: lat,
             longitude: lon,
-            city: 'Mumbai',
-            area: 'Current GPS Location',
+            city: finalCity,
+            area: detectedArea,
             radiusKm: 25,
           });
-          setSelectedMarketplaceCity('Mumbai');
+          if (detectedCity) {
+            setSelectedMarketplaceCity(detectedCity);
+          }
           addToast({
             type: 'success',
             title: '📍 Location Acquired',
-            message: `GPS Coordinates: ${lat.toFixed(2)}, ${lon.toFixed(2)}`,
+            message: `${finalCity} (${lat.toFixed(2)}, ${lon.toFixed(2)})`,
           });
         },
         () => {
           addToast({
             type: 'warning',
             title: 'GPS Unavailable',
-            message: 'Using default location: Bandra West, Mumbai',
+            message: 'Unable to acquire GPS coordinates. Please select your city manually.',
           });
         },
         { timeout: 10000, enableHighAccuracy: true }

@@ -121,9 +121,11 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Renewal strictly enforces a 30-day period from the renewal time
-      const count = await listingService.bulkRenew(ids, 30);
-      return NextResponse.json({ success: true, count, renewedDurationDays: 30 });
+      const renewalDays = typeof data?.days === 'number' && Number.isFinite(data.days) && data.days > 0
+        ? Math.floor(data.days)
+        : 30;
+      const count = await listingService.bulkRenew(ids, renewalDays);
+      return NextResponse.json({ success: true, count, renewedDurationDays: renewalDays });
     }
 
     return NextResponse.json({ error: `Unsupported bulk action: ${action}` }, { status: 400 });

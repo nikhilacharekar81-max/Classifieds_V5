@@ -164,6 +164,15 @@ export async function POST(req: NextRequest) {
       ? body.images.filter((img: any) => typeof img === 'string' && (img.startsWith('http://') || img.startsWith('https://'))).slice(0, 5)
       : [];
 
+    // Require authenticated seller account phone; do not accept arbitrary body.sellerPhone override
+    const sellerAccountPhone = authContext.user.phone ? authContext.user.phone.trim() : '';
+    if (!sellerAccountPhone) {
+      return NextResponse.json(
+        { error: 'A phone number is required on your account to post listings. Please add your phone number in your account settings.' },
+        { status: 400 }
+      );
+    }
+
     // Strip sensitive fields that sellers cannot assign to themselves
     const safePayload: any = {
       title: body.title.trim(),
@@ -172,14 +181,14 @@ export async function POST(req: NextRequest) {
       categoryId: body.categoryId.trim(),
       subcategoryId: body.subcategoryId ? String(body.subcategoryId).trim() : undefined,
       location: body.location || {
-        city: body.city || 'Mumbai',
-        state: body.state || 'Maharashtra',
-        locality: body.locality || 'Locality',
+        city: body.city ? String(body.city).trim() : (authContext.user.location?.city || ''),
+        state: body.state ? String(body.state).trim() : (authContext.user.location?.state || ''),
+        locality: body.locality ? String(body.locality).trim() : '',
       },
       images: validImages,
       customAttributes: body.customAttributes && typeof body.customAttributes === 'object' ? body.customAttributes : {},
       sellerName: authContext.user.name,
-      sellerPhone: authContext.user.phone || body.sellerPhone || '',
+      sellerPhone: sellerAccountPhone,
       sellerId: authContext.userId, // Derived strictly from verified session
       // Moderation workflow: pending unless user is an authorized admin/moderator/super_admin
       status: authContext.isAdmin || authContext.isModerator || authContext.isSuperAdmin ? (body.status || 'approved') : 'pending',

@@ -25,9 +25,11 @@ export const OrdersReceiptsTab: React.FC<OrdersReceiptsTabProps> = ({
           </p>
         </div>
 
-        <div className="text-xs font-bold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg">
-          GSTIN: {currentUser.businessDetails?.gstNumber || '27AABCU9603R1ZN'}
-        </div>
+        {currentUser.businessDetails?.gstNumber ? (
+          <div className="text-xs font-bold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg">
+            GSTIN: {currentUser.businessDetails.gstNumber}
+          </div>
+        ) : null}
       </div>
 
       {userTransactions.length === 0 ? (

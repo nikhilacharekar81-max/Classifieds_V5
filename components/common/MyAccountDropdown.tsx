@@ -257,6 +257,15 @@ export const MyAccountDropdown: React.FC = () => {
       setErrorMsg('Name, email, and password are required.');
       return;
     }
+    if (!signUpPhone.trim()) {
+      setErrorMsg('Phone number is required.');
+      return;
+    }
+    const cleanDigits = signUpPhone.trim().replace(/\D/g, '');
+    if (!/^\+?[0-9\s-]{10,15}$/.test(signUpPhone.trim()) || cleanDigits.length < 10 || cleanDigits.length > 15) {
+      setErrorMsg('Please enter a valid phone number (10 to 15 digits).');
+      return;
+    }
     if (signUpPassword.length < 4 || signUpPassword.length > 20) {
       setErrorMsg('Password must be between 4 and 20 characters long.');
       return;
@@ -272,8 +281,8 @@ export const MyAccountDropdown: React.FC = () => {
           email: signUpEmail.trim(),
           password: signUpPassword,
           phone: signUpPhone.trim(),
-          city: signUpCity.trim() || 'Mumbai',
-          state: signUpState.trim() || 'Maharashtra',
+          city: signUpCity.trim(),
+          state: signUpState.trim(),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -288,8 +297,8 @@ export const MyAccountDropdown: React.FC = () => {
         email: signUpEmail.trim(),
         phone: signUpPhone.trim(),
         location: {
-          city: signUpCity.trim() || 'Mumbai',
-          state: signUpState.trim() || 'Maharashtra',
+          city: signUpCity.trim(),
+          state: signUpState.trim(),
         },
       }) : null);
 
@@ -711,12 +720,13 @@ export const MyAccountDropdown: React.FC = () => {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-semibold text-[#3c4043] mb-1">
-                        Phone Number
+                        Phone Number <span className="text-rose-500">*</span>
                       </label>
                       <div className="relative">
                         <Phone className="w-3.5 h-3.5 text-[#5f6368] absolute left-3 top-2.5" />
                         <input
                           type="tel"
+                          required
                           value={signUpPhone}
                           onChange={(e) => setSignUpPhone(e.target.value)}
                           placeholder="+91 98765 43210"
@@ -735,7 +745,7 @@ export const MyAccountDropdown: React.FC = () => {
                           type="text"
                           value={signUpCity}
                           onChange={(e) => setSignUpCity(e.target.value)}
-                          placeholder="Mumbai"
+                          placeholder="e.g. Pune, Delhi"
                           className="w-full pl-8 pr-3 py-2 text-xs rounded-lg border border-[#dadce0] focus:outline-none focus:border-[#1dbf73] text-[#202124]"
                         />
                       </div>
