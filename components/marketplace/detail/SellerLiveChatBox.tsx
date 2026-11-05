@@ -10,6 +10,8 @@ export interface SellerLiveChatBoxProps {
   listing: Listing;
 }
 
+export type AuthState = 'checking' | 'authenticated' | 'guest';
+
 export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing }) => {
   const app = useAppOptional();
   const currentUser = app?.currentUser || null;
@@ -19,7 +21,7 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
   >([]);
   const [newChatInput, setNewChatInput] = useState('');
   const [loading, setLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [authState, setAuthState] = useState<AuthState>('checking');
   const [sending, setSending] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
 
@@ -43,7 +45,7 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
       });
 
       if (res.status === 401) {
-        setIsAuthenticated(false);
+        setAuthState('guest');
         setChatMessages([]);
         setLoading(false);
         return;
@@ -53,7 +55,7 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
         const data = await res.json().catch(() => ({}));
         setChatError(data?.error || `Failed to load chat messages (HTTP ${res.status}).`);
         if (currentUser) {
-          setIsAuthenticated(true);
+          setAuthState('authenticated');
         }
         setLoading(false);
         return;
@@ -61,7 +63,7 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
 
       const data = await res.json().catch(() => null);
       if (data && Array.isArray(data.messages)) {
-        setIsAuthenticated(true);
+        setAuthState('authenticated');
         setChatMessages(
           data.messages.map((m: any) => ({
             id: m.id,
@@ -71,14 +73,14 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
           }))
         );
       } else {
-        setIsAuthenticated(true);
+        setAuthState('authenticated');
         setChatMessages([]);
       }
     } catch (err: any) {
       console.error('Failed to load chat messages:', err);
       setChatError(err?.message || 'Connection error. Unable to load chat messages.');
       if (currentUser) {
-        setIsAuthenticated(true);
+        setAuthState('authenticated');
       }
     } finally {
       setLoading(false);
@@ -129,7 +131,7 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
 
       if (!res.ok) {
         if (res.status === 401) {
-          setIsAuthenticated(false);
+          setAuthState('guest');
           setChatError('Sign in or create an account to start chatting with sellers.');
           notify({
             type: 'warning',
@@ -193,7 +195,7 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
           <Loader2 className="w-4 h-4 animate-spin text-[#1dbf73]" />
           <span>Checking chat availability...</span>
         </div>
-      ) : !isAuthenticated ? (
+      ) : authState === 'guest' ? (
         <div className="p-6 bg-slate-50/80 dark:bg-slate-800/40 flex flex-col items-center justify-center text-center h-64 space-y-3">
           <div className="p-3 bg-emerald-100 dark:bg-emerald-950/60 text-[#1dbf73] rounded-full">
             <MessageCircle className="w-6 h-6" />
@@ -223,7 +225,7 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
             </button>
           </div>
         </div>
-      ) : (
+      ) : authState === 'authenticated' ? (
         <>
           <div className="p-4 bg-white dark:bg-slate-900 space-y-3 h-64 overflow-y-auto text-xs">
             {chatMessages.length === 0 ? (
@@ -274,6 +276,27 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
             </button>
           </form>
         </>
+      ) : (
+        <div className="p-6 bg-slate-50/80 dark:bg-slate-800/40 flex flex-col items-center justify-center text-center h-64 space-y-3">
+          <div className="p-3 bg-amber-100 dark:bg-amber-950/60 text-amber-600 rounded-full">
+            <AlertCircle className="w-6 h-6" />
+          </div>
+          <div className="space-y-1">
+            <p className="font-bold text-slate-800 dark:text-slate-100 text-sm">
+              Unable to connect to chat
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs">
+              {chatError || 'An error occurred while checking chat availability.'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={loadChatMessages}
+            className="px-4 py-2 bg-[#1dbf73] hover:bg-[#19a463] text-white font-bold text-xs rounded-lg shadow-sm cursor-pointer transition-colors"
+          >
+            Retry Connection
+          </button>
+        </div>
       )}
     </div>
   );
