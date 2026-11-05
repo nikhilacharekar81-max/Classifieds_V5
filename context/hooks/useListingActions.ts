@@ -163,29 +163,6 @@ export function useListingActions({
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + 30);
     const featuredUntil = isFeatured ? futureDate.toISOString().split('T')[0] : undefined;
-    setListings((prev) =>
-      prev.map((l) =>
-        l.id === id
-          ? {
-              ...l,
-              isFeatured,
-              featuredUntil,
-            }
-          : l
-      )
-    );
-    recordAuditLog(
-      isFeatured ? 'FEATURE_LISTING' : 'UNFEATURE_LISTING',
-      'Marketplace / Listings',
-      id,
-      item.title,
-      isFeatured ? 'Granted Featured Ad status badge' : 'Removed featured status'
-    );
-    addToast({
-      type: 'success',
-      title: isFeatured ? 'Listing Featured' : 'Feature Status Removed',
-      message: item.title.substring(0, 40) + '...',
-    });
 
     fetch(`/api/listings/${id}`, {
       method: 'PUT',
@@ -200,7 +177,32 @@ export function useListingActions({
             title: 'Action Failed',
             message: 'Failed to update feature status on server.',
           });
+          return;
         }
+
+        setListings((prev) =>
+          prev.map((l) =>
+            l.id === id
+              ? {
+                  ...l,
+                  isFeatured,
+                  featuredUntil,
+                }
+              : l
+          )
+        );
+        recordAuditLog(
+          isFeatured ? 'FEATURE_LISTING' : 'UNFEATURE_LISTING',
+          'Marketplace / Listings',
+          id,
+          item.title,
+          isFeatured ? 'Granted Featured Ad status badge' : 'Removed featured status'
+        );
+        addToast({
+          type: 'success',
+          title: isFeatured ? 'Listing Featured' : 'Feature Status Removed',
+          message: item.title.substring(0, 40) + '...',
+        });
       })
       .catch((err) => {
         console.error(`Error updating feature status for listing ${id}:`, err);
@@ -342,8 +344,6 @@ export function useListingActions({
   };
 
   const restoreListing = (id: string) => {
-    setListings((prev) => prev.map((l) => (l.id === id ? { ...l, status: 'approved' as const } : l)));
-
     fetch(`/api/listings/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -357,7 +357,15 @@ export function useListingActions({
             title: 'Action Failed',
             message: 'Failed to restore listing on server.',
           });
+          return;
         }
+
+        setListings((prev) => prev.map((l) => (l.id === id ? { ...l, status: 'approved' as const } : l)));
+        addToast({
+          type: 'success',
+          title: 'Listing Restored',
+          message: 'Listing is now active again.',
+        });
       })
       .catch((err) => {
         console.error(`Error restoring listing ${id}:`, err);
@@ -401,18 +409,6 @@ export function useListingActions({
     if (!item) return;
 
     const todayStr = new Date().toISOString().split('T')[0];
-    setListings((prev) =>
-      prev.map((l) => (l.id === id ? { ...l, status: 'expired' as const, expiresAt: todayStr } : l))
-    );
-
-    recordAuditLog(
-      'MARK_EXPIRED',
-      'Marketplace / Listings',
-      id,
-      item.title,
-      `Marked as expired. Automated expiry notice email sent.`
-    );
-    sendAdExpiredEmail(id);
 
     fetch(`/api/listings/${id}`, {
       method: 'PUT',
@@ -427,7 +423,20 @@ export function useListingActions({
             title: 'Action Failed',
             message: 'Failed to expire listing on server.',
           });
+          return;
         }
+
+        setListings((prev) =>
+          prev.map((l) => (l.id === id ? { ...l, status: 'expired' as const, expiresAt: todayStr } : l))
+        );
+        recordAuditLog(
+          'MARK_EXPIRED',
+          'Marketplace / Listings',
+          id,
+          item.title,
+          `Marked as expired. Automated expiry notice email sent.`
+        );
+        sendAdExpiredEmail(id);
       })
       .catch((err) => {
         console.error(`Error expiring listing ${id}:`, err);

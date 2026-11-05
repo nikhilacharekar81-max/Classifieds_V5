@@ -64,21 +64,41 @@ export function useAdminAndTaxonomyActions({
   recordAuditLog,
 }: UseAdminAndTaxonomyActionsParams) {
   const updateCmsPage = (updatedPage: CmsPage) => {
-    setCmsPages((prev) =>
-      prev.map((p) =>
-        p.id === updatedPage.id ? { ...updatedPage, updatedAt: new Date().toISOString().split('T')[0] } : p
-      )
-    );
-    addToast({
-      type: 'success',
-      title: 'Page Content Saved',
-      message: `Updated "${updatedPage.title}" (${updatedPage.slug}).`,
-    });
     fetch(`/api/admin/cms/${updatedPage.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedPage),
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to update CMS page ${updatedPage.id}: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Update Failed',
+            message: 'Failed to save page content on server.',
+          });
+          return;
+        }
+
+        setCmsPages((prev) =>
+          prev.map((p) =>
+            p.id === updatedPage.id ? { ...updatedPage, updatedAt: new Date().toISOString().split('T')[0] } : p
+          )
+        );
+        addToast({
+          type: 'success',
+          title: 'Page Content Saved',
+          message: `Updated "${updatedPage.title}" (${updatedPage.slug}).`,
+        });
+      })
+      .catch((err) => {
+        console.error(`Error updating CMS page ${updatedPage.id}:`, err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const addCmsPage = (newPage: Omit<CmsPage, 'id' | 'updatedAt'>) => {
@@ -87,30 +107,72 @@ export function useAdminAndTaxonomyActions({
       id: `p_${Date.now()}`,
       updatedAt: new Date().toISOString().split('T')[0],
     };
-    setCmsPages((prev) => [page, ...prev]);
-    addToast({
-      type: 'success',
-      title: 'New Page Published',
-      message: `Page "${page.title}" created successfully.`,
-    });
+
     fetch('/api/admin/cms', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(page),
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to create CMS page: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Creation Failed',
+            message: 'Failed to create page on server.',
+          });
+          return;
+        }
+
+        setCmsPages((prev) => [page, ...prev]);
+        addToast({
+          type: 'success',
+          title: 'New Page Published',
+          message: `Page "${page.title}" created successfully.`,
+        });
+      })
+      .catch((err) => {
+        console.error('Error creating CMS page:', err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const deleteCmsPage = (id: string) => {
     const target = cmsPages.find((p) => p.id === id);
-    setCmsPages((prev) => prev.filter((p) => p.id !== id));
-    addToast({
-      type: 'warning',
-      title: 'Page Deleted',
-      message: target ? `Removed page "${target.title}".` : 'Page deleted.',
-    });
+
     fetch(`/api/admin/cms/${id}`, {
       method: 'DELETE',
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to delete CMS page ${id}: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Delete Failed',
+            message: 'Failed to delete page on server.',
+          });
+          return;
+        }
+
+        setCmsPages((prev) => prev.filter((p) => p.id !== id));
+        addToast({
+          type: 'warning',
+          title: 'Page Deleted',
+          message: target ? `Removed page "${target.title}".` : 'Page deleted.',
+        });
+      })
+      .catch((err) => {
+        console.error(`Error deleting CMS page ${id}:`, err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const submitReport = (reportData: {
@@ -363,68 +425,139 @@ export function useAdminAndTaxonomyActions({
       id,
       listingCount: 0,
     };
-    setLocations((prev) => [...prev, newLoc]);
-    recordAuditLog(
-      'CREATE_LOCATION',
-      'Marketplace / Locations',
-      id,
-      newLoc.name,
-      `Created ${newLoc.type} in Country -> City hierarchy`
-    );
-    addToast({
-      type: 'success',
-      title: `${newLoc.type === 'country' ? 'Country' : 'City'} Added`,
-      message: newLoc.name,
-    });
+
     fetch('/api/admin/locations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newLoc),
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to add location: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Creation Failed',
+            message: 'Failed to add location on server.',
+          });
+          return;
+        }
+        setLocations((prev) => [...prev, newLoc]);
+        recordAuditLog(
+          'CREATE_LOCATION',
+          'Marketplace / Locations',
+          id,
+          newLoc.name,
+          `Created ${newLoc.type} in Country -> City hierarchy`
+        );
+        addToast({
+          type: 'success',
+          title: `${newLoc.type === 'country' ? 'Country' : 'City'} Added`,
+          message: newLoc.name,
+        });
+      })
+      .catch((err) => {
+        console.error('Error adding location:', err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const updateLocation = (loc: LocationItem) => {
-    setLocations((prev) => prev.map((l) => (l.id === loc.id ? loc : l)));
-    recordAuditLog('UPDATE_LOCATION', 'Marketplace / Locations', loc.id, loc.name, `Updated location details`);
-    addToast({ type: 'success', title: 'Location Updated', message: loc.name });
     fetch(`/api/admin/locations/${loc.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(loc),
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to update location: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Update Failed',
+            message: 'Failed to update location on server.',
+          });
+          return;
+        }
+        setLocations((prev) => prev.map((l) => (l.id === loc.id ? loc : l)));
+        recordAuditLog('UPDATE_LOCATION', 'Marketplace / Locations', loc.id, loc.name, `Updated location details`);
+        addToast({ type: 'success', title: 'Location Updated', message: loc.name });
+      })
+      .catch((err) => {
+        console.error('Error updating location:', err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const deleteLocation = (id: string) => {
     const loc = locations.find((l) => l.id === id);
-    setLocations((prev) => prev.filter((l) => l.id !== id && l.parentId !== id));
-    if (loc) {
-      recordAuditLog('DELETE_LOCATION', 'Marketplace / Locations', id, loc.name, `Deleted location and linked cities`);
-      addToast({ type: 'warning', title: 'Location Removed', message: loc.name });
-    }
     fetch(`/api/admin/locations/${id}`, {
       method: 'DELETE',
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to delete location: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Delete Failed',
+            message: 'Failed to delete location on server.',
+          });
+          return;
+        }
+        setLocations((prev) => prev.filter((l) => l.id !== id && l.parentId !== id));
+        if (loc) {
+          recordAuditLog('DELETE_LOCATION', 'Marketplace / Locations', id, loc.name, `Deleted location and linked cities`);
+          addToast({ type: 'warning', title: 'Location Removed', message: loc.name });
+        }
+      })
+      .catch((err) => {
+        console.error('Error deleting location:', err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const toggleLocationPopular = (id: string) => {
     const target = locations.find((l) => l.id === id);
     if (!target) return;
     const updatedPopular = !target.popular;
-    setLocations((prev) => prev.map((l) => (l.id === id ? { ...l, popular: updatedPopular } : l)));
     fetch(`/api/admin/locations/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ popular: updatedPopular }),
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to toggle location popular: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Update Failed',
+            message: 'Failed to update popular location status.',
+          });
+          return;
+        }
+        setLocations((prev) => prev.map((l) => (l.id === id ? { ...l, popular: updatedPopular } : l)));
+      })
+      .catch((err) => {
+        console.error('Error toggling location popular:', err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const updateUser = (updatedUser: UserAccount) => {
-    setUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
-    addToast({
-      type: 'success',
-      title: 'Profile Updated',
-      message: 'Your account settings have been saved.',
-    });
     fetch(`/api/admin/users/${updatedUser.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -438,7 +571,14 @@ export function useAdminAndTaxonomyActions({
             title: 'Action Failed',
             message: 'Failed to update profile settings on server.',
           });
+          return;
         }
+        setUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+        addToast({
+          type: 'success',
+          title: 'Profile Updated',
+          message: 'Your account settings have been saved.',
+        });
       })
       .catch((err) => {
         console.error(`Error updating user ${updatedUser.id}:`, err);
@@ -453,19 +593,6 @@ export function useAdminAndTaxonomyActions({
   const verifyUserKyc = (userId: string, status: 'verified' | 'rejected') => {
     const user = users.find((u) => u.id === userId);
     if (!user) return;
-    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, kycStatus: status } : u)));
-    recordAuditLog(
-      status === 'verified' ? 'VERIFY_USER_KYC' : 'REJECT_USER_KYC',
-      'Users / Verification',
-      userId,
-      user.name,
-      `Manual KYC status set to ${status}`
-    );
-    addToast({
-      type: status === 'verified' ? 'success' : 'error',
-      title: status === 'verified' ? 'User KYC Verified' : 'User KYC Rejected',
-      message: user.name,
-    });
     fetch('/api/admin/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -479,7 +606,21 @@ export function useAdminAndTaxonomyActions({
             title: 'Action Failed',
             message: 'Failed to persist KYC decision on server.',
           });
+          return;
         }
+        setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, kycStatus: status } : u)));
+        recordAuditLog(
+          status === 'verified' ? 'VERIFY_USER_KYC' : 'REJECT_USER_KYC',
+          'Users / Verification',
+          userId,
+          user.name,
+          `Manual KYC status set to ${status}`
+        );
+        addToast({
+          type: status === 'verified' ? 'success' : 'error',
+          title: status === 'verified' ? 'User KYC Verified' : 'User KYC Rejected',
+          message: user.name,
+        });
       })
       .catch((err) => {
         console.error(`Error updating KYC status for user ${userId}:`, err);
@@ -494,18 +635,6 @@ export function useAdminAndTaxonomyActions({
   const banUser = (userId: string, reason: string) => {
     const user = users.find((u) => u.id === userId);
     if (!user) return;
-    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, status: 'banned' as const } : u)));
-    setListings((prev) =>
-      prev.map((l) =>
-        l.sellerId === userId ? { ...l, status: 'rejected' as const, rejectionReason: 'Seller account suspended' } : l
-      )
-    );
-    recordAuditLog('BAN_USER', 'Users / Safety', userId, user.name, `Banned user and suspended all ads. Reason: ${reason}`);
-    addToast({
-      type: 'error',
-      title: 'User Banned',
-      message: `${user.name} has been banned. All active listings taken down.`,
-    });
     fetch('/api/admin/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -519,7 +648,20 @@ export function useAdminAndTaxonomyActions({
             title: 'Action Failed',
             message: 'Failed to record user ban on server.',
           });
+          return;
         }
+        setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, status: 'banned' as const } : u)));
+        setListings((prev) =>
+          prev.map((l) =>
+            l.sellerId === userId ? { ...l, status: 'rejected' as const, rejectionReason: 'Seller account suspended' } : l
+          )
+        );
+        recordAuditLog('BAN_USER', 'Users / Safety', userId, user.name, `Banned user and suspended all ads. Reason: ${reason}`);
+        addToast({
+          type: 'error',
+          title: 'User Banned',
+          message: `${user.name} has been banned. All active listings taken down.`,
+        });
       })
       .catch((err) => {
         console.error(`Error banning user ${userId}:`, err);
@@ -534,13 +676,6 @@ export function useAdminAndTaxonomyActions({
   const unbanUser = (userId: string) => {
     const user = users.find((u) => u.id === userId);
     if (!user) return;
-    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, status: 'active' as const } : u)));
-    recordAuditLog('UNBAN_USER', 'Users / Safety', userId, user.name, 'Reactivated user account');
-    addToast({
-      type: 'success',
-      title: 'User Re-activated',
-      message: `${user.name} account restored to active status.`,
-    });
     fetch('/api/admin/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -554,7 +689,15 @@ export function useAdminAndTaxonomyActions({
             title: 'Action Failed',
             message: 'Failed to reactivate user on server.',
           });
+          return;
         }
+        setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, status: 'active' as const } : u)));
+        recordAuditLog('UNBAN_USER', 'Users / Safety', userId, user.name, 'Reactivated user account');
+        addToast({
+          type: 'success',
+          title: 'User Re-activated',
+          message: `${user.name} account restored to active status.`,
+        });
       })
       .catch((err) => {
         console.error(`Error unbanning user ${userId}:`, err);
@@ -567,88 +710,202 @@ export function useAdminAndTaxonomyActions({
   };
 
   const actionReport = (reportId: string, actionNote: string, actionType: 'actioned' | 'dismissed') => {
-    setReports((prev) =>
-      prev.map((r) =>
-        r.id === reportId
-          ? {
-              ...r,
-              status: actionType,
-              actionTaken: actionNote,
-            }
-          : r
-      )
-    );
-    recordAuditLog('MODERATE_REPORT', 'Moderation / Queue', reportId, actionType, actionNote);
-    addToast({
-      type: 'info',
-      title: 'Report Processed',
-      message: `Status: ${actionType.toUpperCase()}`,
-    });
     fetch('/api/admin/moderation', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'action_report', reportId, note: actionNote, actionType }),
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to action report ${reportId}: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Action Failed',
+            message: 'Failed to process report on server.',
+          });
+          return;
+        }
+        setReports((prev) =>
+          prev.map((r) =>
+            r.id === reportId
+              ? {
+                  ...r,
+                  status: actionType,
+                  actionTaken: actionNote,
+                }
+              : r
+          )
+        );
+        recordAuditLog('MODERATE_REPORT', 'Moderation / Queue', reportId, actionType, actionNote);
+        addToast({
+          type: 'info',
+          title: 'Report Processed',
+          message: `Status: ${actionType.toUpperCase()}`,
+        });
+      })
+      .catch((err) => {
+        console.error(`Error actioning report ${reportId}:`, err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const addModerationRule = (rule: Omit<ModerationRule, 'id'>) => {
     const id = 'rule_' + Date.now();
-    setRules((prev) => [...prev, { ...rule, id }]);
-    recordAuditLog('CREATE_MODERATION_RULE', 'Moderation / Rules', id, rule.title, `Automated action: ${rule.action}`);
-    addToast({ type: 'success', title: 'Moderation Rule Created', message: rule.title });
     fetch('/api/admin/moderation', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'add_rule', ruleData: rule }),
-    }).catch(() => {});
+      body: JSON.stringify({ action: 'add_rule', ruleData: { ...rule, id } }),
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to add moderation rule: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Rule Creation Failed',
+            message: 'Failed to create moderation rule on server.',
+          });
+          return;
+        }
+        setRules((prev) => [...prev, { ...rule, id }]);
+        recordAuditLog('CREATE_MODERATION_RULE', 'Moderation / Rules', id, rule.title, `Automated action: ${rule.action}`);
+        addToast({ type: 'success', title: 'Moderation Rule Created', message: rule.title });
+      })
+      .catch((err) => {
+        console.error('Error adding moderation rule:', err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const toggleModerationRule = (id: string) => {
     const target = rules.find((r) => r.id === id);
     if (!target) return;
     const updated = !target.isActive;
-    setRules((prev) => prev.map((r) => (r.id === id ? { ...r, isActive: updated } : r)));
     fetch('/api/admin/moderation', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'toggle_rule', ruleData: { id } }),
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to toggle moderation rule: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Update Failed',
+            message: 'Failed to toggle rule on server.',
+          });
+          return;
+        }
+        setRules((prev) => prev.map((r) => (r.id === id ? { ...r, isActive: updated } : r)));
+      })
+      .catch((err) => {
+        console.error('Error toggling moderation rule:', err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const addPackage = (pkg: Omit<PromotionalPackage, 'id' | 'salesCount'>) => {
     const id = 'pkg_' + Math.random().toString(36).substring(2, 7);
     const newPkg = { ...pkg, id, salesCount: 0 };
-    setPackages((prev) => [...prev, newPkg]);
-    recordAuditLog('CREATE_COMMERCE_PACKAGE', 'Commerce / Packages', id, pkg.name, `Price: ₹${pkg.price}`);
-    addToast({ type: 'success', title: 'Promotional Package Added', message: pkg.name });
     fetch('/api/boost/packages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newPkg),
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to add package: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Creation Failed',
+            message: 'Failed to create package on server.',
+          });
+          return;
+        }
+        setPackages((prev) => [...prev, newPkg]);
+        recordAuditLog('CREATE_COMMERCE_PACKAGE', 'Commerce / Packages', id, pkg.name, `Price: ₹${pkg.price}`);
+        addToast({ type: 'success', title: 'Promotional Package Added', message: pkg.name });
+      })
+      .catch((err) => {
+        console.error('Error adding package:', err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const updatePackage = (pkg: PromotionalPackage) => {
-    setPackages((prev) => prev.map((p) => (p.id === pkg.id ? pkg : p)));
-    recordAuditLog('UPDATE_COMMERCE_PACKAGE', 'Commerce / Packages', pkg.id, pkg.name, `Price: ₹${pkg.price}`);
-    addToast({ type: 'success', title: 'Package Updated', message: pkg.name });
     fetch(`/api/boost/packages/${pkg.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(pkg),
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to update package: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Update Failed',
+            message: 'Failed to update package on server.',
+          });
+          return;
+        }
+        setPackages((prev) => prev.map((p) => (p.id === pkg.id ? pkg : p)));
+        recordAuditLog('UPDATE_COMMERCE_PACKAGE', 'Commerce / Packages', pkg.id, pkg.name, `Price: ₹${pkg.price}`);
+        addToast({ type: 'success', title: 'Package Updated', message: pkg.name });
+      })
+      .catch((err) => {
+        console.error('Error updating package:', err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const togglePackageStatus = (id: string) => {
     const target = packages.find((p) => p.id === id);
     if (!target) return;
     const updatedStatus = !target.isActive;
-    setPackages((prev) => prev.map((p) => (p.id === id ? { ...p, isActive: updatedStatus } : p)));
     fetch(`/api/boost/packages/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ isActive: updatedStatus }),
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to toggle package status: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Update Failed',
+            message: 'Failed to toggle package status on server.',
+          });
+          return;
+        }
+        setPackages((prev) => prev.map((p) => (p.id === id ? { ...p, isActive: updatedStatus } : p)));
+      })
+      .catch((err) => {
+        console.error('Error toggling package status:', err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const updateSettings = (newSettings: Partial<SystemSettings>) => {

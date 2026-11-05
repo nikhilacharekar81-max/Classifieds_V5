@@ -39,13 +39,72 @@ export class UserRepository {
     };
   }
 
+  private async enrichUserWithStats(user: UserAccount, sessionIp?: string): Promise<UserAccount> {
+    try {
+      let totalListings = 0;
+      let activeListings = 0;
+      let lastIp = sessionIp && sessionIp !== 'unknown' ? sessionIp : 'Not recorded';
+
+      try {
+        const statsRows = (await withDbRetry(() =>
+          db
+            .select({
+              total: sql<number>`count(*)::int`,
+              active: sql<number>`sum(case when ${schema.listings.status} = 'approved' and ${schema.listings.expiresAt} >= now() then 1 else 0 end)::int`,
+            })
+            .from(schema.listings)
+            .where(eq(schema.listings.sellerId, user.id))
+        )) as any[];
+
+        if (statsRows && statsRows.length > 0) {
+          totalListings = Number(statsRows[0].total) || 0;
+          activeListings = Number(statsRows[0].active) || 0;
+        }
+      } catch (err) {
+        console.warn(`Failed to fetch listing stats for user ${user.id}:`, err);
+      }
+
+      if (lastIp === 'Not recorded') {
+        try {
+          const sessionRows = (await withDbRetry(() =>
+            db
+              .select({
+                ipAddress: schema.userSessions.ipAddress,
+              })
+              .from(schema.userSessions)
+              .where(eq(schema.userSessions.userId, user.id))
+              .orderBy(desc(schema.userSessions.lastSeenAt))
+              .limit(1)
+          )) as any[];
+
+          if (sessionRows && sessionRows.length > 0 && sessionRows[0].ipAddress && sessionRows[0].ipAddress !== 'unknown') {
+            lastIp = sessionRows[0].ipAddress;
+          }
+        } catch (err) {
+          console.warn(`Failed to fetch lastIp for user ${user.id}:`, err);
+        }
+      }
+
+      return {
+        ...user,
+        totalListings,
+        activeListings,
+        lastIp,
+      };
+    } catch (err) {
+      console.warn(`enrichUserWithStats failed for user ${user.id}:`, err);
+      return user;
+    }
+  }
+
   public async findById(id: string): Promise<UserAccount | null> {
     try {
       const rows = (await withDbRetry(() =>
         db.select().from(schema.users).where(eq(schema.users.id, id)).limit(1)
       )) as any[];
       if (!rows.length) return null;
-      return this.mapRowToUser(rows[0]);
+      const baseUser = this.mapRowToUser(rows[0]);
+      return await this.enrichUserWithStats(baseUser);
     } catch (error) {
       console.error(`UserRepository.findById error for ${id}:`, error);
       throw new Error(`Failed to find user with id ${id}`, { cause: error });
@@ -384,7 +443,9 @@ export class UserRepository {
         await this.deleteSession(sessionId);
         return null;
       }
-      return { session, user: this.mapRowToUser(user), adminRole: user.adminRole };
+      const baseUser = this.mapRowToUser(user);
+      const enrichedUser = await this.enrichUserWithStats(baseUser, session.ipAddress);
+      return { session, user: enrichedUser, adminRole: user.adminRole };
     } catch (error) {
       console.error('UserRepository.findSession error:', error);
       return null;
