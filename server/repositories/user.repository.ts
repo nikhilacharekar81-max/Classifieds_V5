@@ -18,6 +18,7 @@ export class UserRepository {
       emailUnsubscribedAt: row.emailUnsubscribedAt ? row.emailUnsubscribedAt.toISOString() : undefined,
       emailVerified: row.emailVerified,
       emailVerifiedAt: row.emailVerifiedAt ? row.emailVerifiedAt.toISOString() : undefined,
+      banReason: row.banReason || undefined,
       location: {
         city: row.city,
         state: row.state,
@@ -474,27 +475,30 @@ export class UserRepository {
 
   public async anonymizeAndDeleteUser(userId: string): Promise<boolean> {
     try {
-      await db
-        .update(schema.listings)
-        .set({ status: 'expired', updatedAt: new Date() })
-        .where(eq(schema.listings.sellerId, userId));
+      return await db.transaction(async (tx) => {
+        const now = new Date();
+        await tx
+          .update(schema.listings)
+          .set({ status: 'expired', updatedAt: now })
+          .where(eq(schema.listings.sellerId, userId));
 
-      await db
-        .update(schema.users)
-        .set({
-          name: 'Deleted User',
-          email: `deleted_${userId.slice(0, 12)}@deleted.invalid`,
-          phone: '0000000000',
-          passwordHash: null,
-          avatarUrl: null,
-          status: 'deleted',
-          emailVerified: false,
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.users.id, userId));
+        await tx
+          .update(schema.users)
+          .set({
+            name: 'Deleted User',
+            email: `deleted_${userId.slice(0, 12)}@deleted.invalid`,
+            phone: '0000000000',
+            passwordHash: null,
+            avatarUrl: null,
+            status: 'deleted',
+            emailVerified: false,
+            updatedAt: now,
+          })
+          .where(eq(schema.users.id, userId));
 
-      await this.deleteUserSessions(userId);
-      return true;
+        await tx.delete(schema.userSessions).where(eq(schema.userSessions.userId, userId));
+        return true;
+      });
     } catch (error) {
       console.error(`UserRepository.anonymizeAndDeleteUser error for ${userId}:`, error);
       return false;

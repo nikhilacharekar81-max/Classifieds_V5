@@ -108,7 +108,40 @@ export class ChatRepository {
       };
     } catch (error) {
       console.error('ChatRepository.createMessage error:', error);
-      throw new Error('Failed to create chat message in PostgreSQL', { cause: error });
+      throw error;
+    }
+  }
+
+  public async hasConversation(
+    listingId: string,
+    participant1: string,
+    participant2: string
+  ): Promise<boolean> {
+    try {
+      const rows = await db
+        .select({ id: schema.chatMessages.id })
+        .from(schema.chatMessages)
+        .where(
+          and(
+            eq(schema.chatMessages.listingId, listingId),
+            or(
+              and(
+                eq(schema.chatMessages.senderId, participant1),
+                eq(schema.chatMessages.receiverId, participant2)
+              ),
+              and(
+                eq(schema.chatMessages.senderId, participant2),
+                eq(schema.chatMessages.receiverId, participant1)
+              )
+            )
+          )
+        )
+        .limit(1);
+
+      return rows.length > 0;
+    } catch (error) {
+      console.error('ChatRepository.hasConversation error:', error);
+      return false;
     }
   }
 }

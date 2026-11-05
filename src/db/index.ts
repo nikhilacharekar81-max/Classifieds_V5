@@ -15,6 +15,7 @@ declare global {
 const EMAIL_MIGRATION_SQL = `
   ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "email_verified" boolean DEFAULT false NOT NULL;
   ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "email_verified_at" timestamp with time zone;
+  ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "ban_reason" text;
 
   CREATE TABLE IF NOT EXISTS "email_verification_tokens" (
       "id" varchar(64) PRIMARY KEY NOT NULL,
@@ -24,6 +25,22 @@ const EMAIL_MIGRATION_SQL = `
       "used_at" timestamp with time zone,
       "created_at" timestamp with time zone DEFAULT now() NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS "ban_appeals" (
+      "id" varchar(64) PRIMARY KEY NOT NULL,
+      "user_id" varchar(64) NOT NULL REFERENCES "users"("id") ON DELETE cascade,
+      "user_email" varchar(255) NOT NULL,
+      "appeal_reason" text NOT NULL,
+      "status" varchar(32) DEFAULT 'pending' NOT NULL,
+      "reviewed_by" varchar(64),
+      "review_notes" text,
+      "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+      "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+  );
+
+  UPDATE "listings" SET "status" = 'expired' WHERE "status" IN ('approved', 'pending') AND "expires_at" <= NOW();
+  DROP INDEX IF EXISTS "idx_unique_active_ad_title_per_seller";
+  CREATE UNIQUE INDEX IF NOT EXISTS "idx_unique_active_ad_title_per_seller" ON "listings" ("seller_id", LOWER(REGEXP_REPLACE(TRIM("title"), '\s+', ' ', 'g'))) WHERE "status" IN ('approved', 'pending');
 `;
 
 async function applyEmailVerificationSchema(executor: { query: (sql: string, params?: any[]) => Promise<any> } | { exec: (sql: string) => Promise<any> }) {

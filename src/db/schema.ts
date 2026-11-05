@@ -194,7 +194,7 @@ export const listings = pgTable(
     uniqueIndex('idx_unique_active_ad_title_per_seller').on(
       table.sellerId,
       sql`LOWER(REGEXP_REPLACE(TRIM(${table.title}), '\\s+', ' ', 'g'))`
-    ).where(sql`${table.status} NOT IN ('sold', 'expired')`),
+    ).where(sql`${table.status} IN ('approved', 'pending')`),
     index('idx_listings_boost_ranking').on(
       table.boostStatus,
       table.boostExpiresAt,
@@ -458,4 +458,17 @@ export const cacheInvalidationOutbox = pgTable(
     index('idx_cache_invalidation_outbox_status_retry').on(table.status, table.nextRetryAt),
   ]
 );
+
+// 24. Ban Appeals
+export const banAppeals = pgTable('ban_appeals', {
+  id: varchar('id', { length: 64 }).primaryKey(),
+  userId: varchar('user_id', { length: 64 }).notNull().references(() => users.id, { onDelete: 'cascade' }),
+  userEmail: varchar('user_email', { length: 255 }).notNull(),
+  appealReason: text('appeal_reason').notNull(),
+  status: varchar('status', { length: 32 }).notNull().default('pending'),
+  reviewedBy: varchar('reviewed_by', { length: 64 }),
+  reviewNotes: text('review_notes'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
 

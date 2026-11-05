@@ -91,6 +91,20 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
+
+      // Ensure seller cannot send unsolicited messages without existing conversation on this listing
+      const hasExistingChat = await chatRepository.hasConversation(
+        listingId,
+        listing.sellerId,
+        explicitReceiverId
+      );
+      if (!hasExistingChat) {
+        return NextResponse.json(
+          { error: 'Sellers can only reply to users who have initiated a conversation on this listing' },
+          { status: 403 }
+        );
+      }
+
       receiverId = explicitReceiverId;
     }
 

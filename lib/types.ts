@@ -42,6 +42,7 @@ export interface UserAccount {
   emailUnsubscribedAt?: string;
   emailVerified?: boolean;
   emailVerifiedAt?: string;
+  banReason?: string;
   kycDocument?: {
     type: 'Aadhaar' | 'PAN' | 'GSTIN' | 'Passport';
     docNumber: string;

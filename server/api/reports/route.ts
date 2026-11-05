@@ -26,9 +26,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Target ID is required' }, { status: 400 });
     }
 
-    const cleanReason = String(reason || '').trim();
+    const ALLOWED_REPORT_REASONS = [
+      'spam',
+      'prohibited_item',
+      'fraud_scam',
+      'offensive',
+      'duplicate',
+      'wrong_category',
+    ];
+
+    const cleanReason = String(reason || '').trim().toLowerCase();
     if (!cleanReason) {
       return NextResponse.json({ error: 'Report reason is required' }, { status: 400 });
+    }
+
+    if (!ALLOWED_REPORT_REASONS.includes(cleanReason)) {
+      return NextResponse.json(
+        { error: `Invalid report reason '${cleanReason}'. Allowed reasons are: ${ALLOWED_REPORT_REASONS.join(', ')}` },
+        { status: 400 }
+      );
     }
 
     const reportNotes = String(notes || comments || 'User submitted report').trim();

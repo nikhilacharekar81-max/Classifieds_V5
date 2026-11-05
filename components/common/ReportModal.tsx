@@ -13,11 +13,19 @@ export const ReportModal: React.FC<ReportModalProps> = ({ reportConfig, onClose 
   const app = useAppOptional();
 
   const activeConfig = reportConfig !== undefined ? reportConfig : app?.reportModalConfig || null;
-  const closeReportModal = onClose || app?.closeReportModal || (() => {});
+  const closeReportModal = () => {
+    setComments('');
+    setTargetId('');
+    if (onClose) onClose();
+    if (app?.closeReportModal) app.closeReportModal();
+  };
+
+  if (!activeConfig || !activeConfig.open) return null;
 
   const initialType: 'listing' | 'user' = activeConfig?.type === 'user' ? 'user' : 'listing';
   const [targetType, setTargetType] = useState<'listing' | 'user'>(initialType);
   const [targetId, setTargetId] = useState<string>(activeConfig?.targetId || '');
+  const [comments, setComments] = useState<string>('');
   const adReasons = [
     { label: 'Fraud / Advance Payment Scam', key: 'fraud_scam' },
     { label: 'Prohibited / Illegal Goods or Counterfeit', key: 'prohibited_item' },

@@ -54,6 +54,11 @@ export const MyAccountDropdown: React.FC = () => {
   const [resetToken, setResetToken] = useState('');
   const [resetNewPassword, setResetNewPassword] = useState('');
 
+  // Ban Appeal state
+  const [appealReason, setAppealReason] = useState('');
+  const [isSubmittingAppeal, setIsSubmittingAppeal] = useState(false);
+  const [appealSubmitted, setAppealSubmitted] = useState(false);
+
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const notify = (payload: {
@@ -396,6 +401,46 @@ export const MyAccountDropdown: React.FC = () => {
     }
   };
 
+  const handleAppealSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!appealReason.trim() || !bannedInfo) return;
+    setIsSubmittingAppeal(true);
+    try {
+      const res = await fetch('/api/user/appeal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: bannedInfo.userId,
+          userEmail: signInEmail.trim(),
+          appealReason: appealReason.trim(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setIsSubmittingAppeal(false);
+      if (res.ok) {
+        setAppealSubmitted(true);
+        notify({
+          type: 'success',
+          title: 'Appeal Submitted',
+          message: data.message || 'Your ban appeal has been submitted for moderation review.',
+        });
+      } else {
+        notify({
+          type: 'error',
+          title: 'Appeal Error',
+          message: data.error || 'Failed to submit appeal.',
+        });
+      }
+    } catch (err: any) {
+      setIsSubmittingAppeal(false);
+      notify({
+        type: 'error',
+        title: 'Appeal Error',
+        message: err?.message || 'Failed to submit appeal.',
+      });
+    }
+  };
+
   const handleSignOutClick = async () => {
     setIsOpen(false);
     setLocalAuthUser(null);
@@ -596,24 +641,35 @@ export const MyAccountDropdown: React.FC = () => {
                       </button>
                     )}
                     {bannedInfo && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAuthModalMode(null);
-                          if (app?.openReportModal) {
-                            app.openReportModal('user', bannedInfo.userId, `Appeal Ban for User ${bannedInfo.userId}`);
-                          } else {
-                            window.dispatchEvent(
-                              new CustomEvent('open_report_modal', {
-                                detail: { reportType: 'user', targetId: bannedInfo.userId },
-                              })
-                            );
-                          }
-                        }}
-                        className="mt-2 px-3 py-1.5 bg-rose-700 hover:bg-rose-800 text-white font-bold rounded-lg text-xs cursor-pointer block"
-                      >
-                        Submit Appeal to Moderation Team
-                      </button>
+                      <div className="mt-3 pt-3 border-t border-rose-200">
+                        {appealSubmitted ? (
+                          <div className="p-2.5 bg-emerald-100 border border-emerald-300 text-emerald-800 rounded-lg text-xs font-semibold">
+                            Appeal submitted. Our moderation team will review your request.
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <label className="block text-xs font-bold text-rose-900">
+                              Submit Account Ban Appeal:
+                            </label>
+                            <textarea
+                              rows={3}
+                              value={appealReason}
+                              onChange={(e) => setAppealReason(e.target.value)}
+                              placeholder="Explain why your account suspension should be reviewed..."
+                              className="w-full p-2 text-xs border border-rose-300 rounded-lg text-slate-900 focus:outline-none focus:border-rose-600 bg-white"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleAppealSubmit}
+                              disabled={isSubmittingAppeal || !appealReason.trim()}
+                              className="px-3 py-1.5 bg-rose-700 hover:bg-rose-800 disabled:opacity-50 text-white font-bold rounded-lg text-xs cursor-pointer flex items-center gap-1.5"
+                            >
+                              {isSubmittingAppeal && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                              Submit Appeal to Moderation Team
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}

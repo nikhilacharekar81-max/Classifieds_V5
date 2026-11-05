@@ -319,6 +319,7 @@ CREATE TABLE "users" (
 	"avatar_url" text,
 	"type" varchar(32) DEFAULT 'user' NOT NULL,
 	"status" varchar(32) DEFAULT 'active' NOT NULL,
+	"ban_reason" text,
 	"kyc_status" varchar(32) DEFAULT 'unsubmitted' NOT NULL,
 	"email_subscribed" boolean DEFAULT true NOT NULL,
 	"email_unsubscribed_at" timestamp with time zone,
@@ -394,8 +395,20 @@ ALTER TABLE "listings" ADD CONSTRAINT "listings_category_id_categories_id_fk" FO
 ALTER TABLE "user_favorites" ADD CONSTRAINT "user_favorites_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "user_favorites" ADD CONSTRAINT "user_favorites_listing_id_listings_id_fk" FOREIGN KEY ("listing_id") REFERENCES "public"."listings"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "user_sessions" ADD CONSTRAINT "user_sessions_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE UNIQUE INDEX "idx_unique_active_ad_title_per_seller" ON "listings" USING btree ("seller_id",LOWER(REGEXP_REPLACE(TRIM("title"), '\s+', ' ', 'g'))) WHERE "listings"."status" NOT IN ('sold', 'expired');--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_unique_active_ad_title_per_seller" ON "listings" USING btree ("seller_id",LOWER(REGEXP_REPLACE(TRIM("title"), '\s+', ' ', 'g'))) WHERE "listings"."status" IN ('approved', 'pending');--> statement-breakpoint
 CREATE INDEX "idx_listings_boost_ranking" ON "listings" USING btree ("boost_status","boost_expires_at","is_featured","created_at");--> statement-breakpoint
 CREATE INDEX "idx_listings_location_cat" ON "listings" USING btree ("city","category_id","status");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_webhook_gateway_event_unique" ON "payment_webhook_events" USING btree ("gateway","id");--> statement-breakpoint
-CREATE INDEX "idx_cache_invalidation_outbox_status_retry" ON "cache_invalidation_outbox" USING btree ("status","next_retry_at");
+CREATE INDEX "idx_cache_invalidation_outbox_status_retry" ON "cache_invalidation_outbox" USING btree ("status","next_retry_at");--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "ban_appeals" (
+	"id" varchar(64) PRIMARY KEY NOT NULL,
+	"user_id" varchar(64) NOT NULL,
+	"user_email" varchar(255) NOT NULL,
+	"appeal_reason" text NOT NULL,
+	"status" varchar(32) DEFAULT 'pending' NOT NULL,
+	"reviewed_by" varchar(64),
+	"review_notes" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);--> statement-breakpoint
+ALTER TABLE "ban_appeals" ADD CONSTRAINT "ban_appeals_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;

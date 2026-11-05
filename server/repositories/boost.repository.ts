@@ -157,31 +157,21 @@ export class BoostRepository {
 
   public async findPendingOrderByListingId(listingId: string): Promise<typeof schema.boostOrders.$inferSelect | null> {
     try {
+      const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000);
       const rows = await db
         .select()
         .from(schema.boostOrders)
         .where(
           and(
             eq(schema.boostOrders.listingId, listingId),
-            eq(schema.boostOrders.status, 'pending')
+            eq(schema.boostOrders.status, 'pending'),
+            gte(schema.boostOrders.createdAt, thirtyMinsAgo)
           )
         )
         .orderBy(desc(schema.boostOrders.createdAt))
         .limit(1);
 
-      if (!rows.length) return null;
-
-      const order = rows[0];
-      const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000);
-      if (order.createdAt < thirtyMinsAgo) {
-        await db
-          .update(schema.boostOrders)
-          .set({ status: 'expired' })
-          .where(eq(schema.boostOrders.orderId, order.orderId));
-        return null;
-      }
-
-      return order;
+      return rows[0] || null;
     } catch (error) {
       console.error(`BoostRepository.findPendingOrderByListingId error:`, error);
       return null;
