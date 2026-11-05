@@ -649,7 +649,8 @@ export function useListingActions({
       }
 
       if (!res.ok) {
-        throw new Error('Failed to create listing');
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to create listing');
       }
 
       const createdListing: Listing = await res.json();
@@ -672,12 +673,12 @@ export function useListingActions({
       });
 
       return createdListing;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to create listing:', err);
       addToast({
         type: 'error',
         title: 'Posting Failed',
-        message: 'There was an error saving your ad.',
+        message: err.message || 'There was an error saving your ad.',
       });
       return null;
     }

@@ -41,9 +41,7 @@ export const ListingMapWidget: React.FC<ListingMapWidgetProps> = ({
   state,
   priceFormatted,
 }) => {
-  const apiKey =
-    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_MAPS_API_KEY) ||
-    'AIzaSyB2M-uQo8veNV4B2iG3B9JEd7u74rGQxUg';
+  const apiKey = typeof import.meta !== 'undefined' ? import.meta.env?.VITE_GOOGLE_MAPS_API_KEY : undefined;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [shouldLoadMap, setShouldLoadMap] = useState(false);

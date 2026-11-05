@@ -56,10 +56,10 @@ export const PostAdPage: React.FC = () => {
     window.dispatchEvent(new CustomEvent('open_auth_modal', { detail: { mode } }));
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
-    // ... (rest of function remains same)
+
     const remainingSlots = 5 - postForm.images.length;
     if (remainingSlots <= 0) {
       addToast({
@@ -72,27 +72,40 @@ export const PostAdPage: React.FC = () => {
 
     const filesArray = Array.from(files).slice(0, remainingSlots);
 
-    filesArray.forEach((file) => {
+    for (const file of filesArray) {
       if (file.size > 5 * 1024 * 1024) {
         addToast({
           title: 'File Too Large',
           message: `${file.name} is larger than 5MB. Please upload a smaller image.`,
           type: 'error',
         });
-        return;
+        continue;
       }
 
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (typeof reader.result === 'string') {
-          setPostForm((prev) => ({
-            ...prev,
-            images: [...prev.images, reader.result as string],
-          }));
-        }
-      };
-      reader.readAsDataURL(file);
-    });
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const res = await fetch('/api/listings/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!res.ok) throw new Error('Upload failed');
+
+        const { url } = await res.json();
+        setPostForm((prev) => ({
+          ...prev,
+          images: [...prev.images, url],
+        }));
+      } catch (err) {
+        addToast({
+          title: 'Upload Failed',
+          message: `Failed to upload ${file.name}.`,
+          type: 'error',
+        });
+      }
+    }
   };
 
   const handleRemoveImage = (index: number) => {
@@ -280,7 +293,7 @@ export const PostAdPage: React.FC = () => {
       sellerPhone,
       sellerAvatar,
       price: parsedPrice as any,
-      description: postForm.description || 'Genuine item, well maintained and used with care.',
+      description: postForm.description,
       images: finalImages,
       status: requiresPayment ? 'approved' : 'pending',
       isFeatured: wantFeatured,

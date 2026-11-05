@@ -16,7 +16,7 @@ declare global {
 }
 
 const PROCESSING_LEASE_MS = 60_000;
-const OUTBOX_WORKER_INTERVAL_MS = 30_000;
+const OUTBOX_WORKER_INTERVAL_MS = 30_000 + Math.random() * 10000;
 
 export const REFERENCE_CACHE_TAGS = {
   CATEGORIES: 'marketplace-categories',
