@@ -146,10 +146,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Description cannot exceed 5000 characters' }, { status: 400 });
     }
 
-    // Validate price
-    const priceNum = Number(body.price);
-    if (isNaN(priceNum) || !isFinite(priceNum) || priceNum < 0) {
-      return NextResponse.json({ error: 'Price must be a valid non-negative number' }, { status: 400 });
+    // Validate price (optional: missing/empty price becomes null; zero is preserved)
+    let priceNum: number | null = null;
+    if (body.price !== undefined && body.price !== null && String(body.price).trim() !== '') {
+      const p = Number(body.price);
+      if (isNaN(p) || !isFinite(p) || p < 0) {
+        return NextResponse.json(
+          { error: 'Price must be a valid non-negative number' },
+          { status: 400 }
+        );
+      }
+      priceNum = p;
     }
 
     // Sanitize image URLs array

@@ -271,7 +271,6 @@ export class ListingService {
     }
 
     const sellerId = authenticatedUserId || data.sellerId;
-    console.log('DEBUG createListing data:', data);
     if (!sellerId) {
       return { success: false, error: 'Seller authentication required', status: 401 };
     }
