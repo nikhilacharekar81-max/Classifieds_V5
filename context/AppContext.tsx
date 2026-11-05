@@ -437,9 +437,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
   const signOut = async () => {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
-      setAuthUser(null);
-      setCurrentAdmin(null);
-      setActiveUserId(null);
+      updateAuth(null, null, null);
       addToast({ type: 'info', title: 'Signed Out', message: 'You have been signed out.' });
       window.location.href = '/';
     } catch (err) {
@@ -528,8 +526,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
         exitImpersonation,
         currentUser,
         authUser,
-        setAuthUser,
-        setCurrentUserId: setActiveUserId,
+        updateAuth,
         isAuthChecking,
         listings,
         categories,

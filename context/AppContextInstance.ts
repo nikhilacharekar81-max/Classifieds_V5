@@ -46,7 +46,7 @@ export interface AppContextType {
   exitImpersonation: () => void;
   currentUser: UserAccount;
   authUser: UserAccount | null;
-  setAuthUser: (user: UserAccount | null) => void;
+  updateAuth: (user: UserAccount | null, admin: AdminUser | null, userId: string | null) => void;
   setCurrentUserId: (id: string) => void;
   isAuthChecking: boolean;
 

@@ -226,8 +226,7 @@ export const MyAccountDropdown: React.FC = () => {
       if (data.user) {
         setLocalAuthUser(data.user);
         setHasCheckedSession(true);
-        app?.setAuthUser(data.user);
-        app?.setCurrentUserId(data.user.id);
+        app?.updateAuth(data.user, null, data.user.id);
         window.dispatchEvent(new CustomEvent('auth_state_changed', { detail: { user: data.user } }));
       }
       notify({
