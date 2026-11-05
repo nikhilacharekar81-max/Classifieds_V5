@@ -4,6 +4,7 @@ import React from 'react';
 import dynamic from '@/src/shims/next-dynamic';
 import { useApp } from '@/context/AppContext';
 import { ToastContainer } from '@/components/common/ToastContainer';
+import { MyAccountDropdown } from '@/components/common/MyAccountDropdown';
 
 const CmsPageModal = dynamic(() =>
   import('@/components/common/CmsPageModal').then((m) => m.CmsPageModal)
@@ -38,6 +39,7 @@ export const GlobalOverlays: React.FC = () => {
       {settings?.enablePrivacyChoices && isCmpModalOpen && <CmpConsentModal />}
       {settings?.enablePrivacyChoices && isUsPrivacyModalOpen && <UsPrivacyModal />}
       {isEeatModalOpen && <EeatSchemaModal />}
+      <MyAccountDropdown />
       <ToastContainer />
     </>
   );
