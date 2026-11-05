@@ -11,6 +11,7 @@
     "db:init": "tsx server/seed-postgres.ts --init",
     "db:seed:demo": "tsx server/seed-postgres.ts --demo",
     "clean": "rm -rf dist server.js",
+    "test": "tsx --test tests/*.test.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

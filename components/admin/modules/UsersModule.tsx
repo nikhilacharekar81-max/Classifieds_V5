@@ -26,6 +26,7 @@ import {
 import { Badge } from '@/components/common/Badge';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { navigateTo } from '@/lib/router/useRouter';
+import { buildCsvContent } from '@/lib/utils/csvHelper';
 
 interface UsersModuleProps {
   initialTab?: 'all' | 'users' | 'businesses' | 'verification' | 'banned';
@@ -87,7 +88,7 @@ export const UsersModule: React.FC<UsersModuleProps> = ({ initialTab = 'all' }) 
     const headers = ['ID', 'Name', 'Email', 'Phone', 'Type', 'Status', 'KYC', 'City', 'Listings', 'Joined Date', 'Last IP'];
     const rows = filteredUsers.map((u) => [
       u.id,
-      `"${u.name.replace(/"/g, '""')}"`,
+      u.name,
       u.email,
       u.phone,
       u.type,
@@ -96,16 +97,18 @@ export const UsersModule: React.FC<UsersModuleProps> = ({ initialTab = 'all' }) 
       u.location.city,
       u.totalListings,
       u.joinedDate,
-      u.lastIp,
+      u.lastIp && u.lastIp !== 'unknown' ? u.lastIp : 'Not recorded',
     ]);
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    const csvContent = buildCsvContent(headers, rows);
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
+    link.setAttribute('href', url);
     link.setAttribute('download', `chillyads_users_export_${Date.now()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
     addToast({
       type: 'success',
       title: 'Users Export Generated',
@@ -311,7 +314,9 @@ export const UsersModule: React.FC<UsersModuleProps> = ({ initialTab = 'all' }) 
                     </td>
 
                     <td className="p-3 text-[11px] text-slate-500">
-                      <div className="font-mono text-[10px] text-slate-400">IP: {user.lastIp}</div>
+                      <div className="font-mono text-[10px] text-slate-400">
+                        IP: {user.lastIp && user.lastIp !== 'unknown' ? user.lastIp : 'Not recorded'}
+                      </div>
                       <div>Last: {user.lastLogin}</div>
                     </td>
 

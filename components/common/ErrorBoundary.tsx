@@ -26,12 +26,6 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   private handleReset = () => {
-    try {
-      localStorage.clear();
-      sessionStorage.clear();
-    } catch (e) {
-      console.error('Failed clearing storage:', e);
-    }
     window.location.href = '/';
   };
 

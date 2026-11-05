@@ -485,7 +485,13 @@ export const AccountSettingsTab: React.FC<AccountSettingsTabProps> = ({
 
             <div className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-800/60 rounded-lg">
               <span>Account Rating</span>
-              <span className="font-extrabold text-amber-500">★ {currentUser.rating} / 5.0</span>
+              {(currentUser.reviewCount || 0) > 0 ? (
+                <span className="font-extrabold text-amber-500">
+                  ★ {Number(currentUser.rating).toFixed(1)} / 5.0 ({currentUser.reviewCount} {currentUser.reviewCount === 1 ? 'review' : 'reviews'})
+                </span>
+              ) : (
+                <span className="font-semibold text-slate-500 dark:text-slate-400">No reviews yet</span>
+              )}
             </div>
           </div>
 

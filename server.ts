@@ -302,7 +302,7 @@ ${urls
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(
-      `Remix Classifieds V3 (Node.js + Vite + Express + PostgreSQL + Full SSR) running on http://localhost:${PORT}`
+      `Chillyads / Classifieds_V5 (Node.js + Vite + Express + PostgreSQL + Full SSR) running on http://localhost:${PORT}`
     );
   });
 }

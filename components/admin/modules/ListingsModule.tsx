@@ -30,6 +30,7 @@ import {
 import { Badge } from '@/components/common/Badge';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { navigateTo } from '@/lib/router/useRouter';
+import { buildCsvContent } from '@/lib/utils/csvHelper';
 
 interface ListingsModuleProps {
   initialStatusFilter?: ListingStatus | 'all';
@@ -353,23 +354,25 @@ export const ListingsModule: React.FC<ListingsModuleProps> = ({
     const headers = ['ID', 'Title', 'Price', 'Category', 'City', 'Seller', 'Status', 'Views', 'Created Date'];
     const rows = filteredListings.map((l) => [
       l.id,
-      `"${l.title.replace(/"/g, '""')}"`,
-      l.price,
+      l.title,
+      l.price ?? '',
       categories.find((c) => c.id === l.categoryId)?.name || l.categoryId,
       l.location.city,
-      `"${l.sellerName.replace(/"/g, '""')}"`,
+      l.sellerName,
       l.status,
       l.views,
       l.createdAt,
     ]);
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    const csvContent = buildCsvContent(headers, rows);
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
+    link.setAttribute('href', url);
     link.setAttribute('download', `chillyads_listings_export_${Date.now()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
     addToast({
       type: 'success',
       title: 'CSV Export Generated',

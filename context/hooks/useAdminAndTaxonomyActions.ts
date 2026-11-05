@@ -429,7 +429,25 @@ export function useAdminAndTaxonomyActions({
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedUser),
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to update user ${updatedUser.id}: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Action Failed',
+            message: 'Failed to update profile settings on server.',
+          });
+        }
+      })
+      .catch((err) => {
+        console.error(`Error updating user ${updatedUser.id}:`, err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const verifyUserKyc = (userId: string, status: 'verified' | 'rejected') => {
@@ -452,7 +470,25 @@ export function useAdminAndTaxonomyActions({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'verify_kyc', userId, status }),
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to update KYC status for user ${userId}: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Action Failed',
+            message: 'Failed to persist KYC decision on server.',
+          });
+        }
+      })
+      .catch((err) => {
+        console.error(`Error updating KYC status for user ${userId}:`, err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const banUser = (userId: string, reason: string) => {
@@ -474,7 +510,25 @@ export function useAdminAndTaxonomyActions({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'ban', userId, reason }),
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to ban user ${userId}: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Action Failed',
+            message: 'Failed to record user ban on server.',
+          });
+        }
+      })
+      .catch((err) => {
+        console.error(`Error banning user ${userId}:`, err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const unbanUser = (userId: string) => {
@@ -491,7 +545,25 @@ export function useAdminAndTaxonomyActions({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'unban', userId }),
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to unban user ${userId}: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Action Failed',
+            message: 'Failed to reactivate user on server.',
+          });
+        }
+      })
+      .catch((err) => {
+        console.error(`Error unbanning user ${userId}:`, err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const actionReport = (reportId: string, actionNote: string, actionType: 'actioned' | 'dismissed') => {

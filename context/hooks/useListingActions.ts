@@ -191,7 +191,25 @@ export function useListingActions({
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ isFeatured, featuredUntil: featuredUntil || null }),
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to update feature status for listing ${id}: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Action Failed',
+            message: 'Failed to update feature status on server.',
+          });
+        }
+      })
+      .catch((err) => {
+        console.error(`Error updating feature status for listing ${id}:`, err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const markAsSold = async (id: string): Promise<boolean> => {
@@ -330,7 +348,25 @@ export function useListingActions({
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'approved' }),
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to restore listing ${id}: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Action Failed',
+            message: 'Failed to restore listing on server.',
+          });
+        }
+      })
+      .catch((err) => {
+        console.error(`Error restoring listing ${id}:`, err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const sendAdExpiredEmail = (listingId: string) => {
@@ -382,7 +418,25 @@ export function useListingActions({
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'expired', expiresAt: todayStr }),
-    }).catch(() => {});
+    })
+      .then((res) => {
+        if (!res.ok) {
+          console.error(`Failed to expire listing ${id}: ${res.statusText}`);
+          addToast({
+            type: 'error',
+            title: 'Action Failed',
+            message: 'Failed to expire listing on server.',
+          });
+        }
+      })
+      .catch((err) => {
+        console.error(`Error expiring listing ${id}:`, err);
+        addToast({
+          type: 'error',
+          title: 'Network Error',
+          message: 'Unable to connect to server.',
+        });
+      });
   };
 
   const renewListing = async (id: string, days = 30, isFree = true): Promise<boolean> => {

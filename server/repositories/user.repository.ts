@@ -1,6 +1,6 @@
 import { db, withDbRetry } from '@/src/db/index';
 import * as schema from '@/src/db/schema';
-import { eq, desc, and, ne, gt, isNull } from '@/src/db/pg-orm';
+import { eq, desc, and, ne, gt, isNull, sql } from '@/src/db/pg-orm';
 import { UserAccount } from '@/lib/types';
 
 export class UserRepository {
@@ -28,7 +28,7 @@ export class UserRepository {
       reviewCount: row.reviewCount,
       joinedDate: row.createdAt.toISOString().split('T')[0],
       lastLogin: row.updatedAt.toISOString().split('T')[0],
-      lastIp: 'unknown',
+      lastIp: 'Not recorded',
       businessDetails: row.businessName
         ? {
             companyName: row.businessName,
@@ -74,8 +74,45 @@ export class UserRepository {
 
   public async findAll(): Promise<UserAccount[]> {
     try {
-      const rows = await db.select().from(schema.users).orderBy(desc(schema.users.createdAt));
-      return rows.map((r) => this.mapRowToUser(r));
+      const rows = (await withDbRetry(() =>
+        db.select().from(schema.users).orderBy(desc(schema.users.createdAt))
+      )) as any[];
+      const users = rows.map((r) => this.mapRowToUser(r));
+
+      try {
+        const listingStatsRows = (await withDbRetry(() =>
+          db
+            .select({
+              sellerId: schema.listings.sellerId,
+              total: sql<number>`count(*)::int`,
+              active: sql<number>`sum(case when ${schema.listings.status} = 'approved' and ${schema.listings.expiresAt} >= now() then 1 else 0 end)::int`,
+            })
+            .from(schema.listings)
+            .groupBy(schema.listings.sellerId)
+        )) as any[];
+
+        const statsMap = new Map<string, { total: number; active: number }>();
+        for (const row of listingStatsRows) {
+          if (row.sellerId) {
+            statsMap.set(row.sellerId, {
+              total: Number(row.total) || 0,
+              active: Number(row.active) || 0,
+            });
+          }
+        }
+
+        return users.map((u) => {
+          const stats = statsMap.get(u.id);
+          return {
+            ...u,
+            totalListings: stats?.total ?? 0,
+            activeListings: stats?.active ?? 0,
+          };
+        });
+      } catch (err) {
+        console.warn('Failed to aggregate listing stats for users:', err);
+        return users;
+      }
     } catch (error) {
       console.error('UserRepository.findAll error:', error);
       throw new Error('Failed to find users', { cause: error });
@@ -85,10 +122,12 @@ export class UserRepository {
   public async findAllForAdmin(): Promise<UserAccount[]> {
     try {
       const users = await this.findAll();
-      const kycRows = await db
-        .select()
-        .from(schema.kycDocuments)
-        .orderBy(desc(schema.kycDocuments.submittedAt));
+      const kycRows = (await withDbRetry(() =>
+        db
+          .select()
+          .from(schema.kycDocuments)
+          .orderBy(desc(schema.kycDocuments.submittedAt))
+      )) as any[];
 
       const kycByUserId = new Map<string, typeof schema.kycDocuments.$inferSelect>();
       for (const kyc of kycRows) {
@@ -97,11 +136,34 @@ export class UserRepository {
         }
       }
 
+      // Query most recent recorded IP address from user_sessions per user
+      const sessionRows = (await withDbRetry(() =>
+        db
+          .select({
+            userId: schema.userSessions.userId,
+            ipAddress: schema.userSessions.ipAddress,
+          })
+          .from(schema.userSessions)
+          .orderBy(desc(schema.userSessions.lastSeenAt))
+      )) as any[];
+
+      const ipByUserId = new Map<string, string>();
+      for (const sess of sessionRows) {
+        if (sess.userId && !ipByUserId.has(sess.userId) && sess.ipAddress && sess.ipAddress !== 'unknown') {
+          ipByUserId.set(sess.userId, sess.ipAddress);
+        }
+      }
+
       return users.map((u) => {
         const kyc = kycByUserId.get(u.id);
+        const lastIp = ipByUserId.get(u.id) || 'Not recorded';
+        const base = {
+          ...u,
+          lastIp,
+        };
         if (kyc) {
           return {
-            ...u,
+            ...base,
             kycDocument: {
               type: kyc.documentType as any,
               docNumber: kyc.documentNumber,
@@ -110,7 +172,7 @@ export class UserRepository {
             },
           };
         }
-        return u;
+        return base;
       });
     } catch (error) {
       console.error('UserRepository.findAllForAdmin error:', error);
