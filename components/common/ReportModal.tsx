@@ -12,20 +12,6 @@ export interface ReportModalProps {
 export const ReportModal: React.FC<ReportModalProps> = ({ reportConfig, onClose }) => {
   const app = useAppOptional();
 
-  const activeConfig = reportConfig !== undefined ? reportConfig : app?.reportModalConfig || null;
-  const closeReportModal = () => {
-    setComments('');
-    setTargetId('');
-    if (onClose) onClose();
-    if (app?.closeReportModal) app.closeReportModal();
-  };
-
-  if (!activeConfig || !activeConfig.open) return null;
-
-  const initialType: 'listing' | 'user' = activeConfig?.type === 'user' ? 'user' : 'listing';
-  const [targetType, setTargetType] = useState<'listing' | 'user'>(initialType);
-  const [targetId, setTargetId] = useState<string>(activeConfig?.targetId || '');
-  const [comments, setComments] = useState<string>('');
   const adReasons = [
     { label: 'Fraud / Advance Payment Scam', key: 'fraud_scam' },
     { label: 'Prohibited / Illegal Goods or Counterfeit', key: 'prohibited_item' },
@@ -43,8 +29,25 @@ export const ReportModal: React.FC<ReportModalProps> = ({ reportConfig, onClose 
     { label: 'Repeated Spam Messaging', key: 'spam' },
   ];
 
-  const activeReasons = targetType === 'listing' ? adReasons : userReasons;
+  const activeConfig = reportConfig !== undefined ? reportConfig : app?.reportModalConfig || null;
+  const initialType: 'listing' | 'user' = activeConfig?.type === 'user' ? 'user' : 'listing';
+
+  // React hooks MUST run unconditionally on every render
+  const [targetType, setTargetType] = useState<'listing' | 'user'>(initialType);
+  const [targetId, setTargetId] = useState<string>(activeConfig?.targetId || '');
+  const [comments, setComments] = useState<string>('');
   const [reason, setReason] = useState<string>(adReasons[0].key);
+
+  const closeReportModal = () => {
+    setComments('');
+    setTargetId('');
+    if (onClose) onClose();
+    if (app?.closeReportModal) app.closeReportModal();
+  };
+
+  if (!activeConfig || !activeConfig.open) return null;
+
+  const activeReasons = targetType === 'listing' ? adReasons : userReasons;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

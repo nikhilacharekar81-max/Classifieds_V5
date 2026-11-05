@@ -108,6 +108,72 @@ export class ModerationService {
     const updated = await moderationRepository.updateRule(id, { isActive: !rule.isActive });
     return updated ? updated.isActive : false;
   }
+
+  public async getBanAppeals(statusFilter?: string): Promise<any[]> {
+    try {
+      const rows = await db.select().from(schema.banAppeals).orderBy(desc(schema.banAppeals.createdAt));
+      if (statusFilter && statusFilter !== 'all') {
+        return rows.filter((r) => r.status === statusFilter);
+      }
+      return rows;
+    } catch (error) {
+      console.error('ModerationService.getBanAppeals error:', error);
+      return [];
+    }
+  }
+
+  public async reviewBanAppeal(params: {
+    appealId: string;
+    decision: 'accepted' | 'rejected';
+    reviewNotes: string;
+    unbanUser?: boolean;
+    actor?: { id?: string; name?: string; ipAddress?: string };
+  }): Promise<boolean> {
+    const { appealId, decision, reviewNotes, unbanUser, actor } = params;
+    try {
+      const appealRows = await db
+        .select()
+        .from(schema.banAppeals)
+        .where(eq(schema.banAppeals.id, appealId))
+        .limit(1);
+
+      if (!appealRows.length) return false;
+      const appeal = appealRows[0];
+
+      await db
+        .update(schema.banAppeals)
+        .set({
+          status: decision,
+          reviewedBy: actor?.id || 'staff',
+          reviewNotes: reviewNotes || `Decision: ${decision}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.banAppeals.id, appealId));
+
+      if (decision === 'accepted' && unbanUser) {
+        await db
+          .update(schema.users)
+          .set({ status: 'active', banReason: null, updatedAt: new Date() })
+          .where(eq(schema.users.id, appeal.userId));
+      }
+
+      await adminRepository.createAuditLog({
+        adminId: actor?.id || 'staff',
+        adminName: actor?.name || 'Moderator',
+        action: 'BAN_APPEAL_REVIEWED',
+        module: 'Moderation',
+        targetId: appealId,
+        targetSummary: `Appeal for ${appeal.userEmail}`,
+        details: `Decision: ${decision}. Notes: ${reviewNotes}. Unbanned: ${Boolean(unbanUser)}`,
+        ipAddress: actor?.ipAddress || 'unknown',
+      });
+
+      return true;
+    } catch (error) {
+      console.error('ModerationService.reviewBanAppeal error:', error);
+      return false;
+    }
+  }
 }
 
 export const moderationService = new ModerationService();

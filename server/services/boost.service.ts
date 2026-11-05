@@ -104,12 +104,14 @@ export class BoostService {
       };
     }
 
-    // 5. Check for existing pending order on this listing to prevent concurrent pending orders
+    // 5. Expire any stale uncompleted pending orders for this listing before checking
+    await boostRepository.expireStalePendingOrdersForListing(listingId);
+
     const existingPending = await boostRepository.findPendingOrderByListingId(listingId);
     if (existingPending) {
       return {
         success: false,
-        error: 'A pending boost order already exists for this listing.',
+        error: 'A pending boost order already exists for this listing. Please complete or cancel existing checkout.',
         status: 409,
       };
     }
@@ -287,8 +289,24 @@ export class BoostService {
     }
 
     // 6. Verify amount and currency correspondence against authoritative order
+    if (amount === undefined || typeof amount !== 'number' || isNaN(amount)) {
+      return {
+        success: false,
+        error: 'Verified payment amount is required for verification',
+        status: 400,
+      };
+    }
+
+    if (!currency || typeof currency !== 'string' || !currency.trim()) {
+      return {
+        success: false,
+        error: 'Verified payment currency is required for verification',
+        status: 400,
+      };
+    }
+
     const expectedTotal = Number(order.totalAmount);
-    if (amount !== undefined && Math.abs(Number(amount) - expectedTotal) >= 0.01) {
+    if (Math.abs(Number(amount) - expectedTotal) >= 0.01) {
       return {
         success: false,
         error: `Payment amount mismatch: expected ${expectedTotal.toFixed(2)}, got ${Number(amount).toFixed(2)}`,
@@ -296,7 +314,7 @@ export class BoostService {
       };
     }
 
-    if (currency !== undefined && currency.trim().toUpperCase() !== order.currency.toUpperCase()) {
+    if (currency.trim().toUpperCase() !== order.currency.toUpperCase()) {
       return {
         success: false,
         error: `Payment currency mismatch: expected ${order.currency}, got ${currency}`,
@@ -317,8 +335,8 @@ export class BoostService {
         paymentId,
         paymentGateway: paymentGateway.trim(),
         invoiceNumber,
-        verifiedAmount: amount !== undefined ? Number(amount) : expectedTotal,
-        verifiedCurrency: currency !== undefined ? currency.trim().toUpperCase() : order.currency,
+        verifiedAmount: Number(amount),
+        verifiedCurrency: currency.trim().toUpperCase(),
       });
 
       if (result.duplicate) {
@@ -359,6 +377,53 @@ export class BoostService {
     }
   }
 
+  private parseProviderAmountAndCurrency(
+    gateway: string,
+    payload: any,
+    topAmount?: number,
+    topCurrency?: string
+  ): { amount?: number; currency?: string } {
+    let rawAmount = topAmount;
+    let rawCurrency = topCurrency;
+    const gw = (gateway || '').toLowerCase();
+
+    if (gw.includes('stripe')) {
+      const obj = payload?.data?.object || payload;
+      if (rawAmount === undefined) {
+        const val = obj?.amount_total ?? obj?.amount;
+        if (typeof val === 'number' && val > 0) {
+          rawAmount = val / 100; // Stripe uses cents/minor units
+        }
+      }
+      if (!rawCurrency) {
+        rawCurrency = obj?.currency;
+      }
+    } else if (gw.includes('razorpay')) {
+      const entity = payload?.payload?.payment?.entity || payload;
+      if (rawAmount === undefined) {
+        const val = entity?.amount;
+        if (typeof val === 'number' && val > 0) {
+          rawAmount = val / 100; // Razorpay uses paise/minor units
+        }
+      }
+      if (!rawCurrency) {
+        rawCurrency = entity?.currency;
+      }
+    } else {
+      if (rawAmount === undefined) {
+        rawAmount = payload?.amount;
+      }
+      if (!rawCurrency) {
+        rawCurrency = payload?.currency;
+      }
+    }
+
+    return {
+      amount: typeof rawAmount === 'number' && !isNaN(rawAmount) ? rawAmount : undefined,
+      currency: typeof rawCurrency === 'string' && rawCurrency.trim() ? rawCurrency.trim().toUpperCase() : undefined,
+    };
+  }
+
   /**
    * Durable, atomically idempotent webhook handler backed by PostgreSQL.
    * Uses database-enforced ON CONFLICT DO NOTHING and row-level locking inside activateBoostInTransaction.
@@ -394,19 +459,32 @@ export class BoostService {
         return { success: false, message: `Order ${orderId} not found`, status: 404 };
       }
 
-      const verifiedAmount = amount ?? payload?.amount;
-      const verifiedCurrency = currency ?? payload?.currency;
-      const expectedTotal = Number(order.totalAmount);
+      const { amount: verifiedAmount, currency: verifiedCurrency } = this.parseProviderAmountAndCurrency(
+        paymentGateway,
+        payload,
+        amount,
+        currency
+      );
 
-      if (verifiedAmount !== undefined && Math.abs(Number(verifiedAmount) - expectedTotal) >= 0.01) {
+      if (verifiedAmount === undefined || verifiedCurrency === undefined) {
         return {
           success: false,
-          message: `Payment amount mismatch: expected ${expectedTotal.toFixed(2)}, got ${Number(verifiedAmount).toFixed(2)}`,
+          message: 'Missing or unverifiable payment amount or currency in provider payload',
           status: 400,
         };
       }
 
-      if (verifiedCurrency !== undefined && String(verifiedCurrency).toUpperCase() !== order.currency.toUpperCase()) {
+      const expectedTotal = Number(order.totalAmount);
+
+      if (Math.abs(verifiedAmount - expectedTotal) >= 0.01) {
+        return {
+          success: false,
+          message: `Payment amount mismatch: expected ${expectedTotal.toFixed(2)}, got ${verifiedAmount.toFixed(2)}`,
+          status: 400,
+        };
+      }
+
+      if (verifiedCurrency.toUpperCase() !== order.currency.toUpperCase()) {
         return {
           success: false,
           message: `Payment currency mismatch: expected ${order.currency}, got ${verifiedCurrency}`,
@@ -422,8 +500,8 @@ export class BoostService {
         invoiceNumber,
         eventId,
         webhookPayload: payload || {},
-        verifiedAmount: verifiedAmount !== undefined ? Number(verifiedAmount) : expectedTotal,
-        verifiedCurrency: verifiedCurrency ? String(verifiedCurrency).toUpperCase() : order.currency,
+        verifiedAmount,
+        verifiedCurrency,
       });
 
       if (txResult.duplicate) {

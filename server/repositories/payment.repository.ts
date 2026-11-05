@@ -116,21 +116,25 @@ export class PaymentRepository {
         };
       }
 
+      if (order.status !== 'pending') {
+        throw new Error(
+          `Cannot activate order ${params.orderId}: current order status is '${order.status}' (must be 'pending')`
+        );
+      }
+
       // 3. Authoritative amount and currency verification against stored pending order
+      if (params.verifiedAmount === undefined || params.verifiedCurrency === undefined) {
+        throw new Error('Verified payment amount and currency are required for boost activation');
+      }
+
       const expectedTotal = Number(order.totalAmount);
-      if (
-        params.verifiedAmount !== undefined &&
-        Math.abs(Number(params.verifiedAmount) - expectedTotal) >= 0.01
-      ) {
+      if (Math.abs(Number(params.verifiedAmount) - expectedTotal) >= 0.01) {
         throw new Error(
           `Payment amount mismatch: expected ${expectedTotal.toFixed(2)}, received ${Number(params.verifiedAmount).toFixed(2)}`
         );
       }
 
-      if (
-        params.verifiedCurrency !== undefined &&
-        params.verifiedCurrency.toUpperCase() !== order.currency.toUpperCase()
-      ) {
+      if (params.verifiedCurrency.trim().toUpperCase() !== order.currency.toUpperCase()) {
         throw new Error(
           `Payment currency mismatch: expected ${order.currency}, received ${params.verifiedCurrency}`
         );

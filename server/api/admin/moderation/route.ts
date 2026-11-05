@@ -13,8 +13,9 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get('status') || undefined;
     const reports = await moderationService.getReports(status);
     const rules = await moderationService.getRules();
+    const appeals = await moderationService.getBanAppeals(status);
 
-    return NextResponse.json({ reports, rules });
+    return NextResponse.json({ reports, rules, appeals });
   } catch (error: any) {
     console.error('API /api/admin/moderation GET error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -28,7 +29,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden: Moderator access required' }, { status: 403 });
     }
 
-    const { action, reportId, note, actionType, targetListingId, ruleData } = await req.json();
+    const { action, reportId, note, actionType, targetListingId, ruleData, appealId, decision, reviewNotes, unbanUser } = await req.json();
     const actor = {
       id: authContext.userId,
       name: authContext.user.name,
@@ -43,6 +44,17 @@ export async function POST(req: NextRequest) {
         targetListingId,
         actor
       );
+      return NextResponse.json({ success });
+    }
+
+    if (action === 'review_appeal' && appealId && decision) {
+      const success = await moderationService.reviewBanAppeal({
+        appealId,
+        decision: decision === 'accepted' ? 'accepted' : 'rejected',
+        reviewNotes: reviewNotes || note || 'Reviewed by moderator',
+        unbanUser: Boolean(unbanUser),
+        actor,
+      });
       return NextResponse.json({ success });
     }
 

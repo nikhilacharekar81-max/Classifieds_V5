@@ -40,7 +40,7 @@ const EMAIL_MIGRATION_SQL = `
 
   UPDATE "listings" SET "status" = 'expired' WHERE "status" IN ('approved', 'pending') AND "expires_at" <= NOW();
   DROP INDEX IF EXISTS "idx_unique_active_ad_title_per_seller";
-  CREATE UNIQUE INDEX IF NOT EXISTS "idx_unique_active_ad_title_per_seller" ON "listings" ("seller_id", LOWER(REGEXP_REPLACE(TRIM("title"), '\s+', ' ', 'g'))) WHERE "status" IN ('approved', 'pending');
+  CREATE UNIQUE INDEX IF NOT EXISTS "idx_unique_active_ad_title_per_seller" ON "listings" ("seller_id", LOWER(REGEXP_REPLACE(TRIM("title"), '\\s+', ' ', 'g'))) WHERE "status" IN ('approved', 'pending');
 `;
 
 async function applyEmailVerificationSchema(executor: { query: (sql: string, params?: any[]) => Promise<any> } | { exec: (sql: string) => Promise<any> }) {

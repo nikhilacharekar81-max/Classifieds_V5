@@ -201,15 +201,75 @@ export const SellerLiveChatBox: React.FC<SellerLiveChatBoxProps> = ({ listing })
     }
   };
 
+  const availableBuyers = isSellerUser
+    ? Array.from(
+        new Set(
+          rawMessages.map((m: any) => (m.senderId === listing.sellerId ? m.receiverId : m.senderId))
+        )
+      ).filter((id): id is string => Boolean(id && id !== listing.sellerId))
+    : [];
+
+  useEffect(() => {
+    if (isSellerUser && availableBuyers.length > 0) {
+      const activeBuyer = selectedBuyerId && availableBuyers.includes(selectedBuyerId)
+        ? selectedBuyerId
+        : availableBuyers[0];
+
+      if (activeBuyer !== selectedBuyerId) {
+        setSelectedBuyerId(activeBuyer);
+      }
+
+      const filtered = rawMessages.filter(
+        (m: any) => m.senderId === activeBuyer || m.receiverId === activeBuyer
+      );
+
+      setChatMessages(
+        filtered.map((m: any) => ({
+          id: m.id,
+          sender: m.senderId === listing.sellerId ? 'seller' : 'user',
+          text: m.messageText,
+          time: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          senderId: m.senderId,
+          receiverId: m.receiverId,
+        }))
+      );
+    }
+  }, [selectedBuyerId, rawMessages, isSellerUser, listing.sellerId]);
+
   return (
     <div className="bg-white dark:bg-slate-900 rounded-xl border border-[#dadce0] dark:border-slate-800 overflow-hidden shadow-2xs">
       <div className="bg-[#f8f9fa] dark:bg-slate-800/80 border-b border-[#dadce0] dark:border-slate-800 text-[#202124] dark:text-white px-5 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <MessageCircle className="w-4 h-4 text-[#1dbf73]" />
-          <span className="font-bold text-xs">Message {listing.sellerName}</span>
+          <span className="font-bold text-xs">
+            {isSellerUser ? 'Seller Inbox & Live Chat' : `Message ${listing.sellerName}`}
+          </span>
         </div>
         <span className="text-[11px] text-[#137333] dark:text-emerald-400 font-semibold">Available</span>
       </div>
+
+      {isSellerUser && availableBuyers.length > 0 && (
+        <div className="bg-slate-100 dark:bg-slate-800 px-4 py-2 border-b border-[#dadce0] dark:border-slate-700 flex items-center justify-between text-xs font-semibold">
+          <label htmlFor="buyer-select" className="text-slate-700 dark:text-slate-300">
+            Select Buyer Conversation:
+          </label>
+          <select
+            id="buyer-select"
+            value={selectedBuyerId || availableBuyers[0] || ''}
+            onChange={(e) => setSelectedBuyerId(e.target.value)}
+            className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold focus:outline-none focus:border-emerald-500"
+          >
+            {availableBuyers.map((buyerId) => {
+              const count = rawMessages.filter((m: any) => m.senderId === buyerId || m.receiverId === buyerId).length;
+              return (
+                <option key={buyerId} value={buyerId}>
+                  Buyer #{buyerId.slice(-6)} ({count} {count === 1 ? 'msg' : 'msgs'})
+                </option>
+              );
+            })}
+          </select>
+        </div>
+      )}
 
       {chatError && (
         <div className="mx-4 mt-3 p-2.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 text-xs rounded-lg flex items-center justify-between gap-2">

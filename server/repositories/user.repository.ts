@@ -496,6 +496,14 @@ export class UserRepository {
           })
           .where(eq(schema.users.id, userId));
 
+        await tx
+          .update(schema.kycDocuments)
+          .set({
+            documentNumber: 'ANONYMIZED',
+            fileUrl: '',
+          })
+          .where(eq(schema.kycDocuments.userId, userId));
+
         await tx.delete(schema.userSessions).where(eq(schema.userSessions.userId, userId));
         return true;
       });

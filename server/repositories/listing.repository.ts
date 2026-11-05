@@ -211,6 +211,12 @@ export class ListingRepository {
     }
 
     try {
+      // 1. Atomically update any date-expired listings for this seller so status='expired' in database,
+      // freeing the PostgreSQL partial unique index from blocking reposts after expiry.
+      await db.execute(
+        sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW()`
+      );
+
       const conditions = [
         eq(schema.listings.sellerId, sellerId),
         sql`LOWER(REGEXP_REPLACE(TRIM(${schema.listings.title}), '\\s+', ' ', 'g')) = ${normalized}`,

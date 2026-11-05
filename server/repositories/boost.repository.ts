@@ -157,15 +157,13 @@ export class BoostRepository {
 
   public async findPendingOrderByListingId(listingId: string): Promise<typeof schema.boostOrders.$inferSelect | null> {
     try {
-      const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000);
       const rows = await db
         .select()
         .from(schema.boostOrders)
         .where(
           and(
             eq(schema.boostOrders.listingId, listingId),
-            eq(schema.boostOrders.status, 'pending'),
-            gte(schema.boostOrders.createdAt, thirtyMinsAgo)
+            eq(schema.boostOrders.status, 'pending')
           )
         )
         .orderBy(desc(schema.boostOrders.createdAt))
@@ -175,6 +173,28 @@ export class BoostRepository {
     } catch (error) {
       console.error(`BoostRepository.findPendingOrderByListingId error:`, error);
       return null;
+    }
+  }
+
+  public async expireStalePendingOrdersForListing(listingId: string, olderThanMs: number = 30 * 60 * 1000): Promise<number> {
+    try {
+      const cutoff = new Date(Date.now() - olderThanMs);
+      const res = await db
+        .update(schema.boostOrders)
+        .set({ status: 'expired' })
+        .where(
+          and(
+            eq(schema.boostOrders.listingId, listingId),
+            eq(schema.boostOrders.status, 'pending'),
+            sql`${schema.boostOrders.createdAt} < ${cutoff}`
+          )
+        )
+        .returning({ orderId: schema.boostOrders.orderId });
+
+      return res.length;
+    } catch (error) {
+      console.error(`BoostRepository.expireStalePendingOrdersForListing error:`, error);
+      return 0;
     }
   }
 
