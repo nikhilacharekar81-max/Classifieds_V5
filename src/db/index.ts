@@ -3,6 +3,7 @@ import { PGlite } from '@electric-sql/pglite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createPgDb, PgDatabase } from './pg-orm.ts';
+import { seedEssentialProductionData } from '../../server/seed-postgres.ts';
 
 declare global {
   var _postgresPool: Pool | undefined;
@@ -12,16 +13,8 @@ declare global {
 }
 
 const EMAIL_MIGRATION_SQL = `
-  DO $$ 
-  BEGIN
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='email_verified') THEN
-      ALTER TABLE "users" ADD COLUMN "email_verified" boolean DEFAULT false NOT NULL;
-    END IF;
-    
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='email_verified_at') THEN
-      ALTER TABLE "users" ADD COLUMN "email_verified_at" timestamp with time zone;
-    END IF;
-  END $$;
+  ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "email_verified" boolean DEFAULT false NOT NULL;
+  ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "email_verified_at" timestamp with time zone;
 
   CREATE TABLE IF NOT EXISTS "email_verification_tokens" (
       "id" varchar(64) PRIMARY KEY NOT NULL,
@@ -34,10 +27,13 @@ const EMAIL_MIGRATION_SQL = `
 `;
 
 async function applyEmailVerificationSchema(executor: { query: (sql: string, params?: any[]) => Promise<any> } | { exec: (sql: string) => Promise<any> }) {
-  if ('query' in executor) {
-    await executor.query(EMAIL_MIGRATION_SQL);
-  } else {
-    await executor.exec(EMAIL_MIGRATION_SQL);
+  const statements = EMAIL_MIGRATION_SQL.split(';').map(s => s.trim()).filter(Boolean);
+  for (const stmt of statements) {
+    if ('query' in executor) {
+      await executor.query(stmt);
+    } else {
+      await executor.exec(stmt);
+    }
   }
 }
 
@@ -284,6 +280,10 @@ export async function ensurePgSchemaApplied(): Promise<void> {
             }
           }
         }
+        
+        // Seed essential data on fresh install
+        const adminDb = createPgDb(adminPool as any, true);
+        await seedEssentialProductionData(adminDb);
       }
 
       // Safe migration for existing databases
