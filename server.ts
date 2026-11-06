@@ -13,6 +13,7 @@ import { locationRepository } from './server/repositories/location.repository.ts
 import { listingRepository } from './server/repositories/listing.repository.ts';
 import { buildChillyUrl, serializeJsonLd } from './lib/utils/seoAndUrlHelper.ts';
 import { renderSsrPage } from './src/entry-server.tsx';
+import { runWithRequestCache } from './src/shims/next-cache.ts';
 
 // Route Modules
 import * as bootstrapRoute from './server/api/bootstrap/route.ts';
@@ -28,6 +29,7 @@ import * as authVerifyEmailConfirmRoute from './server/api/auth/verify-email/con
 import * as authLogoutAllRoute from './server/api/auth/logout-all/route.ts';
 import * as authUnsubscribeRoute from './server/api/auth/unsubscribe/route.ts';
 import * as listingsRoute from './server/api/listings/route.ts';
+import * as listingsCreateOrderRoute from './server/api/listings/create-order/route.ts';
 import * as listingsUploadRoute from './server/api/listings/upload/route.ts';
 import * as listingsByIdRoute from './server/api/listings/[id]/route.ts';
 import * as listingsRevealPhoneRoute from './server/api/listings/[id]/reveal-phone/route.ts';
@@ -98,7 +100,10 @@ async function startServer() {
   if (process.env.TRUST_PROXY) {
     app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? true : process.env.TRUST_PROXY);
   }
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
+
+  // Per-request AsyncLocalStorage cache context
+  app.use((_req, _res, next) => runWithRequestCache(() => next()));
 
   // Preserve raw body for webhook HMAC verification while parsing JSON
   app.use(
@@ -192,6 +197,7 @@ async function startServer() {
   app.all('/api/auth/unsubscribe', createExpressRouteHandler(authUnsubscribeRoute));
 
   // Listings Routes
+  app.all('/api/listings/create-order', createExpressRouteHandler(listingsCreateOrderRoute));
   app.all('/api/listings/upload', createExpressRouteHandler(listingsUploadRoute));
   app.all('/api/listings/check-duplicate', createExpressRouteHandler(listingsCheckDuplicateRoute));
   app.all('/api/listings/bulk-action', createExpressRouteHandler(listingsBulkActionRoute));

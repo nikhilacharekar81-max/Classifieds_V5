@@ -3,9 +3,61 @@
  * for Vite + Express + PostgreSQL server runtime.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { db } from '@/src/db/index';
 import * as schema from '@/src/db/schema';
 import { eq, inArray, sql } from '@/src/db/pg-orm';
+
+const requestCacheStorage = new AsyncLocalStorage<Map<Function, Map<string, any>>>();
+
+/**
+ * Runs `fn` within an AsyncLocalStorage context for per-request memoisation.
+ */
+export function runWithRequestCache<T>(fn: () => T): T {
+  if (requestCacheStorage.getStore()) {
+    return fn();
+  }
+  return requestCacheStorage.run(new Map(), fn);
+}
+
+/**
+ * Request-scoped memoisation backed by Node.js AsyncLocalStorage.
+ * Deduplicates calls with identical arguments within the same request context.
+ */
+export function requestCache<T extends (...args: any[]) => any>(fn: T): T {
+  const wrapped = (...args: any[]) => {
+    const store = requestCacheStorage.getStore();
+    if (!store) {
+      return fn(...args);
+    }
+    let fnMap = store.get(fn);
+    if (!fnMap) {
+      fnMap = new Map<string, any>();
+      store.set(fn, fnMap);
+    }
+    let key = '';
+    try {
+      key = JSON.stringify(args);
+    } catch {
+      key = args.map(String).join(':');
+    }
+    if (fnMap.has(key)) {
+      return fnMap.get(key);
+    }
+    const result = fn(...args);
+    if (result && typeof result.then === 'function') {
+      const promise = result.catch((err: any) => {
+        fnMap?.delete(key);
+        throw err;
+      });
+      fnMap.set(key, promise);
+      return promise;
+    }
+    fnMap.set(key, result);
+    return result;
+  };
+  return wrapped as T;
+}
 
 interface CacheEntry {
   value: any;

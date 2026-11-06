@@ -861,4 +861,97 @@ test('Finding 3 & 7: Payment verification and email audit attribution', async ()
   }
 });
 
+test('Phase 3 (3.1, 3.2, 3.3): SSR status codes (404/410/200), noindex, #fragments, and AsyncLocalStorage requestCache', async () => {
+  const { renderSsrPage } = await import('../src/entry-server.tsx');
+  const { normalizeInternalUrl, parsePath } = await import('../lib/router/useRouter.ts');
+  const { requestCache, runWithRequestCache, revalidateTag } = await import('../src/shims/next-cache.ts');
+  const { REFERENCE_CACHE_TAGS } = await import('../server/cache/reference-data.cache.ts');
+
+  // 3.2 Preserve #fragments in normalizeInternalUrl and parsePath
+  assert.equal(normalizeInternalUrl('/mumbai/cars/?b=2&a=1#dealers'), '/mumbai/cars?a=1&b=2#dealers');
+  assert.equal(normalizeInternalUrl('/my-account#kyc'), '/my-account#kyc');
+  assert.equal(normalizeInternalUrl('#faq-section'), '/#faq-section');
+  const parsedWithFrag = parsePath('/mumbai/cars?sort=price_asc#top-picks');
+  assert.equal(parsedWithFrag.path, '/mumbai/cars');
+  assert.equal(parsedWithFrag.query.sort, 'price_asc');
+  assert.equal(parsedWithFrag.hash, '#top-picks');
+
+  // 3.3 Request-scoped memoisation via AsyncLocalStorage
+  let callCount = 0;
+  const dedupedFn = requestCache(async (arg: string) => {
+    callCount += 1;
+    return `val_${arg}_${callCount}`;
+  });
+  await runWithRequestCache(async () => {
+    const [r1, r2] = await Promise.all([dedupedFn('alpha'), dedupedFn('alpha')]);
+    assert.equal(r1, r2);
+    assert.equal(callCount, 1, 'Expected requestCache to deduplicate within the same request');
+  });
+  await runWithRequestCache(async () => {
+    const r3 = await dedupedFn('alpha');
+    assert.equal(r3, 'val_alpha_2');
+    assert.equal(callCount, 2, 'Expected separate request context to execute anew');
+  });
+
+  // 3.1 Valid pages return 200 and index, follow
+  const validHome = await renderSsrPage('/', {}, 'http://localhost:3000');
+  assert.equal(validHome.statusCode, 200);
+  assert.match(validHome.headTagsHtml, /content="index, follow/);
+
+  // 3.1 Unknown routes and arbitrary slugs return 404 and noindex (no invented pages)
+  const unknownSlug = await renderSsrPage('/totally-unknown-random-slug-xyz', {}, 'http://localhost:3000');
+  assert.equal(unknownSlug.statusCode, 404);
+  assert.match(unknownSlug.headTagsHtml, /content="noindex, nofollow"/);
+
+  const fakeCityGeo = await renderSsrPage('/nonexistentcity_g999999', {}, 'http://localhost:3000');
+  assert.equal(fakeCityGeo.statusCode, 404);
+  assert.match(fakeCityGeo.headTagsHtml, /content="noindex, nofollow"/);
+
+  const unknownSubSlug = await renderSsrPage('/mumbai/nonexistent-category-xyz', {}, 'http://localhost:3000');
+  assert.equal(unknownSubSlug.statusCode, 404);
+  assert.match(unknownSubSlug.headTagsHtml, /content="noindex, nofollow"/);
+
+  // 3.1 Unknown listing returns 404 + noindex
+  const missingListing = await renderSsrPage('/item/lst_nonexistent_99999999', {}, 'http://localhost:3000');
+  assert.equal(missingListing.statusCode, 404);
+  assert.match(missingListing.headTagsHtml, /content="noindex, nofollow"/);
+
+  // 3.1 Expired listing returns 410 Gone + noindex
+  const sellerId = `usr_p3_${Date.now()}`;
+  const expAdId = `lst_p3_exp_${Date.now()}`;
+  await pool.query(
+    `INSERT INTO users (id, name, email, type, status, email_verified) VALUES ($1, 'P3 Seller', $2, 'user', 'active', TRUE)`,
+    [sellerId, `${sellerId}@example.com`]
+  );
+  await pool.query(
+    `INSERT INTO listings (id, seller_id, seller_name, category_id, title, description, price, city, state, locality, status, expires_at)
+     VALUES ($1, $2, 'P3 Seller', 'cat_cars', 'Expired SSR Ad', 'Desc', 1000, 'Mumbai', 'Maharashtra', 'Bandra', 'expired', NOW() - INTERVAL '2 days')`,
+    [expAdId, sellerId]
+  );
+  await revalidateTag(REFERENCE_CACHE_TAGS.LISTING_COUNTS);
+
+  try {
+    const expiredSsr = await renderSsrPage(`/item/${expAdId}`, {}, 'http://localhost:3000');
+    assert.equal(expiredSsr.statusCode, 410, 'Expired listing SSR must return HTTP 410 Gone');
+    assert.match(expiredSsr.headTagsHtml, /content="noindex, nofollow"/);
+  } finally {
+    await pool.query('DELETE FROM listings WHERE id = $1', [expAdId]);
+    await pool.query('DELETE FROM users WHERE id = $1', [sellerId]);
+  }
+
+  // 3.1 Admin, account, post, and search-query pages return 200 with noindex, nofollow
+  for (const [pathStr, q] of [
+    ['/admin/dashboard', {}],
+    ['/my-account', {}],
+    ['/post', {}],
+    ['/search', { q: 'iphone' }],
+    ['/mumbai/cars', { q: 'honda' }],
+  ] as const) {
+    const res = await renderSsrPage(pathStr, q as Record<string, string>, 'http://localhost:3000');
+    assert.equal(res.statusCode, 200, `Expected 200 for ${pathStr}`);
+    assert.match(res.headTagsHtml, /content="noindex, nofollow"/, `Expected noindex for ${pathStr}`);
+  }
+});
+
+
 

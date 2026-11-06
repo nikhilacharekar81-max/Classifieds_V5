@@ -228,9 +228,12 @@ export function parsePath(rawPathAndSearch?: string): { path: string; query: Rec
 export function navigateTo(targetUrl: string, linkId?: string) {
   if (typeof window === 'undefined') return;
 
-  let cleanUrl = targetUrl;
-  if (cleanUrl.startsWith('#')) {
+  let cleanUrl = targetUrl.trim();
+  if (cleanUrl.startsWith('#/')) {
     cleanUrl = cleanUrl.replace(/^#\/?/, '/');
+  } else if (cleanUrl.startsWith('#')) {
+    const base = window.location.pathname + window.location.search;
+    cleanUrl = `${base || '/'}${cleanUrl}`;
   }
   if (!cleanUrl.startsWith('/')) {
     cleanUrl = '/' + cleanUrl;
@@ -261,7 +264,7 @@ export function useRouter(initialPath?: string, initialQuery?: Record<string, st
 
   const [clientLocation, setClientLocation] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
-      return window.location.pathname + window.location.search;
+      return window.location.pathname + window.location.search + window.location.hash;
     }
     return null;
   });
@@ -270,15 +273,17 @@ export function useRouter(initialPath?: string, initialQuery?: Record<string, st
     if (typeof window === 'undefined') return;
 
     const handleLocationChange = () => {
-      setClientLocation(window.location.pathname + window.location.search);
+      setClientLocation(window.location.pathname + window.location.search + window.location.hash);
       clearNavigationFeedback();
     };
 
     handleLocationChange();
     window.addEventListener('popstate', handleLocationChange);
+    window.addEventListener('hashchange', handleLocationChange);
     window.addEventListener('chilly:navigation', handleLocationChange);
     return () => {
       window.removeEventListener('popstate', handleLocationChange);
+      window.removeEventListener('hashchange', handleLocationChange);
       window.removeEventListener('chilly:navigation', handleLocationChange);
     };
   }, [nextPathname, initialPath]);

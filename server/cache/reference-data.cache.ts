@@ -1,5 +1,4 @@
-import { cache } from 'react';
-import { unstable_cache, revalidateTag, revalidatePath } from '@/src/shims/next-cache';
+import { unstable_cache, revalidateTag, revalidatePath, requestCache } from '@/src/shims/next-cache';
 import { categoryRepository } from '@/server/repositories/category.repository';
 import { locationRepository } from '@/server/repositories/location.repository';
 import { adminRepository } from '@/server/repositories/admin.repository';
@@ -411,7 +410,7 @@ const lastKnownGoodCategoriesByCity = new LRUCache<string, Category[]>({
   ttl: 1000 * 60 * 60 * 24, // 24 hours
 });
 
-export const getCachedCategoryHierarchy = cache(async (): Promise<Category[]> => {
+export const getCachedCategoryHierarchy = requestCache(async (): Promise<Category[]> => {
   if (
     failedInvalidationTags.has(REFERENCE_CACHE_TAGS.CATEGORIES) ||
     failedInvalidationTags.has(REFERENCE_CACHE_TAGS.SUBCATEGORIES) ||
@@ -425,7 +424,7 @@ export const getCachedCategoryHierarchy = cache(async (): Promise<Category[]> =>
   return fetchCachedCategoryHierarchyInternal();
 });
 
-export const getCachedLiveListingCounts = cache(async (city?: string): Promise<LiveListingCountsResult> => {
+export const getCachedLiveListingCounts = requestCache(async (city?: string): Promise<LiveListingCountsResult> => {
   ensureOutboxRetryWorkerStarted();
 
   if (!globalThis._outboxRetryWorkerTimer) {
@@ -451,7 +450,7 @@ export const getCachedLiveListingCounts = cache(async (city?: string): Promise<L
   return result;
 });
 
-export const getCategoriesWithLiveCounts = cache(async (city?: string): Promise<Category[]> => {
+export const getCategoriesWithLiveCounts = requestCache(async (city?: string): Promise<Category[]> => {
   const cityKey = await normalizeCityCacheKey(city);
   try {
     const [hierarchy, counts] = await Promise.all([
@@ -584,7 +583,7 @@ export async function getCachedNavigationHierarchy(city?: string): Promise<{
   return { categories, subcategoriesByParent };
 }
 
-export const getCachedLocations = cache(async (): Promise<LocationItem[]> => {
+export const getCachedLocations = requestCache(async (): Promise<LocationItem[]> => {
   if (
     failedInvalidationTags.has(REFERENCE_CACHE_TAGS.LOCATIONS) ||
     failedInvalidationTags.has(REFERENCE_CACHE_TAGS.NAVIGATION)
@@ -596,7 +595,7 @@ export const getCachedLocations = cache(async (): Promise<LocationItem[]> => {
   return fetchCachedLocationsInternal();
 });
 
-export const getCachedSystemSettings = cache(async (): Promise<SystemSettings> => {
+export const getCachedSystemSettings = requestCache(async (): Promise<SystemSettings> => {
   if (failedInvalidationTags.has(REFERENCE_CACHE_TAGS.SETTINGS)) {
     tryHealInvalidationTag(REFERENCE_CACHE_TAGS.SETTINGS);
     return adminRepository.getSystemSettingsDirect();

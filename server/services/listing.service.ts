@@ -1,6 +1,5 @@
-import { cache } from 'react';
 import crypto from 'node:crypto';
-import { unstable_cache } from '@/src/shims/next-cache';
+import { unstable_cache, requestCache } from '@/src/shims/next-cache';
 import {
   listingRepository,
   ListingFilterQuery,
@@ -1247,10 +1246,10 @@ export function isListingPubliclyAccessible(listing: Listing | null | undefined)
 }
 
 /**
- * Per-request React.cache() deduplicated + cross-request unstable_cache listing lookup
- * for detail pages and generateMetadata(). Invalidated immediately on any ad change.
+ * Request-scoped (AsyncLocalStorage) + cross-request unstable_cache listing lookup
+ * for detail pages. Invalidated immediately on any ad change.
  */
-export const getCachedPublicListingById = cache(async (id: string): Promise<Listing | null> => {
+export const getCachedPublicListingById = requestCache(async (id: string): Promise<Listing | null> => {
   return listingService.getListingById(id);
 });
 

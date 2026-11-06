@@ -212,7 +212,7 @@ export function stripChillySuffixes(part: string): {
 }
 
 export interface ParsedRoute {
-  routeType: 'home' | 'city' | 'category' | 'listing' | 'post' | 'search' | 'admin' | 'user-panel';
+  routeType: 'home' | 'city' | 'category' | 'listing' | 'post' | 'search' | 'admin' | 'user-panel' | 'cms' | 'not-found';
   city: string; // e.g. "Mumbai", "New Delhi", "All India"
   citySlug: string; // e.g. "mumbai", "new-delhi", "all-india"
   geoId: string; // e.g. "g4058997"
@@ -221,6 +221,7 @@ export interface ParsedRoute {
   subcategoryId: string; // e.g. "sub_cars" or "all"
   subcategorySlug?: string;
   listingId: string | null;
+  cmsSlug?: string;
   adminPath?: string;
   rawPath: string;
 }
@@ -312,13 +313,37 @@ export function unslugifyCategory(
 export function parseChillyPath(
   pathStr: string,
   locations: LocationItem[],
-  categories: Category[]
+  categories: Category[],
+  cmsSlugs: string[] = []
 ): ParsedRoute {
   let clean = pathStr.replace(/^#\/?/, '/');
   if (!clean || clean === '') clean = '/';
   if (!clean.startsWith('/')) clean = '/' + clean;
 
   const parts = clean.split('?')[0].split('/').filter(Boolean);
+
+  const notFoundRoute = (): ParsedRoute => ({
+    routeType: 'not-found',
+    city: 'All India',
+    citySlug: 'all-india',
+    geoId: 'g0',
+    categoryId: 'all',
+    subcategoryId: 'all',
+    listingId: null,
+    rawPath: clean,
+  });
+
+  const isKnownCitySlug = (segment: string): boolean => {
+    const { cleanSlug } = stripChillySuffixes(segment);
+    if (!cleanSlug) return false;
+    if (cleanSlug === 'all-india' || cleanSlug === 'india') return true;
+    const normalized = cleanSlug.toLowerCase().replace(/-/g, ' ');
+    return locations.some(
+      (l) =>
+        (l.type === 'city' || l.type === 'state') &&
+        (l.slug === cleanSlug || slugify(l.name) === cleanSlug || l.name.toLowerCase() === normalized)
+    );
+  };
 
   // Default Route
   if (parts.length === 0) {
@@ -349,8 +374,15 @@ export function parseChillyPath(
     };
   }
 
-  // 2. User Panel Route (/my-account, /user, /user/panel, /my-ads)
-  if (parts[0] === 'my-account' || parts[0] === 'user' || parts[0] === 'my-ads' || parts[0] === 'account') {
+  // 2. User Panel Route (/my-account, /user, /user/panel, /my-ads, /account, /unsubscribe)
+  if (
+    (parts[0] === 'my-account' ||
+      parts[0] === 'user' ||
+      parts[0] === 'my-ads' ||
+      parts[0] === 'account' ||
+      parts[0] === 'unsubscribe') &&
+    parts.length <= 2
+  ) {
     return {
       routeType: 'user-panel',
       city: 'All India',
@@ -364,7 +396,7 @@ export function parseChillyPath(
   }
 
   // 3. Post / Sell Route (/post, /sell)
-  if (parts[0] === 'post' || parts[0] === 'sell') {
+  if ((parts[0] === 'post' || parts[0] === 'sell') && parts.length === 1) {
     return {
       routeType: 'post',
       city: 'All India',
@@ -377,8 +409,8 @@ export function parseChillyPath(
     };
   }
 
-  // 3. Search Route (/search)
-  if (parts[0] === 'search') {
+  // 3b. Search Route (/search)
+  if (parts[0] === 'search' && parts.length === 1) {
     return {
       routeType: 'search',
       city: 'All India',
@@ -389,6 +421,25 @@ export function parseChillyPath(
       listingId: null,
       rawPath: clean,
     };
+  }
+
+  // 3c. Explicit CMS Page Route (/p/:slug or /pages/:slug)
+  if ((parts[0] === 'p' || parts[0] === 'pages' || parts[0] === 'page') && parts.length === 2) {
+    const slug = parts[1].toLowerCase();
+    if (cmsSlugs.includes(slug)) {
+      return {
+        routeType: 'cms',
+        city: 'All India',
+        citySlug: 'all-india',
+        geoId: 'g0',
+        categoryId: 'all',
+        subcategoryId: 'all',
+        listingId: null,
+        cmsSlug: slug,
+        rawPath: clean,
+      };
+    }
+    return notFoundRoute();
   }
 
   // Helper to extract listing ID from slug
@@ -408,8 +459,14 @@ export function parseChillyPath(
 
   // 4a. Direct /ad/* or /item/* route
   if (parts[0] === 'item' || parts[0] === 'ad') {
-    const rawIdPart = parts[1] || '';
+    if (parts.length !== 2 || !parts[1]) {
+      return notFoundRoute();
+    }
+    const rawIdPart = parts[1];
     const listingId = extractListingIdFromSegment(rawIdPart) || rawIdPart.split('-')[0];
+    if (!listingId) {
+      return notFoundRoute();
+    }
     return {
       routeType: 'listing',
       city: 'All India',
@@ -424,9 +481,15 @@ export function parseChillyPath(
 
   // 4b. City prefix with /item/ or /ad/ (e.g. /mumbai/ad/:id)
   if (parts.length >= 2 && (parts[1] === 'item' || parts[1] === 'ad')) {
+    if (parts.length !== 3 || !parts[2] || !isKnownCitySlug(parts[0])) {
+      return notFoundRoute();
+    }
     const { cityName, citySlug, geoId } = unslugifyCity(parts[0], locations);
-    const rawIdPart = parts[2] || '';
+    const rawIdPart = parts[2];
     const listingId = extractListingIdFromSegment(rawIdPart) || rawIdPart.split('-')[0];
+    if (!listingId) {
+      return notFoundRoute();
+    }
     return {
       routeType: 'listing',
       city: cityName,
@@ -440,12 +503,21 @@ export function parseChillyPath(
   }
 
   // 4c. Hierarchical listing route (e.g. /mumbai_g1/mobiles_c3/apple-iphone-14-lst_1001 or /mumbai_g1/cars_c2/used-cars_c201/bmw-lst_1001)
-  if (parts.length >= 2 && detectedListingId) {
+  if (parts.length >= 2 && parts.length <= 4 && detectedListingId) {
+    if (!isKnownCitySlug(parts[0])) {
+      return notFoundRoute();
+    }
     const { cityName, citySlug, geoId } = unslugifyCity(parts[0], locations);
-    const mainCatInfo = unslugifyCategory(parts[1], categories);
+    const mainCatInfo = parts.length >= 3 ? unslugifyCategory(parts[1], categories) : { categoryId: 'all', subcategoryId: 'all' };
+    if (parts.length >= 3 && mainCatInfo.categoryId === 'all' && mainCatInfo.subcategoryId === 'all') {
+      return notFoundRoute();
+    }
     let subCatInfo = { categoryId: 'all', subcategoryId: 'all' };
-    if (parts.length >= 4) {
+    if (parts.length === 4) {
       subCatInfo = unslugifyCategory(parts[2], categories);
+      if (subCatInfo.categoryId === 'all' && subCatInfo.subcategoryId === 'all') {
+        return notFoundRoute();
+      }
     }
     return {
       routeType: 'listing',
@@ -459,14 +531,9 @@ export function parseChillyPath(
     };
   }
 
-  // 5. Check if first part contains city (e.g. mumbai_g4058997 or mumbai or all-india)
-  const { cleanSlug: firstCleanSlug, geoId: firstGeoId } = stripChillySuffixes(parts[0]);
-
-  const firstPartIsCity =
-    !!firstGeoId ||
-    firstCleanSlug === 'all-india' ||
-    firstCleanSlug === 'india' ||
-    locations.some((l) => (l.type === 'city' || l.type === 'state') && (slugify(l.name) === firstCleanSlug || l.name.toLowerCase() === firstCleanSlug.replace(/-/g, ' ')));
+  // 5. Check if first part is a known city (e.g. mumbai_g1 or mumbai or all-india)
+  const { cleanSlug: firstCleanSlug } = stripChillySuffixes(parts[0]);
+  const firstPartIsCity = isKnownCitySlug(parts[0]);
 
   if (firstPartIsCity) {
     const { cityName, citySlug, geoId } = unslugifyCity(parts[0], locations);
@@ -499,6 +566,9 @@ export function parseChillyPath(
       }
 
       const catInfo = unslugifyCategory(parts[1], categories);
+      if (catInfo.categoryId === 'all' && catInfo.subcategoryId === 'all') {
+        return notFoundRoute();
+      }
       return {
         routeType: 'category',
         city: cityName,
@@ -512,9 +582,17 @@ export function parseChillyPath(
       };
     }
 
-    if (parts.length >= 3) {
+    if (parts.length === 3) {
       const mainCatInfo = unslugifyCategory(parts[1], categories);
       const subCatInfo = unslugifyCategory(parts[2], categories);
+
+      if (
+        mainCatInfo.categoryId === 'all' ||
+        (subCatInfo.subcategoryId === 'all' && subCatInfo.categoryId === 'all') ||
+        (subCatInfo.categoryObj?.parentId && subCatInfo.categoryObj.parentId !== mainCatInfo.categoryId)
+      ) {
+        return notFoundRoute();
+      }
 
       return {
         routeType: 'category',
@@ -529,38 +607,71 @@ export function parseChillyPath(
         rawPath: clean,
       };
     }
+
+    return notFoundRoute();
   } else {
-    // First part is category slug across All India (e.g. /cars_c2)
-    const catInfo = unslugifyCategory(parts[0], categories);
-    let subCatInfo = { categoryId: 'all', subcategoryId: 'all' };
-    if (parts.length >= 2) {
-      subCatInfo = unslugifyCategory(parts[1], categories);
+    // First part is category slug across All India (e.g. /cars_c2) or published CMS page slug
+    if (parts.length === 1) {
+      const catInfo = unslugifyCategory(parts[0], categories);
+      if (catInfo.categoryId !== 'all' || catInfo.subcategoryId !== 'all') {
+        return {
+          routeType: 'category',
+          city: 'All India',
+          citySlug: 'all-india',
+          geoId: 'g0',
+          categoryId: catInfo.categoryId,
+          categorySlug: parts[0],
+          subcategoryId: catInfo.subcategoryId,
+          listingId: null,
+          rawPath: clean,
+        };
+      }
+
+      if (cmsSlugs.includes(firstCleanSlug)) {
+        return {
+          routeType: 'cms',
+          city: 'All India',
+          citySlug: 'all-india',
+          geoId: 'g0',
+          categoryId: 'all',
+          subcategoryId: 'all',
+          listingId: null,
+          cmsSlug: firstCleanSlug,
+          rawPath: clean,
+        };
+      }
+
+      return notFoundRoute();
     }
 
-    return {
-      routeType: 'category',
-      city: 'All India',
-      citySlug: 'all-india',
-      geoId: 'g0',
-      categoryId: catInfo.categoryId !== 'all' ? catInfo.categoryId : subCatInfo.categoryId,
-      categorySlug: parts[0],
-      subcategoryId: subCatInfo.subcategoryId !== 'all' ? subCatInfo.subcategoryId : subCatInfo.categoryId,
-      subcategorySlug: parts[1],
-      listingId: null,
-      rawPath: clean,
-    };
-  }
+    if (parts.length === 2) {
+      const catInfo = unslugifyCategory(parts[0], categories);
+      const subCatInfo = unslugifyCategory(parts[1], categories);
 
-  return {
-    routeType: 'home',
-    city: 'All India',
-    citySlug: 'all-india',
-    geoId: 'g0',
-    categoryId: 'all',
-    subcategoryId: 'all',
-    listingId: null,
-    rawPath: clean,
-  };
+      if (
+        catInfo.categoryId === 'all' ||
+        (subCatInfo.subcategoryId === 'all' && subCatInfo.categoryId === 'all') ||
+        (subCatInfo.categoryObj?.parentId && subCatInfo.categoryObj.parentId !== catInfo.categoryId)
+      ) {
+        return notFoundRoute();
+      }
+
+      return {
+        routeType: 'category',
+        city: 'All India',
+        citySlug: 'all-india',
+        geoId: 'g0',
+        categoryId: catInfo.categoryId !== 'all' ? catInfo.categoryId : subCatInfo.categoryId,
+        categorySlug: parts[0],
+        subcategoryId: subCatInfo.subcategoryId !== 'all' ? subCatInfo.subcategoryId : subCatInfo.categoryId,
+        subcategorySlug: parts[1],
+        listingId: null,
+        rawPath: clean,
+      };
+    }
+
+    return notFoundRoute();
+  }
 }
 
 /**
@@ -755,9 +866,26 @@ export function updateSeoAndCanonical(
   };
 
   const primaryImage = listing?.images?.[0] || `${origin}/favicon.ico`;
+  const searchParams = new URLSearchParams(window.location.search);
+  const hasSearchQuery = Boolean(searchParams.get('q') || searchParams.get('search'));
+  const shouldNoIndex =
+    parsedRoute.routeType === 'not-found' ||
+    parsedRoute.routeType === 'admin' ||
+    parsedRoute.routeType === 'user-panel' ||
+    parsedRoute.routeType === 'post' ||
+    parsedRoute.routeType === 'search' ||
+    hasSearchQuery ||
+    (parsedRoute.routeType === 'listing' && !listing);
 
   setMetaTag('meta[name="description"]', 'name', 'description', metaDesc);
-  setMetaTag('meta[name="robots"]', 'name', 'robots', 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1');
+  setMetaTag(
+    'meta[name="robots"]',
+    'name',
+    'robots',
+    shouldNoIndex
+      ? 'noindex, nofollow'
+      : 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1'
+  );
   setMetaTag('meta[property="og:title"]', 'property', 'og:title', pageTitle);
   setMetaTag('meta[property="og:description"]', 'property', 'og:description', metaDesc);
   setMetaTag('meta[property="og:url"]', 'property', 'og:url', canonicalUrl);
