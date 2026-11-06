@@ -490,3 +490,15 @@ export const banAppeals = pgTable('ban_appeals', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// 26. Posting Orders (Server-authoritative orders for paid ad postings)
+export const postingOrders = pgTable('posting_orders', {
+  orderId: varchar('order_id', { length: 64 }).primaryKey(),
+  userId: varchar('user_id', { length: 64 }).notNull().references(() => users.id),
+  categoryId: varchar('category_id', { length: 64 }).notNull(),
+  amount: numeric('amount', { precision: 10, scale: 2 }).notNull(),
+  currency: varchar('currency', { length: 10 }).notNull().default('INR'),
+  purpose: varchar('purpose', { length: 64 }).notNull().default('posting_fee'),
+  status: varchar('status', { length: 32 }).notNull().default('pending'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+

@@ -405,7 +405,7 @@ function mapProjectedRow(projection: Record<string, any>, row: Record<string, an
 
 type QueryExecutor = Pick<Pool | PoolClient, 'query'>;
 
-class SelectQueryBuilder<TResult = any> implements PromiseLike<TResult[]> {
+class SelectQueryBuilder<TResult = any> implements Promise<TResult[]> {
   private _table!: PgTableWithColumns<any>;
   private _where?: SqlExpr<any>;
   private _groupBy: any[] = [];
@@ -504,6 +504,20 @@ class SelectQueryBuilder<TResult = any> implements PromiseLike<TResult[]> {
     onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
   ): Promise<TResult1 | TResult2> {
     return this.executeQuery().then(onfulfilled, onrejected);
+  }
+
+  catch<TResult2 = never>(
+    onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
+  ): Promise<TResult[] | TResult2> {
+    return this.executeQuery().catch(onrejected);
+  }
+
+  finally(onfinally?: (() => void) | null): Promise<TResult[]> {
+    return this.executeQuery().finally(onfinally);
+  }
+
+  get [Symbol.toStringTag]() {
+    return 'Promise';
   }
 }
 
@@ -636,29 +650,118 @@ class InsertQueryBuilder<TTable extends PgTableWithColumns<any>, TReturn = TTabl
   }
 }
 
+function unwrapOuterParens(str: string): string {
+  let s = str.trim();
+  while (s.startsWith('(') && s.endsWith(')')) {
+    let depth = 0;
+    let matchedOuter = true;
+    for (let i = 0; i < s.length - 1; i++) {
+      if (s[i] === '(') depth++;
+      else if (s[i] === ')') {
+        depth--;
+        if (depth === 0) {
+          matchedOuter = false;
+          break;
+        }
+      }
+    }
+    if (matchedOuter) {
+      s = s.slice(1, -1).trim();
+    } else {
+      break;
+    }
+  }
+  return s;
+}
+
+function isTautologicalExpr(raw: string): boolean {
+  const unwrapped = unwrapOuterParens(raw).trim().toLowerCase();
+  const withoutSpaces = unwrapped.replace(/\s+/g, '');
+  if (!withoutSpaces) return false;
+
+  if (
+    withoutSpaces === '1=1' ||
+    withoutSpaces === '0=0' ||
+    withoutSpaces === 'true' ||
+    withoutSpaces === '1' ||
+    withoutSpaces === "''=''" ||
+    withoutSpaces === '""=""' ||
+    withoutSpaces === 'true=true' ||
+    withoutSpaces === 'false=false'
+  ) {
+    return true;
+  }
+
+  // Equality comparison: left === right
+  const eqIdx = unwrapped.indexOf('=');
+  if (
+    eqIdx !== -1 &&
+    unwrapped.indexOf('=', eqIdx + 1) === -1 &&
+    !unwrapped.includes('!=') &&
+    !unwrapped.includes('<>') &&
+    !unwrapped.includes('<=') &&
+    !unwrapped.includes('>=')
+  ) {
+    const left = unwrapped.slice(0, eqIdx).trim();
+    const right = unwrapped.slice(eqIdx + 1).trim();
+    if (left && right && left === right) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function hasCompoundOrTautology(whereSql: string): boolean {
+  // Regex detection for OR tautology variants including parenthesized tautologies
+  const orPatterns = [
+    /\bor\s*\(+\s*1\s*=\s*1\s*\)+/i,
+    /\bor\s*\(+\s*0\s*=\s*0\s*\)+/i,
+    /\bor\s*\(+\s*true\s*\)+/i,
+    /\bor\s*\(+\s*'([^']*)'\s*=\s*'\1'\s*\)+/i,
+    /\bor\s*\(+\s*"([^"]*)"\s*=\s*"\1"\s*\)+/i,
+    /\b\(+\s*1\s*=\s*1\s*\)+\s*or\b/i,
+    /\b\(+\s*0\s*=\s*0\s*\)+\s*or\b/i,
+    /\b\(+\s*true\s*\)+\s*or\b/i,
+    /\b\(+\s*'([^']*)'\s*=\s*'\1'\s*\)+\s*or\b/i,
+    /\bor\s+1\s*=\s*1(\b|\s|\)|$)/i,
+    /\bor\s+0\s*=\s*0(\b|\s|\)|$)/i,
+    /\bor\s+true(\b|\s|\)|$)/i,
+    /\bor\s+'([^']*)'\s*=\s*'\1'(\b|\s|\)|$)/i,
+    /\bor\s+"([^"]*)"\s*=\s*"\1"(\b|\s|\)|$)/i,
+  ];
+
+  for (const pat of orPatterns) {
+    if (pat.test(whereSql)) {
+      return true;
+    }
+  }
+
+  // Tokenize around OR to catch any nested parenthesized expression that unwraps to a tautology
+  const orAfterRegex = /\bor\s+(\(+[^\)]+\)+|[^)]+?)(?=\s+or\b|\s+and\b|\)|$)/gi;
+  let match;
+  while ((match = orAfterRegex.exec(whereSql)) !== null) {
+    const candidate = match[1]?.trim();
+    if (candidate && isTautologicalExpr(candidate)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function assertSafeWhereClause(whereSql: string, operation: 'UPDATE' | 'DELETE'): void {
   if (!whereSql || !whereSql.trim()) {
     throw new Error(`ORM Safety: ${operation} query has empty .where(). Use .where(sql\`1=1\`) if intentional.`);
   }
 
-  const normalized = whereSql.trim().replace(/\s+/g, ' ').toLowerCase();
-  const withoutSpaces = normalized.replace(/\s+/g, '');
-
-  // Direct tautologies: 1=1, true, 0=0
-  if (
-    withoutSpaces === '1=1' ||
-    withoutSpaces === 'true' ||
-    withoutSpaces === '0=0' ||
-    withoutSpaces === "''=''" ||
-    withoutSpaces === '""=""'
-  ) {
+  // Direct and parenthesized tautologies: 1=1, (1=1), ((1=1)), ( 'a' = 'a' ), (true), etc.
+  if (isTautologicalExpr(whereSql)) {
     throw new Error(`ORM Safety: ${operation} query has unrestricted .where(). Use .where(sql\`1=1\`) if intentional.`);
   }
 
-  // Compound unrestricted expressions: e.g. "or 1=1", "or true", "or 'a'='a'", "or 0=0"
-  // anywhere inside the WHERE clause
-  const tautologyPattern = /\bor\s+(1\s*=\s*1|0\s*=\s*0|true|'[^']*'\s*=\s*'[^']*'|"[^"]*"\s*=\s*"[^"]*")(\s|\)|$)/i;
-  if (tautologyPattern.test(whereSql)) {
+  // Compound unrestricted expressions: e.g. "id = 'x' OR (1=1)", "id = 'x' OR true", etc.
+  if (hasCompoundOrTautology(whereSql)) {
     throw new Error(`ORM Safety: ${operation} query has unrestricted compound .where() containing OR tautology. Execution blocked.`);
   }
 }

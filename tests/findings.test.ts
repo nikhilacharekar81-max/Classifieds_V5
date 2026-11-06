@@ -653,4 +653,212 @@ test('Unsubscribe POST: Authenticated user can unsubscribe their own account', a
   }
 });
 
+test('Finding 5: Unsubscribe authorization — Only owner or actual admin can unsubscribe', async () => {
+  const unsubId = `usr_unsub_${Date.now()}`;
+  const otherId = `usr_oth_${Date.now()}`;
+  const modId = `usr_mod_${Date.now()}`;
+  const adminId = `usr_adm_${Date.now()}`;
+
+  const unsubEmail = `${unsubId}@example.com`;
+  const otherEmail = `${otherId}@example.com`;
+
+  const unsubToken = `tok_unsub_${Date.now()}`;
+  const modToken = `tok_mod_${Date.now()}`;
+  const adminToken = `tok_adm_${Date.now()}`;
+
+  await pool.query(`
+    INSERT INTO users (id, name, email, type, status, email_subscribed, email_verified, admin_role) VALUES
+      ($1, 'Unsub User', $2, 'user', 'active', TRUE, TRUE, NULL),
+      ($3, 'Other User', $4, 'user', 'active', TRUE, TRUE, NULL),
+      ($5, 'Mod User', 'mod@example.com', 'user', 'active', TRUE, TRUE, 'moderator'),
+      ($6, 'Admin User', 'adm@example.com', 'user', 'active', TRUE, TRUE, 'admin')
+  `, [unsubId, unsubEmail, otherId, otherEmail, modId, adminId]);
+
+  await pool.query(`
+    INSERT INTO user_sessions (id, user_id, expires_at) VALUES
+      ($1, $2, NOW() + INTERVAL '1 day'),
+      ($3, $4, NOW() + INTERVAL '1 day'),
+      ($5, $6, NOW() + INTERVAL '1 day')
+  `, [unsubToken, unsubId, modToken, modId, adminToken, adminId]);
+
+  try {
+    // 1. Authenticated user CAN unsubscribe their own account
+    const req1 = makeReq('http://localhost:3000/api/auth/unsubscribe', 'POST', {
+      email: unsubEmail,
+    }, unsubToken);
+    const res1 = await unsubPost(req1);
+    assert.equal(res1.status, 200);
+
+    // 2. Moderator CANNOT unsubscribe another user's account
+    const req2 = makeReq('http://localhost:3000/api/auth/unsubscribe', 'POST', {
+      email: otherEmail,
+    }, modToken);
+    const res2 = await unsubPost(req2);
+    assert.equal(res2.status, 403, 'Moderator cannot unsubscribe another user');
+
+    // 3. Actual admin CAN unsubscribe another user's account
+    const req3 = makeReq('http://localhost:3000/api/auth/unsubscribe', 'POST', {
+      email: otherEmail,
+    }, adminToken);
+    const res3 = await unsubPost(req3);
+    assert.equal(res3.status, 200, 'Admin can unsubscribe another user');
+  } finally {
+    await pool.query('DELETE FROM user_sessions WHERE user_id IN ($1, $2, $3, $4)', [unsubId, otherId, modId, adminId]);
+    await pool.query('DELETE FROM users WHERE id IN ($1, $2, $3, $4)', [unsubId, otherId, modId, adminId]);
+  }
+});
+
+test('Finding 6: Atomic database-level campaign claim prevents concurrent duplicate sends', async () => {
+  const { emailRepository } = await import('../server/repositories/email.repository.ts');
+  const campId = `camp_atomic_${Date.now()}`;
+
+  await emailRepository.createCampaign({
+    id: campId,
+    title: 'Atomic Campaign',
+    subject: 'Atomic Subject',
+    contentHtml: '<p>Content</p>',
+    targetAudience: 'all_subscribed',
+    status: 'draft',
+  });
+
+  try {
+    // First claim succeeds
+    const claim1 = await emailRepository.claimCampaignForSending(campId);
+    assert.ok(claim1, 'First claim should succeed and return campaign');
+    assert.equal(claim1.status, 'sending');
+
+    // Second concurrent claim fails (already claimed)
+    const claim2 = await emailRepository.claimCampaignForSending(campId);
+    assert.equal(claim2, null, 'Second claim must fail and return null');
+  } finally {
+    await pool.query('DELETE FROM newsletter_campaigns WHERE id = $1', [campId]);
+  }
+});
+
+test('Finding 1 & 2: Individual listing permissions and free quota enforcement', async () => {
+  const { POST: listingPost } = await import('../server/api/listings/route.ts');
+  const { DELETE: listingDelete } = await import('../server/api/listings/[id]/route.ts');
+
+  const sellerId = `usr_seller_q_${Date.now()}`;
+  const supportId = `usr_support_q_${Date.now()}`;
+  const adminId = `usr_admin_q_${Date.now()}`;
+
+  const sellerToken = `tok_seller_q_${Date.now()}`;
+  const supportToken = `tok_support_q_${Date.now()}`;
+  const adminToken = `tok_admin_q_${Date.now()}`;
+
+  await pool.query(`
+    INSERT INTO users (id, name, email, phone, type, status, email_verified, admin_role) VALUES
+      ($1, 'Seller Q', '${sellerId}@example.com', '+919876543210', 'user', 'active', TRUE, NULL),
+      ($2, 'Support Q', '${supportId}@example.com', '+919876543211', 'user', 'active', TRUE, 'support_agent'),
+      ($3, 'Admin Q', '${adminId}@example.com', '+919876543212', 'user', 'active', TRUE, 'admin')
+  `, [sellerId, supportId, adminId]);
+
+  await pool.query(`
+    INSERT INTO user_sessions (id, user_id, expires_at) VALUES
+      ($1, $2, NOW() + INTERVAL '1 day'),
+      ($3, $4, NOW() + INTERVAL '1 day'),
+      ($5, $6, NOW() + INTERVAL '1 day')
+  `, [sellerToken, sellerId, supportToken, supportId, adminToken, adminId]);
+
+  let createdListingId = '';
+
+  try {
+    // 1. Ordinary seller can create ad within free quota without supplying payment ID
+    const postReq = makeReq('http://localhost:3000/api/listings', 'POST', {
+      title: `Free Quota Listing ${Date.now()}`,
+      description: 'Listing within free quota.',
+      categoryId: 'cat_services',
+      price: 500,
+      location: { city: 'Mumbai', state: 'Maharashtra', locality: 'Bandra' },
+      isFeatured: true, // Ordinary seller trying to feature for free
+    }, sellerToken);
+
+    const postRes = await listingPost(postReq);
+    assert.equal(postRes.status, 201, 'Should create listing without payment within free quota');
+    const postData = await postRes.json();
+    createdListingId = postData.id;
+
+    // Ordinary seller listing must be pending and NOT featured
+    assert.equal(postData.status, 'pending', 'Ordinary seller ad must be pending');
+    assert.equal(postData.isFeatured, false, 'Ordinary seller ad must not be auto-featured');
+
+    // 2. Support agent CANNOT delete seller ad
+    const delReqSupport = makeReq(`http://localhost:3000/api/listings/${createdListingId}`, 'DELETE', undefined, supportToken);
+    const delResSupport = await listingDelete(delReqSupport, { params: Promise.resolve({ id: createdListingId }) });
+    assert.equal(delResSupport.status, 403, 'Support agent cannot delete another user listing');
+
+    // 3. Seller CAN delete their own ad
+    const delReqOwner = makeReq(`http://localhost:3000/api/listings/${createdListingId}`, 'DELETE', undefined, sellerToken);
+    const delResOwner = await listingDelete(delReqOwner, { params: Promise.resolve({ id: createdListingId }) });
+    assert.equal(delResOwner.status, 200, 'Owner can delete their own listing');
+  } finally {
+    if (createdListingId) {
+      await pool.query('DELETE FROM listings WHERE id = $1', [createdListingId]);
+    }
+    await pool.query('DELETE FROM user_sessions WHERE user_id IN ($1, $2, $3)', [sellerId, supportId, adminId]);
+    await pool.query('DELETE FROM users WHERE id IN ($1, $2, $3)', [sellerId, supportId, adminId]);
+  }
+});
+
+test('Finding 3 & 7: Payment verification and email audit attribution', async () => {
+  const { listingService } = await import('../server/services/listing.service.ts');
+  const { POST: testSmtpPost } = await import('../server/api/admin/email/test-smtp/route.ts');
+
+  const adminId = `usr_adm_eml_${Date.now()}`;
+  const adminToken = `tok_adm_eml_${Date.now()}`;
+
+  await pool.query(`
+    INSERT INTO users (id, name, email, phone, type, status, email_verified, admin_role) VALUES
+      ($1, 'Admin Eml', '${adminId}@example.com', '+919876543213', 'user', 'active', TRUE, 'admin')
+  `, [adminId]);
+
+  await pool.query(`
+    INSERT INTO user_sessions (id, user_id, expires_at) VALUES ($1, $2, NOW() + INTERVAL '1 day')
+  `, [adminToken, adminId]);
+
+  try {
+    // 1. Finding 7: Unauthorized request must be rejected
+    const unauthReq = makeReq('http://localhost:3000/api/admin/email/test-smtp', 'POST', {});
+    const unauthRes = await testSmtpPost(unauthReq);
+    assert.equal(unauthRes.status, 401, 'Unauthorized request must be rejected');
+
+    // 2. Finding 3: Paid category requires posting order; zero-fee category does not
+    const paidCatId = `cat_paid_${Date.now()}`;
+    await pool.query(`
+      INSERT INTO categories (id, name, slug, posting_fee, free_listings_quota)
+      VALUES ($1, 'Paid Category', $2, 99.00, 0)
+    `, [paidCatId, `paid-cat-${Date.now()}`]);
+
+    // Zero fee category returns 400 (no fee required)
+    const zeroOrderRes = await listingService.createPostingOrder({
+      categoryId: 'cat_services',
+      userId: adminId,
+    });
+    assert.equal(zeroOrderRes.success, false);
+    assert.equal(zeroOrderRes.status, 400);
+
+    // Paid category creates server-side order
+    const orderRes = await listingService.createPostingOrder({
+      categoryId: paidCatId,
+      userId: adminId,
+    });
+    assert.equal(orderRes.success, true);
+    assert.ok(orderRes.order?.orderId);
+    assert.equal(orderRes.order.amount, 99);
+
+    // Verify order was inserted into posting_orders
+    const checkOrder = await pool.query('SELECT * FROM posting_orders WHERE order_id = $1', [orderRes.order.orderId]);
+    assert.equal(checkOrder.rows.length, 1);
+    assert.equal(checkOrder.rows[0].currency, 'INR');
+    assert.equal(checkOrder.rows[0].status, 'pending');
+    assert.equal(Number(checkOrder.rows[0].amount), 99);
+  } finally {
+    await pool.query('DELETE FROM posting_orders WHERE user_id = $1', [adminId]);
+    await pool.query('DELETE FROM categories WHERE id LIKE $1', ['cat_paid_%']);
+    await pool.query('DELETE FROM user_sessions WHERE user_id = $1', [adminId]);
+    await pool.query('DELETE FROM users WHERE id = $1', [adminId]);
+  }
+});
+
 

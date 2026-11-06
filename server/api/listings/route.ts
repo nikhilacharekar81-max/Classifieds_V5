@@ -125,6 +125,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Authentication required to post an ad' }, { status: 401 });
     }
 
+    const isActualAdmin = Boolean(authContext.isSuperAdmin || authContext.adminRole === 'admin' || authContext.adminRole === 'super_admin');
+
     const body = await req.json();
 
     // Validate title
@@ -185,10 +187,11 @@ export async function POST(req: NextRequest) {
       sellerName: authContext.user.name,
       sellerPhone: sellerAccountPhone,
       sellerId: authContext.userId, // Derived strictly from verified session
-      // Moderation workflow: pending unless user is an authorized admin/moderator/super_admin
-      status: authContext.isAdmin || authContext.isModerator || authContext.isSuperAdmin ? (body.status || 'approved') : 'pending',
-      isFeatured: (authContext.isAdmin || authContext.isModerator || authContext.isSuperAdmin) ? !!body.isFeatured : false,
-      isBoosted: (authContext.isAdmin || authContext.isModerator || authContext.isSuperAdmin) ? !!body.isBoosted : false,
+      // Moderation workflow: only actual admins or moderators can bypass 'pending' status
+      status: (isActualAdmin || authContext.isModerator) ? (body.status || 'approved') : 'pending',
+      // Only actual admin/super_admin can set featured/boosted for free on creation
+      isFeatured: isActualAdmin ? Boolean(body.isFeatured) : false,
+      isBoosted: isActualAdmin ? Boolean(body.isBoosted) : false,
       postingFeePaymentId: body.postingFeePaymentId,
       postingFeeOrderId: body.postingFeeOrderId,
       postingFeeSignature: body.postingFeeSignature,
@@ -198,7 +201,7 @@ export async function POST(req: NextRequest) {
     const result = await listingService.createListing(safePayload, authContext.userId, {
       name: authContext.user.name,
       ipAddress: authContext.ipAddress,
-      isAdminAction: authContext.isAdmin,
+      isAdminAction: isActualAdmin,
     });
 
     if (!result.success) {

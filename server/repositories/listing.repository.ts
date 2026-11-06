@@ -762,8 +762,8 @@ export class ListingRepository {
       paymentGateway: string;
       paymentId: string;
     };
-  }): Promise<Listing> {
-    return await db.transaction(async (tx) => {
+  }, externalTx?: any): Promise<Listing> {
+    const executeInTx = async (tx: any) => {
       // 1. If extra posting fee payment is required, insert listing_payments record inside the transaction
       if (data.paymentRecord) {
         // Idempotency check inside transaction
@@ -837,7 +837,12 @@ export class ListingRepository {
 
       await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS, tx);
       return this.mapRowToListing(inserted[0]);
-    });
+    };
+
+    if (externalTx) {
+      return await executeInTx(externalTx);
+    }
+    return await db.transaction(async (tx) => executeInTx(tx));
   }
 
   public async updateWithDuplicateCheck(

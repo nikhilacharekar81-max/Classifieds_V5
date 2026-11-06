@@ -1,6 +1,6 @@
 import { db } from '@/src/db/index';
 import * as schema from '@/src/db/schema';
-import { desc, eq } from '@/src/db/pg-orm';
+import { and, desc, eq } from '@/src/db/pg-orm';
 import { EmailTemplate, EmailLog, NewsletterCampaign } from '@/lib/types';
 
 export class EmailRepository {
@@ -197,6 +197,26 @@ export class EmailRepository {
     } catch (error) {
       console.error('EmailRepository.createCampaign error:', error);
       throw new Error('Failed to create newsletter campaign', { cause: error });
+    }
+  }
+
+  public async claimCampaignForSending(campaignId: string): Promise<NewsletterCampaign | null> {
+    try {
+      const updated = await db
+        .update(schema.newsletterCampaigns)
+        .set({ status: 'sending' })
+        .where(
+          and(
+            eq(schema.newsletterCampaigns.id, campaignId),
+            eq(schema.newsletterCampaigns.status, 'draft')
+          )
+        )
+        .returning();
+
+      return updated[0] ? this.mapRowToCampaign(updated[0]) : null;
+    } catch (error) {
+      console.error(`EmailRepository.claimCampaignForSending error for ${campaignId}:`, error);
+      throw error;
     }
   }
 

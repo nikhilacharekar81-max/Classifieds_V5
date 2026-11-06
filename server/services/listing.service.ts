@@ -437,20 +437,6 @@ export class ListingService {
     const { db } = await import('@/src/db/index');
     const { sql, eq, and, inArray } = await import('@/src/db/pg-orm');
     const schema = await import('@/src/db/schema');
-    
-    await db.execute(sql`SELECT id FROM users WHERE id = ${sellerId} FOR UPDATE`);
-
-    const activeCountRes = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(schema.listings)
-      .where(
-        and(
-          eq(schema.listings.sellerId, sellerId),
-          inArray(schema.listings.status, ['approved', 'pending']),
-          sql`${schema.listings.expiresAt} >= NOW()`
-        )
-      );
-    const activeCount = Number(activeCountRes[0]?.count || 0);
 
     let parentCategoryFee: number | undefined = undefined;
     if (existingCategory.parentId) {
@@ -469,61 +455,8 @@ export class ListingService {
     const featuredDurationDays = paidCfg?.featuredAdDurationDays || 30;
     const featuredUntil = data.isFeatured ? new Date(Date.now() + featuredDurationDays * 24 * 3600 * 1000) : null;
 
-    let paymentRecordToPersist: { amount: number; paymentGateway: string; paymentId: string } | undefined = undefined;
-
-    // Check payment gateway verification outside if a fee is required
-    const requiresPayment = !actorMeta?.isAdminAction && postingFee > 0;
-
-    if (requiresPayment) {
-      const paymentId = (data as any).postingFeePaymentId;
-      const paymentGateway = (data as any).paymentGateway?.trim() || '';
-      const orderId = (data as any).postingFeeOrderId?.trim() || '';
-      const signature = (data as any).postingFeeSignature?.trim() || '';
-
-      const { boostService } = await import('@/server/services/boost.service');
-      const isGatewayConfigured = boostService.isGatewayConfigured(paymentGateway);
-
-      // Rule 2: No fake success. If payment gateway is not configured and a non-zero fee is required, fail closed.
-      if (!isGatewayConfigured) {
-        return {
-          success: false,
-          error: `Payment gateway is not configured for paid posting fee (₹${postingFee}). Cannot accept unverified payment.`,
-          status: 503,
-        };
-      }
-
-      if (!paymentId) {
-        return {
-          success: false,
-          error: `A posting fee of ₹${postingFee} is required. Please complete payment first.`,
-          status: 402, // Payment Required
-        };
-      }
-
-      // Verify payment with payment gateway
-      const isVerified = boostService.verifyPaymentSignature({
-        orderId,
-        paymentId,
-        signature,
-      });
-
-      if (!isVerified) {
-        return {
-          success: false,
-          error: 'Payment verification failed: Invalid payment signature from payment provider.',
-          status: 400,
-        };
-      }
-
-      paymentRecordToPersist = {
-        amount: postingFee,
-        paymentGateway,
-        paymentId,
-      };
-    }
-
     try {
-      // Execute quota count verification, seller row lock, payment insertion and listing insertion in ONE single database transaction
+      // Execute quota count verification, seller row lock, payment verification and listing insertion in ONE single database transaction
       const created = await db.transaction(async (tx) => {
         // 1. Seller row-level FOR UPDATE lock INSIDE the transaction
         await tx.execute(sql`SELECT id FROM users WHERE id = ${sellerId} FOR UPDATE`);
@@ -541,12 +474,88 @@ export class ListingService {
           );
         const activeCount = Number(activeCountRes[0]?.count || 0);
 
-        // Enforce quota: if active count >= quotaLimit and fee > 0, ensure payment is provided
-        if (activeCount >= quotaLimit && !actorMeta?.isAdminAction) {
-          if (postingFee > 0 && !paymentRecordToPersist) {
+        let paymentRecordToPersist: { amount: number; paymentGateway: string; paymentId: string } | undefined = undefined;
+
+        // Quota check: A fee is required ONLY when seller has exhausted applicable free quota AND category fee > 0
+        const isQuotaExceeded = activeCount >= quotaLimit;
+        const requiresFee = isQuotaExceeded && postingFee > 0 && !actorMeta?.isAdminAction;
+
+        if (requiresFee) {
+          const { boostService } = await import('@/server/services/boost.service');
+          const paymentId = (data as any).postingFeePaymentId?.trim();
+          const paymentGateway = (data as any).paymentGateway?.trim() || '';
+          const orderId = (data as any).postingFeeOrderId?.trim();
+          const signature = (data as any).postingFeeSignature?.trim();
+
+          // Fail closed: payment gateway must be configured for paid postings
+          if (!boostService.isGatewayConfigured(paymentGateway)) {
+            throw new Error(`GATEWAY_NOT_CONFIGURED:₹${postingFee}`);
+          }
+
+          if (!orderId || !paymentId) {
             throw new Error(`QUOTA_EXCEEDED_FEE_REQUIRED:₹${postingFee}`);
           }
-          // If postingFee === 0, quota is exhausted but category is zero-fee: allow free post without requiring payment ID!
+
+          // Verify server-side posting order exists and belongs to seller
+          await tx.execute(sql`SELECT order_id FROM posting_orders WHERE order_id = ${orderId} FOR UPDATE`);
+          const orderRows = await tx
+            .select()
+            .from(schema.postingOrders)
+            .where(eq(schema.postingOrders.orderId, orderId))
+            .limit(1);
+
+          const postingOrder = orderRows[0];
+          if (!postingOrder) {
+            throw new Error('INVALID_POSTING_ORDER:Server-side posting order not found');
+          }
+          if (postingOrder.userId !== sellerId) {
+            throw new Error('UNAUTHORIZED_ORDER:Posting order belongs to a different user');
+          }
+          if (postingOrder.purpose !== 'posting_fee') {
+            throw new Error('INVALID_ORDER_PURPOSE:Order purpose must be posting_fee');
+          }
+          if (postingOrder.currency !== 'INR') {
+            throw new Error('CURRENCY_MISMATCH:Only INR currency is accepted for posting fee');
+          }
+          if (postingOrder.status !== 'pending') {
+            throw new Error('ORDER_ALREADY_USED:Posting order is no longer in pending status');
+          }
+          if (Number(postingOrder.amount) !== postingFee) {
+            throw new Error(`AMOUNT_MISMATCH:Order amount ₹${postingOrder.amount} does not match required fee ₹${postingFee}`);
+          }
+
+          // Cryptographic signature verification
+          const isSignatureValid = boostService.verifyPaymentSignature({
+            orderId,
+            paymentId,
+            signature,
+          });
+          if (!isSignatureValid) {
+            throw new Error('PAYMENT_SIGNATURE_INVALID');
+          }
+
+          // Verify paymentId has not already been used
+          const existingPayment = await tx
+            .select({ id: schema.listingPayments.id })
+            .from(schema.listingPayments)
+            .where(eq(schema.listingPayments.paymentId, paymentId))
+            .limit(1);
+
+          if (existingPayment.length > 0) {
+            throw new Error('PAYMENT_ALREADY_USED');
+          }
+
+          // Mark order as completed
+          await tx
+            .update(schema.postingOrders)
+            .set({ status: 'completed' })
+            .where(eq(schema.postingOrders.orderId, orderId));
+
+          paymentRecordToPersist = {
+            amount: postingFee,
+            paymentGateway: paymentGateway || 'razorpay',
+            paymentId,
+          };
         }
 
         // 3. Atomically insert payment record (if required) and create listing with duplicate check
@@ -573,7 +582,7 @@ export class ListingService {
           featuredUntil: featuredUntil || undefined,
           isBoosted: data.isFeatured ?? false,
           paymentRecord: paymentRecordToPersist,
-        });
+        }, tx);
       });
 
       // 1. Immediately trigger listing count invalidation right after successful database insert
@@ -593,9 +602,7 @@ export class ListingService {
             module: 'Marketplace',
             targetId: id,
             targetSummary: created.title,
-            details: paymentRecordToPersist
-              ? `Created listing in ${created.location.city} with paid fee ₹${paymentRecordToPersist.amount} (Payment ID: ${paymentRecordToPersist.paymentId})`
-              : `Created listing in ${created.location.city}`,
+            details: `Created listing in ${created.location.city}`,
             ipAddress: actorMeta?.ipAddress || 'unknown',
           });
         } catch (auditErr) {
@@ -612,16 +619,90 @@ export class ListingService {
       if (err.message === 'PAYMENT_ALREADY_USED') {
         return { success: false, error: 'This payment has already been used for another listing.', status: 409 };
       }
+      if (err.message === 'PAYMENT_SIGNATURE_INVALID') {
+        return { success: false, error: 'Payment verification failed: Invalid payment signature from payment provider.', status: 400 };
+      }
+      if (err.message?.startsWith('GATEWAY_NOT_CONFIGURED:')) {
+        const feeStr = err.message.split(':')[1] || '';
+        return {
+          success: false,
+          error: `Payment gateway is not configured for paid posting fee (${feeStr}). Cannot accept unverified payment.`,
+          status: 503,
+        };
+      }
       if (err.message?.startsWith('QUOTA_EXCEEDED_FEE_REQUIRED:')) {
         const feeStr = err.message.split(':')[1] || '';
         return {
           success: false,
-          error: `Listing quota exceeded. A posting fee of ${feeStr} is required for additional listings.`,
+          error: `Listing quota exceeded. A posting fee of ${feeStr} is required for additional listings. Please complete payment first.`,
           status: 402,
         };
       }
+      if (
+        err.message?.startsWith('INVALID_POSTING_ORDER:') ||
+        err.message?.startsWith('UNAUTHORIZED_ORDER:') ||
+        err.message?.startsWith('INVALID_ORDER_PURPOSE:') ||
+        err.message?.startsWith('CURRENCY_MISMATCH:') ||
+        err.message?.startsWith('AMOUNT_MISMATCH:') ||
+        err.message?.startsWith('ORDER_ALREADY_USED:')
+      ) {
+        return { success: false, error: err.message.split(':')[1] || err.message, status: 400 };
+      }
       return { success: false, error: err.message || 'Failed to save listing', status: 500 };
     }
+  }
+
+  public async createPostingOrder(params: {
+    categoryId: string;
+    userId: string;
+  }): Promise<{ success: boolean; order?: any; error?: string; status: number }> {
+    const { categoryId, userId } = params;
+    const category = await categoryRepository.findById(categoryId);
+    if (!category) {
+      return { success: false, error: 'Category not found', status: 404 };
+    }
+
+    const settings = await getCachedSystemSettings();
+    let parentCategoryFee: number | undefined = undefined;
+    if (category.parentId) {
+      const parentCat = await categoryRepository.findById(category.parentId);
+      if (parentCat && parentCat.postingFee !== undefined) {
+        parentCategoryFee = Number(parentCat.postingFee);
+      }
+    }
+
+    const rawPostingFee = category.postingFee ?? parentCategoryFee ?? settings.extraListingFee ?? 0;
+    const postingFee = Math.max(0, Number(rawPostingFee) || 0);
+
+    if (postingFee <= 0) {
+      return { success: false, error: 'No posting fee is required for this category', status: 400 };
+    }
+
+    const { db } = await import('@/src/db/index');
+    const schema = await import('@/src/db/schema');
+    const crypto = await import('node:crypto');
+    const orderId = `ORD-POST-${crypto.randomUUID()}`;
+
+    await db.insert(schema.postingOrders).values({
+      orderId,
+      userId,
+      categoryId,
+      amount: String(postingFee),
+      currency: 'INR',
+      purpose: 'posting_fee',
+      status: 'pending',
+    });
+
+    return {
+      success: true,
+      order: {
+        orderId,
+        amount: postingFee,
+        currency: 'INR',
+        purpose: 'posting_fee',
+      },
+      status: 201,
+    };
   }
 
   public async updateListing(

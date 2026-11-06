@@ -55,12 +55,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    // Authorization: User can unsubscribe themselves, or an admin/moderator can unsubscribe anyone
+    // Authorization: User can unsubscribe themselves, or an actual administrator can unsubscribe anyone
     const isOwner = authContext.userId === user.id || authContext.user?.id === user.id;
-    const isPrivileged = Boolean(authContext.isAdmin || authContext.isModerator || authContext.isSuperAdmin);
+    const role = authContext.adminRole || authContext.user?.adminRole;
+    const isActualAdmin = Boolean(authContext.isSuperAdmin || role === 'admin' || role === 'super_admin');
 
-    if (!isOwner && !isPrivileged) {
-      return NextResponse.json({ error: 'Forbidden: You can only unsubscribe your own account.' }, { status: 403 });
+    if (!isOwner && !isActualAdmin) {
+      return NextResponse.json({ error: 'Forbidden: Only administrators can unsubscribe another user\'s account.' }, { status: 403 });
     }
 
     await db.update(schema.users)

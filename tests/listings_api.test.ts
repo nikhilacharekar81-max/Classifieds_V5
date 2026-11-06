@@ -18,6 +18,12 @@ function createMockRequest(url: string, body: any, cookie?: string): NextRequest
 }
 
 test('POST /api/listings — Optional Price and Photos', async () => {
+  const { pool } = await import('../src/db/index.ts');
+  await pool.query(`
+    INSERT INTO users (id, name, email, phone, type, status, email_verified)
+    VALUES ('usr_101', 'Test User', 'usr_101@example.com', '+919876543210', 'user', 'active', TRUE)
+    ON CONFLICT (id) DO UPDATE SET email_verified = TRUE, phone = '+919876543210', status = 'active'
+  `);
   const sessionId = `sess_${Date.now()}`;
   await userRepository.createSession(sessionId, 'usr_101', '127.0.0.1');
   const cookie = `chillyads_session=${sessionId}`;

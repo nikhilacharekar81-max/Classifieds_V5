@@ -177,17 +177,15 @@ export class EmailService {
     campaignId: string,
     actor?: { id: string; name: string; ipAddress?: string }
   ): Promise<{ success: boolean; recipientCount: number; message: string }> {
-    const campaigns = await emailRepository.findAllCampaigns();
-    const campaign = campaigns.find((c) => c.id === campaignId);
+    // Atomically claim the campaign from draft to sending at the database level to prevent concurrent sends
+    const campaign = await emailRepository.claimCampaignForSending(campaignId);
     if (!campaign) {
-      return { success: false, recipientCount: 0, message: 'Campaign not found' };
+      return {
+        success: false,
+        recipientCount: 0,
+        message: 'Campaign is already sending, sent, or does not exist.',
+      };
     }
-
-    if (campaign.status === 'sending' || campaign.status === 'sent') {
-      return { success: false, recipientCount: 0, message: `Campaign is already ${campaign.status} and cannot be sent again.` };
-    }
-
-    await emailRepository.updateCampaignStatus(campaignId, 'sending');
 
     const recipients = await this.filterAudienceUsers(campaign.targetAudience || 'all_subscribed', campaign.targetState, campaign.targetCity);
     const count = recipients.length;

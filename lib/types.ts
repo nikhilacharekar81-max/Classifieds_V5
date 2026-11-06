@@ -268,7 +268,7 @@ export interface ToastMessage {
   };
 }
 
-export type EmailDeliveryStatus = 'delivered' | 'opened' | 'clicked' | 'queued' | 'sending' | 'failed';
+export type EmailDeliveryStatus = 'delivered' | 'opened' | 'clicked' | 'queued' | 'sending' | 'failed' | 'not_configured';
 export type EmailLogType = 'transactional' | 'marketing' | 'test' | 'ad_expired' | 'ad_renewed' | 'ad_approved' | 'ad_rejected' | 'welcome' | 'newsletter' | 'custom_broadcast' | 'general';
 
 export interface EmailLog {

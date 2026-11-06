@@ -64,6 +64,18 @@ const MIGRATIONS: Record<string, string> = {
         "created_at" timestamp with time zone DEFAULT now() NOT NULL
     );
   `,
+  '005_posting_orders': `
+    CREATE TABLE IF NOT EXISTS "posting_orders" (
+        "order_id" varchar(64) PRIMARY KEY NOT NULL,
+        "user_id" varchar(64) NOT NULL REFERENCES "users"("id"),
+        "category_id" varchar(64) NOT NULL,
+        "amount" numeric(10, 2) NOT NULL,
+        "currency" varchar(10) DEFAULT 'INR' NOT NULL,
+        "purpose" varchar(64) DEFAULT 'posting_fee' NOT NULL,
+        "status" varchar(32) DEFAULT 'pending' NOT NULL,
+        "created_at" timestamp with time zone DEFAULT now() NOT NULL
+    );
+  `,
 };
 
 async function runMigrations(executor: { query: (sql: string, params?: any[]) => Promise<any> }) {
