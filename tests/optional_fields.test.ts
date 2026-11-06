@@ -19,7 +19,7 @@ test('Optional Price and Photos — Creating ad with no price and no photos', as
     },
     images: [],
     // price omitted / undefined
-  });
+  } as any);
 
   assert.equal(res.success, true, `Listing creation should succeed without price or photos. Error: ${res.error}`);
   assert.ok(res.listing, 'Created listing data should be returned');
@@ -46,7 +46,7 @@ test('Optional Price and Photos — Explicit price 0 (Free items) is preserved a
       state: 'Delhi',
       locality: 'Connaught Place',
     },
-  });
+  } as any);
 
   assert.equal(res.success, true, 'Creating free item with price=0 should succeed');
   assert.equal(res.listing?.price, 0, 'Explicit price 0 must be preserved as number 0, not converted to null');
@@ -65,7 +65,7 @@ test('Optional Price and Photos — Numeric price is stored and returned normall
       state: 'Karnataka',
       locality: 'Koramangala',
     },
-  });
+  } as any);
 
   assert.equal(res.success, true, 'Creating listing with price 45000 should succeed');
   assert.equal(res.listing?.price, 45000, 'Numeric price 45000 should be stored and returned');

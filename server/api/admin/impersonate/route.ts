@@ -22,13 +22,20 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Target userId is required' }, { status: 400 });
       }
 
+      const isSuperAdmin = Boolean(authContext.isSuperAdmin || authContext.user?.adminRole === 'super_admin');
+      const isAdmin = Boolean(authContext.isAdmin || authContext.user?.adminRole === 'admin');
+
+      if (!isSuperAdmin && !isAdmin) {
+        return NextResponse.json({ error: 'Forbidden: Only administrators can initiate impersonation sessions' }, { status: 403 });
+      }
+
       const targetUser = await userRepository.findById(userId);
       if (!targetUser) {
         return NextResponse.json({ error: 'Target user not found' }, { status: 404 });
       }
 
-      if (targetUser.adminRole === 'super_admin') {
-        return NextResponse.json({ error: 'Cannot impersonate a super administrator' }, { status: 403 });
+      if (targetUser.adminRole || targetUser.type === 'admin') {
+        return NextResponse.json({ error: 'Cannot impersonate an administrator or staff member' }, { status: 403 });
       }
 
       const sessionId = `sess_imp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;

@@ -699,7 +699,8 @@ class UpdateQueryBuilder<TTable extends PgTableWithColumns<any>, TReturn = TTabl
 
     if (this._where) {
       const whereSql = this._where.toSql(params);
-      if (!whereSql || whereSql === '1 = 1') {
+      const normalizedWhere = whereSql ? whereSql.replace(/\s+/g, '').toLowerCase() : '';
+      if (!whereSql || normalizedWhere === '1=1' || normalizedWhere === 'true') {
         throw new Error(`ORM Safety: UPDATE query has unrestricted .where(). Use .where(sql\`1=1\`) if intentional.`);
       }
       sqlText += ` WHERE ${whereSql}`;
@@ -772,7 +773,8 @@ class DeleteQueryBuilder<TTable extends PgTableWithColumns<any>, TReturn = TTabl
 
     if (this._where) {
       const whereSql = this._where.toSql(params);
-      if (!whereSql || whereSql === '1 = 1') {
+      const normalizedWhere = whereSql ? whereSql.replace(/\s+/g, '').toLowerCase() : '';
+      if (!whereSql || normalizedWhere === '1=1' || normalizedWhere === 'true') {
         throw new Error(`ORM Safety: DELETE query has unrestricted .where(). Use .where(sql\`1=1\`) if intentional.`);
       }
       sqlText += ` WHERE ${whereSql}`;

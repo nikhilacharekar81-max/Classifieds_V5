@@ -326,12 +326,14 @@ export class ListingService {
       const item = await listingRepository.findById(cleanId);
       if (item && item.isBoosted) {
         this.incrementBoostClick(item.id).catch(console.warn);
+        this.incrementBoostViews([item.id]).catch(console.warn);
       }
       return item ? toPublicListingDetail(item) : null;
     }
     const cachedItem = await fetchCachedListingByIdInternal(cleanId);
     if (cachedItem && cachedItem.isBoosted) {
       this.incrementBoostClick(cachedItem.id).catch(console.warn);
+      this.incrementBoostViews([cachedItem.id]).catch(console.warn);
     }
     return cachedItem;
   }
@@ -945,6 +947,28 @@ export class ListingService {
         );
     } catch (error) {
       console.warn('Failed to increment boost impressions:', error);
+    }
+  }
+
+  public async incrementBoostViews(ids: string[]): Promise<void> {
+    if (!ids.length) return;
+    try {
+      const { db } = await import('@/src/db/index');
+      const { inArray, and, eq, sql, gt } = await import('@/src/db/pg-orm');
+      const schema = await import('@/src/db/schema');
+
+      await db
+        .update(schema.listings)
+        .set({ boostViews: sql`${schema.listings.boostViews} + 1` })
+        .where(
+          and(
+            inArray(schema.listings.id, ids),
+            eq(schema.listings.boostStatus, 'active'),
+            gt(schema.listings.boostExpiresAt, new Date())
+          )
+        );
+    } catch (error) {
+      console.warn('Failed to increment boost views:', error);
     }
   }
 

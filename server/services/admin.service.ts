@@ -307,6 +307,18 @@ export class AdminService {
     if (newSettings.watermarkImages !== undefined) validated.watermarkImages = Boolean(newSettings.watermarkImages);
     if (newSettings.aiSpamFilterEnabled !== undefined) validated.aiSpamFilterEnabled = Boolean(newSettings.aiSpamFilterEnabled);
     if (newSettings.otpLoginEnabled !== undefined) validated.otpLoginEnabled = Boolean(newSettings.otpLoginEnabled);
+    if (newSettings.defaultCurrency !== undefined) {
+      validated.defaultCurrency = String(newSettings.defaultCurrency).trim().toUpperCase();
+    }
+    if (newSettings.currencySymbol !== undefined) {
+      validated.currencySymbol = String(newSettings.currencySymbol).trim();
+    }
+    if (newSettings.timezone !== undefined) {
+      validated.timezone = String(newSettings.timezone).trim();
+    }
+    if (newSettings.dateFormat !== undefined) {
+      validated.dateFormat = String(newSettings.dateFormat).trim();
+    }
 
     if (Object.keys(validated).length === 0) {
       return await this.getSettings();
