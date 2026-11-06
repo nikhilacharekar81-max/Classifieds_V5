@@ -2,6 +2,7 @@ import { db } from '@/src/db/index';
 import * as schema from '@/src/db/schema';
 import { desc, eq, sql } from '@/src/db/pg-orm';
 import { AuditLog, SystemSettings } from '@/lib/types';
+import { DEFAULT_PAID_FEATURES_CONFIG } from '@/lib/data/initialData';
 import { getCachedSystemSettings } from '@/server/cache/reference-data.cache';
 import crypto from 'node:crypto';
 
@@ -82,18 +83,33 @@ export class AdminRepository {
           timezone: 'Asia/Kolkata',
           dateFormat: 'DD/MM/YYYY',
           listingDurationDays: 30,
-          freeListingsLimit: 3,
-          extraListingFee: 99,
+          freeListingsLimit: DEFAULT_PAID_FEATURES_CONFIG.freeListingsLimit,
+          extraListingFee: DEFAULT_PAID_FEATURES_CONFIG.extraListingFee,
           maxPhotosPerListing: 5,
           autoApproveVerifiedUsers: false,
           maintenanceMode: false,
           watermarkImages: false,
           aiSpamFilterEnabled: true,
           otpLoginEnabled: true,
-          paidFeatures: {} as any,
+          paidFeatures: { ...DEFAULT_PAID_FEATURES_CONFIG },
         };
       }
       const r = rows[0];
+      const storedPaidCfg =
+        r.paidFeaturesConfig && typeof r.paidFeaturesConfig === 'object'
+          ? (r.paidFeaturesConfig as Record<string, any>)
+          : {};
+      const resolvedFreeLimit =
+        storedPaidCfg.freeListingsLimit !== undefined && storedPaidCfg.freeListingsLimit !== null
+          ? Number(storedPaidCfg.freeListingsLimit)
+          : r.freeListingsLimit ?? DEFAULT_PAID_FEATURES_CONFIG.freeListingsLimit;
+      const resolvedExtraFee =
+        storedPaidCfg.extraListingFee !== undefined && storedPaidCfg.extraListingFee !== null
+          ? Number(storedPaidCfg.extraListingFee)
+          : r.extraListingFee !== undefined && r.extraListingFee !== null
+          ? Number(r.extraListingFee)
+          : DEFAULT_PAID_FEATURES_CONFIG.extraListingFee;
+
       return {
         siteName: r.siteName,
         defaultCurrency: r.defaultCurrency,
@@ -109,7 +125,12 @@ export class AdminRepository {
         watermarkImages: r.watermarkImages,
         aiSpamFilterEnabled: r.aiSpamFilterEnabled,
         otpLoginEnabled: r.otpLoginEnabled,
-        paidFeatures: (r.paidFeaturesConfig as any) || {},
+        paidFeatures: {
+          ...DEFAULT_PAID_FEATURES_CONFIG,
+          ...storedPaidCfg,
+          freeListingsLimit: resolvedFreeLimit,
+          extraListingFee: resolvedExtraFee,
+        },
       };
     } catch (error) {
       console.error('AdminRepository.getSystemSettingsDirect error:', error);

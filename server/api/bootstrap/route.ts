@@ -7,6 +7,7 @@ import { cmsRepository } from '@/server/repositories/cms.repository';
 import { listingRepository } from '@/server/repositories/listing.repository';
 import { userRepository } from '@/server/repositories/user.repository';
 import { getAuthenticatedUser } from '@/lib/auth/session';
+import { hasPermission } from '@/lib/auth/roles';
 import { toPublicListingDTO } from '@/lib/utils/seoAndUrlHelper';
 
 export const dynamic = 'force-dynamic';
@@ -14,7 +15,12 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
   try {
     const authContext = await getAuthenticatedUser(req);
-    const isStaff = !!(authContext?.isAdmin || authContext?.isModerator);
+    const role = authContext?.adminRole || authContext?.user?.adminRole;
+    const isActualAdmin = Boolean(
+      authContext?.isSuperAdmin || role === 'super_admin' || role === 'admin'
+    );
+    const canManageUsers = Boolean(authContext && hasPermission(role, 'canManageUsers'));
+    const canManageCms = Boolean(authContext && hasPermission(role, 'canManageCms'));
 
     const [
       categories,
@@ -33,14 +39,16 @@ export async function GET(req: NextRequest) {
       adminRepository.getSystemSettings(),
       cmsRepository.findAllPages(),
       listingRepository.findMarketplaceListings({ status: 'approved', limit: 500 }),
-      authContext?.isAdmin ? userRepository.findAll() : Promise.resolve([]),
+      canManageUsers
+        ? userRepository.findAllForAdmin({ includeKycDocuments: isActualAdmin })
+        : Promise.resolve([]),
     ]);
 
-    // Finding 40: Unauthenticated or regular users should only receive published CMS pages
-    const cmsPages = isStaff ? allCmsPages : allCmsPages.filter((p) => p.status === 'published');
+    // Unauthenticated or non-CMS roles only receive published CMS pages
+    const cmsPages = canManageCms ? allCmsPages : allCmsPages.filter((p) => p.status === 'published');
 
-    // Strip sensitive internal fields for bootstrap listings if not admin/staff
-    const publicListings = isStaff
+    // Strip internal fields for bootstrap listings unless actual administrator
+    const publicListings = isActualAdmin
       ? listingsData.items
       : listingsData.items.map((l) => toPublicListingDTO(l));
 

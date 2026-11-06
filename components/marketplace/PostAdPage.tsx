@@ -122,12 +122,39 @@ export const PostAdPage: React.FC = () => {
 
   const [paymentMethod, setPaymentMethod] = useState<'upi' | 'card' | 'netbanking'>('upi');
   const [wantFeatured, setWantFeatured] = useState(false);
+  const [serverActiveQuotaCount, setServerActiveQuotaCount] = useState<number | null>(null);
 
-  // Freemium Volume Quota calculations
+  useEffect(() => {
+    if (!currentUser?.id) {
+      setServerActiveQuotaCount(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/listings?sellerId=${encodeURIComponent(currentUser.id)}&limit=1`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data?.statusCounts && typeof data.statusCounts.activeQuotaCount === 'number') {
+          setServerActiveQuotaCount(data.statusCounts.activeQuotaCount);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id, listings.length]);
+
+  // Freemium Volume Quota calculations (matches server: non-expired approved + pending)
   const userActiveListingsCount = useMemo(() => {
     if (!currentUser?.id) return 0;
-    return listings.filter((l) => l.sellerId === currentUser.id && l.status === 'approved').length;
-  }, [listings, currentUser]);
+    if (serverActiveQuotaCount !== null) return serverActiveQuotaCount;
+    const now = Date.now();
+    return listings.filter(
+      (l) =>
+        l.sellerId === currentUser.id &&
+        (l.status === 'approved' || l.status === 'pending') &&
+        (!l.expiresAt || new Date(l.expiresAt).getTime() >= now)
+    ).length;
+  }, [listings, currentUser, serverActiveQuotaCount]);
 
   const paidCfg = settings.paidFeatures;
   const currencySymbol = settings.currencySymbol || '₹';
@@ -136,7 +163,18 @@ export const PostAdPage: React.FC = () => {
   const isSubcatFeeEnabled = isMasterMonetized && (paidCfg ? paidCfg.paidSubcategoriesEnabled : true);
   const isFeaturedEnabled = isMasterMonetized && (paidCfg ? paidCfg.featuredAdEnabled : true);
 
-  const freeQuotaLimit = paidCfg?.freeListingsLimit ?? settings.freeListingsLimit ?? 3;
+  const selectedCategory = categories.find((c) => c.id === postForm.categoryId);
+  const selectedSubcategory = categories.find((c) => c.id === postForm.subcategoryId);
+  const currentSubcategories = categories.filter(
+    (c) => c.parentId === postForm.categoryId && c.isActive
+  );
+
+  const freeQuotaLimit =
+    selectedSubcategory?.freeListingsQuota ??
+    selectedCategory?.freeListingsQuota ??
+    paidCfg?.freeListingsLimit ??
+    settings.freeListingsLimit ??
+    3;
   const extraListingFeeRate = paidCfg?.extraListingFee ?? settings.extraListingFee ?? 99;
 
   const isVolumeQuotaExceeded = isQuotaEnabled && userActiveListingsCount >= freeQuotaLimit;
@@ -177,15 +215,19 @@ export const PostAdPage: React.FC = () => {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [states, cities, postForm.state]);
 
-  const selectedCategory = categories.find((c) => c.id === postForm.categoryId);
-  const selectedSubcategory = categories.find((c) => c.id === postForm.subcategoryId);
-  const currentSubcategories = categories.filter(
-    (c) => c.parentId === postForm.categoryId && c.isActive
-  );
-
-  const isPaidSubcategory = isSubcatFeeEnabled && !!(selectedSubcategory?.isPaid || selectedCategory?.isPaid);
-  const postingFeeAmount =
-    selectedSubcategory?.postingFee || selectedCategory?.postingFee || paidCfg?.defaultSubcategoryFee || 149;
+  const rawPostingFee =
+    selectedSubcategory?.postingFee ??
+    selectedCategory?.postingFee ??
+    paidCfg?.defaultSubcategoryFee ??
+    149;
+  const postingFeeAmount = Math.max(0, Number(rawPostingFee) || 0);
+  const effectivePaidFlag =
+    selectedSubcategory !== undefined
+      ? selectedSubcategory.isPaid !== undefined
+        ? Boolean(selectedSubcategory.isPaid)
+        : Boolean(selectedCategory?.isPaid)
+      : Boolean(selectedCategory?.isPaid);
+  const isPaidSubcategory = isSubcatFeeEnabled && effectivePaidFlag && postingFeeAmount > 0;
 
   const featuredAdPrice = paidCfg?.featuredAdPrice ?? 100;
   const featuredFee = isFeaturedEnabled && wantFeatured ? featuredAdPrice : 0;
@@ -284,7 +326,6 @@ export const PostAdPage: React.FC = () => {
     }
 
     const listingDurationDays = settings.listingDurationDays || 30;
-    const featuredDurationDays = paidCfg?.featuredAdDurationDays || 30;
 
     const { listing: newAd, error, code } = await addListing({
       title: postForm.title,
@@ -299,15 +340,18 @@ export const PostAdPage: React.FC = () => {
       description: postForm.description,
       images: finalImages,
       status: 'pending',
-      isFeatured: wantFeatured,
-      featuredUntil: wantFeatured ? new Date(Date.now() + featuredDurationDays * 86400000).toISOString().split('T')[0] : undefined,
-      isBoosted: wantFeatured,
+      isFeatured: false,
+      featuredUntil: undefined,
+      isBoosted: false,
       location: {
         city: postForm.city,
         state: postForm.state,
         locality: postForm.locality,
       },
-      customAttributes: postForm.dynamicAttributes,
+      customAttributes: {
+        ...postForm.dynamicAttributes,
+        ...(wantFeatured ? { requestedFeatured: true } : {}),
+      },
       expiresAt: new Date(Date.now() + listingDurationDays * 86400000).toISOString().split('T')[0],
     });
 
@@ -320,10 +364,16 @@ export const PostAdPage: React.FC = () => {
       return;
     }
 
-    if (requiresPayment) {
+    if (wantFeatured) {
+      addToast({
+        title: 'Standard Listing Submitted (Featured Pending Payment)',
+        message: `Your ad #${newAd.id} was submitted for moderation as a standard listing. The Featured upgrade (${currencySymbol}${featuredAdPrice}) is not active because the payment gateway is not configured.`,
+        type: 'warning',
+      });
+    } else if (requiresPayment) {
       addToast({
         title: 'Ad Submitted',
-        message: `Your ad #${newAd.id} has been submitted. Payment of ₹${totalFee} is required to activate paid features. Please complete the payment to proceed.`,
+        message: `Your ad #${newAd.id} has been submitted. Payment of ${currencySymbol}${totalFee} is required to activate paid features.`,
         type: 'info',
       });
     } else {
@@ -334,14 +384,6 @@ export const PostAdPage: React.FC = () => {
       });
     }
 
-    if (newAd && requiresPayment && wantFeatured) {
-       addToast({
-          title: 'Payment Required',
-          message: 'Boosted listing requires payment through a secure gateway. Please use the "My Ads" section to complete payment for your featured ad.',
-          type: 'info',
-       });
-    }
-    
     navigateTo(buildChillyUrl({ listing: newAd, categories }));
   };
 
@@ -539,9 +581,9 @@ export const PostAdPage: React.FC = () => {
                   setWantFeatured(checked);
                   if (checked) {
                     addToast({
-                      type: 'success',
-                      title: 'Featured Promotion Added',
-                      message: `Successfully added Featured Ad promotion (${currencySymbol}${featuredAdPrice}) to your checkout invoice.`,
+                      type: 'info',
+                      title: 'Featured Upgrade Selected (Payment Pending)',
+                      message: `Featured promotion (${currencySymbol}${featuredAdPrice}) is selected as a pending request. It requires verified payment before activation.`,
                     });
                   }
                 }}

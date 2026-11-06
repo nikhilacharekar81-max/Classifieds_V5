@@ -65,6 +65,7 @@ export interface UserAccount {
     gstNumber: string;
     verifiedBusiness: boolean;
   };
+  adminRole?: string | null;
 }
 
 export type ListingStatus = 'pending' | 'approved' | 'rejected' | 'sold' | 'expired' | 'draft';

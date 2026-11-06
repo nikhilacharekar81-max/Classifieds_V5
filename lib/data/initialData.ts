@@ -2956,6 +2956,27 @@ export const INITIAL_AUDIT_LOGS: AuditLog[] = [
   },
 ];
 
+export const DEFAULT_PAID_FEATURES_CONFIG = {
+  masterMonetizationEnabled: true,
+  freemiumQuotaEnabled: true,
+  freeListingsLimit: 3,
+  extraListingFee: 99,
+  paidSubcategoriesEnabled: true,
+  defaultSubcategoryFee: 149,
+  featuredAdEnabled: true,
+  featuredAdPrice: 100,
+  featuredAdDurationDays: 30,
+  adBoostEnabled: true,
+  quickBoostPrice: 49,
+  spotlightBoostPrice: 199,
+  premiumSurgeBoostPrice: 499,
+  displayAdsEnabled: true,
+  headerBannerEnabled: true,
+  inFeedBannerEnabled: true,
+  sidebarBannerEnabled: true,
+  bannerDailyRate: 299,
+};
+
 export const INITIAL_SETTINGS: SystemSettings = {
   siteName: 'Chillyads',
   defaultCurrency: 'INR',
@@ -2972,26 +2993,7 @@ export const INITIAL_SETTINGS: SystemSettings = {
   aiSpamFilterEnabled: true,
   otpLoginEnabled: true,
   enablePrivacyChoices: false,
-  paidFeatures: {
-    masterMonetizationEnabled: true,
-    freemiumQuotaEnabled: true,
-    freeListingsLimit: 3,
-    extraListingFee: 99,
-    paidSubcategoriesEnabled: true,
-    defaultSubcategoryFee: 149,
-    featuredAdEnabled: true,
-    featuredAdPrice: 100,
-    featuredAdDurationDays: 30,
-    adBoostEnabled: true,
-    quickBoostPrice: 49,
-    spotlightBoostPrice: 199,
-    premiumSurgeBoostPrice: 499,
-    displayAdsEnabled: true,
-    headerBannerEnabled: true,
-    inFeedBannerEnabled: true,
-    sidebarBannerEnabled: true,
-    bannerDailyRate: 299,
-  },
+  paidFeatures: { ...DEFAULT_PAID_FEATURES_CONFIG },
 };
 
 export const INITIAL_EMAIL_SETTINGS: EmailSettings = {

@@ -57,6 +57,7 @@ import * as adminCmsByIdRoute from './server/api/admin/cms/[id]/route.ts';
 import * as chatRoute from './server/api/chat/route.ts';
 import * as reportsRoute from './server/api/reports/route.ts';
 import * as userKycRoute from './server/api/user/kyc/route.ts';
+import * as userAccountRoute from './server/api/user/account/route.ts';
 import * as adminImpersonateRoute from './server/api/admin/impersonate/route.ts';
 import * as adminEmailTemplatesRoute from './server/api/admin/email/templates/route.ts';
 import * as adminEmailLogsRoute from './server/api/admin/email/logs/route.ts';
@@ -218,6 +219,7 @@ async function startServer() {
   app.all('/api/chat', createExpressRouteHandler(chatRoute));
   app.all('/api/reports', createExpressRouteHandler(reportsRoute));
   app.all('/api/user/kyc', createExpressRouteHandler(userKycRoute));
+  app.all('/api/user/account', createExpressRouteHandler(userAccountRoute));
 
   // SEO robots.txt
   app.get('/robots.txt', (req, res) => {

@@ -57,8 +57,8 @@ export class AdminService {
       seoTitle: catData.seoTitle,
       seoDescription: catData.seoDescription,
       isPaid: catData.isPaid ?? false,
-      postingFee: catData.postingFee || 0,
-      freeListingsQuota: catData.freeListingsQuota || 3,
+      postingFee: catData.postingFee ?? 0,
+      freeListingsQuota: catData.freeListingsQuota ?? 3,
     });
 
     await invalidateCategoryReferenceCache();
@@ -267,57 +267,181 @@ export class AdminService {
     newSettings: Partial<SystemSettings>,
     actor?: { id?: string; name?: string; ipAddress?: string }
   ): Promise<SystemSettings> {
+    const validationErr = (msg: string) => {
+      const err: any = new Error(msg);
+      err.code = 'VALIDATION_ERROR';
+      return err;
+    };
+
+    if (!newSettings || typeof newSettings !== 'object' || Array.isArray(newSettings)) {
+      throw validationErr('Settings payload must be a valid object');
+    }
+
     const validated: Partial<SystemSettings> = {};
-    
+
     if (newSettings.siteName !== undefined) {
-      const val = String(newSettings.siteName).trim();
-      if (val) validated.siteName = val;
+      if (typeof newSettings.siteName !== 'string' || !newSettings.siteName.trim() || newSettings.siteName.trim().length > 120) {
+        throw validationErr('Site name must be a non-empty string (max 120 characters)');
+      }
+      validated.siteName = newSettings.siteName.trim();
     }
-    
+
     if (newSettings.listingDurationDays !== undefined) {
-      const val = parseInt(String(newSettings.listingDurationDays), 10);
-      if (!isNaN(val) && val >= 1 && val <= 365) {
-        validated.listingDurationDays = val;
-      } else {
-        throw new Error('Listing duration must be between 1 and 365 days');
+      const val = Number(newSettings.listingDurationDays);
+      if (!Number.isInteger(val) || val < 1 || val > 365) {
+        throw validationErr('Listing duration must be an integer between 1 and 365 days');
       }
+      validated.listingDurationDays = val;
     }
-    
+
     if (newSettings.extraListingFee !== undefined) {
-      const val = parseFloat(String(newSettings.extraListingFee));
-      if (!isNaN(val) && val >= 0) {
-        validated.extraListingFee = Number(val.toFixed(2));
-      } else {
-        throw new Error('Extra listing fee must be a non-negative number');
+      const val = Number(newSettings.extraListingFee);
+      if (typeof newSettings.extraListingFee === 'boolean' || isNaN(val) || !isFinite(val) || val < 0 || val > 1000000) {
+        throw validationErr('Extra listing fee must be a non-negative number');
       }
+      validated.extraListingFee = Number(val.toFixed(2));
     }
 
     if (newSettings.freeListingsLimit !== undefined) {
-      const val = parseInt(String(newSettings.freeListingsLimit), 10);
-      if (!isNaN(val) && val >= 0) validated.freeListingsLimit = val;
+      const val = Number(newSettings.freeListingsLimit);
+      if (typeof newSettings.freeListingsLimit === 'boolean' || !Number.isInteger(val) || val < 0 || val > 10000) {
+        throw validationErr('Free listings limit must be a non-negative integer');
+      }
+      validated.freeListingsLimit = val;
     }
 
     if (newSettings.maxPhotosPerListing !== undefined) {
-      const val = parseInt(String(newSettings.maxPhotosPerListing), 10);
-      if (!isNaN(val) && val >= 1 && val <= 20) validated.maxPhotosPerListing = val;
+      const val = Number(newSettings.maxPhotosPerListing);
+      if (typeof newSettings.maxPhotosPerListing === 'boolean' || !Number.isInteger(val) || val < 1 || val > 20) {
+        throw validationErr('Max photos per listing must be an integer between 1 and 20');
+      }
+      validated.maxPhotosPerListing = val;
     }
 
-    if (newSettings.autoApproveVerifiedUsers !== undefined) validated.autoApproveVerifiedUsers = Boolean(newSettings.autoApproveVerifiedUsers);
-    if (newSettings.maintenanceMode !== undefined) validated.maintenanceMode = Boolean(newSettings.maintenanceMode);
-    if (newSettings.watermarkImages !== undefined) validated.watermarkImages = Boolean(newSettings.watermarkImages);
-    if (newSettings.aiSpamFilterEnabled !== undefined) validated.aiSpamFilterEnabled = Boolean(newSettings.aiSpamFilterEnabled);
-    if (newSettings.otpLoginEnabled !== undefined) validated.otpLoginEnabled = Boolean(newSettings.otpLoginEnabled);
+    const booleanKeys: Array<keyof SystemSettings> = [
+      'autoApproveVerifiedUsers',
+      'maintenanceMode',
+      'watermarkImages',
+      'aiSpamFilterEnabled',
+      'otpLoginEnabled',
+    ];
+    for (const key of booleanKeys) {
+      if (newSettings[key] !== undefined) {
+        if (typeof newSettings[key] !== 'boolean') {
+          throw validationErr(`Setting '${String(key)}' must be a boolean`);
+        }
+        (validated as any)[key] = newSettings[key];
+      }
+    }
+
     if (newSettings.defaultCurrency !== undefined) {
-      validated.defaultCurrency = String(newSettings.defaultCurrency).trim().toUpperCase();
+      if (typeof newSettings.defaultCurrency !== 'string' || !/^[A-Za-z]{3,10}$/.test(newSettings.defaultCurrency.trim())) {
+        throw validationErr('Default currency must be a valid 3-10 letter currency code');
+      }
+      validated.defaultCurrency = newSettings.defaultCurrency.trim().toUpperCase();
     }
+
     if (newSettings.currencySymbol !== undefined) {
-      validated.currencySymbol = String(newSettings.currencySymbol).trim();
+      if (typeof newSettings.currencySymbol !== 'string' || !newSettings.currencySymbol.trim() || newSettings.currencySymbol.trim().length > 10) {
+        throw validationErr('Currency symbol must be a non-empty string (max 10 characters)');
+      }
+      validated.currencySymbol = newSettings.currencySymbol.trim();
     }
+
     if (newSettings.timezone !== undefined) {
-      validated.timezone = String(newSettings.timezone).trim();
+      if (typeof newSettings.timezone !== 'string' || !newSettings.timezone.trim() || newSettings.timezone.trim().length > 64) {
+        throw validationErr('Timezone must be a non-empty string');
+      }
+      validated.timezone = newSettings.timezone.trim();
     }
+
     if (newSettings.dateFormat !== undefined) {
-      validated.dateFormat = String(newSettings.dateFormat).trim();
+      if (typeof newSettings.dateFormat !== 'string' || !newSettings.dateFormat.trim() || newSettings.dateFormat.trim().length > 32) {
+        throw validationErr('Date format must be a non-empty string');
+      }
+      validated.dateFormat = newSettings.dateFormat.trim();
+    }
+
+    if (newSettings.paidFeatures !== undefined) {
+      if (!newSettings.paidFeatures || typeof newSettings.paidFeatures !== 'object' || Array.isArray(newSettings.paidFeatures)) {
+        throw validationErr('paidFeatures must be a valid configuration object');
+      }
+      const { DEFAULT_PAID_FEATURES_CONFIG } = await import('@/lib/data/initialData');
+      const currentSettings = await adminRepository.getSystemSettingsDirect();
+      const basePaid = { ...DEFAULT_PAID_FEATURES_CONFIG, ...(currentSettings.paidFeatures || {}) };
+      const pf = newSettings.paidFeatures as Record<string, any>;
+
+      const pfBooleanKeys = [
+        'masterMonetizationEnabled',
+        'freemiumQuotaEnabled',
+        'paidSubcategoriesEnabled',
+        'featuredAdEnabled',
+      ] as const;
+      for (const k of pfBooleanKeys) {
+        if (pf[k] !== undefined) {
+          if (typeof pf[k] !== 'boolean') {
+            throw validationErr(`paidFeatures.${k} must be a boolean`);
+          }
+          basePaid[k] = pf[k];
+        }
+      }
+
+      if (pf.freeListingsLimit !== undefined) {
+        const v = Number(pf.freeListingsLimit);
+        if (typeof pf.freeListingsLimit === 'boolean' || !Number.isInteger(v) || v < 0 || v > 10000) {
+          throw validationErr('paidFeatures.freeListingsLimit must be a non-negative integer');
+        }
+        basePaid.freeListingsLimit = v;
+        if (validated.freeListingsLimit === undefined) {
+          validated.freeListingsLimit = v;
+        }
+      }
+
+      if (pf.extraListingFee !== undefined) {
+        const v = Number(pf.extraListingFee);
+        if (typeof pf.extraListingFee === 'boolean' || isNaN(v) || !isFinite(v) || v < 0 || v > 1000000) {
+          throw validationErr('paidFeatures.extraListingFee must be a non-negative number');
+        }
+        basePaid.extraListingFee = Number(v.toFixed(2));
+        if (validated.extraListingFee === undefined) {
+          validated.extraListingFee = Number(v.toFixed(2));
+        }
+      }
+
+      if (pf.defaultSubcategoryFee !== undefined) {
+        const v = Number(pf.defaultSubcategoryFee);
+        if (typeof pf.defaultSubcategoryFee === 'boolean' || isNaN(v) || !isFinite(v) || v < 0 || v > 1000000) {
+          throw validationErr('paidFeatures.defaultSubcategoryFee must be a non-negative number');
+        }
+        basePaid.defaultSubcategoryFee = Number(v.toFixed(2));
+      }
+
+      if (pf.featuredAdPrice !== undefined) {
+        const v = Number(pf.featuredAdPrice);
+        if (typeof pf.featuredAdPrice === 'boolean' || isNaN(v) || !isFinite(v) || v < 0 || v > 1000000) {
+          throw validationErr('paidFeatures.featuredAdPrice must be a non-negative number');
+        }
+        basePaid.featuredAdPrice = Number(v.toFixed(2));
+      }
+
+      if (pf.featuredAdDurationDays !== undefined) {
+        const v = Number(pf.featuredAdDurationDays);
+        if (typeof pf.featuredAdDurationDays === 'boolean' || !Number.isInteger(v) || v < 1 || v > 365) {
+          throw validationErr('paidFeatures.featuredAdDurationDays must be an integer between 1 and 365');
+        }
+        basePaid.featuredAdDurationDays = v;
+      }
+
+      validated.paidFeatures = basePaid;
+    } else if (validated.freeListingsLimit !== undefined || validated.extraListingFee !== undefined) {
+      const { DEFAULT_PAID_FEATURES_CONFIG } = await import('@/lib/data/initialData');
+      const currentSettings = await adminRepository.getSystemSettingsDirect();
+      validated.paidFeatures = {
+        ...DEFAULT_PAID_FEATURES_CONFIG,
+        ...(currentSettings.paidFeatures || {}),
+        ...(validated.freeListingsLimit !== undefined ? { freeListingsLimit: validated.freeListingsLimit } : {}),
+        ...(validated.extraListingFee !== undefined ? { extraListingFee: validated.extraListingFee } : {}),
+      };
     }
 
     if (Object.keys(validated).length === 0) {

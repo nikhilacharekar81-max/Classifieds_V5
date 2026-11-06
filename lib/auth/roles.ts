@@ -81,6 +81,10 @@ export function hasPermission(role: string | null | undefined, permission: keyof
   return ROLE_PERMISSIONS[role as AdminRole][permission];
 }
 
+export function canAccessAdmin(role: string | null | undefined): boolean {
+  return hasPermission(role, 'canAccessAdmin');
+}
+
 export function getRoleLabel(role: string | null | undefined): string {
   switch (role) {
     case 'super_admin': return 'Super Admin';

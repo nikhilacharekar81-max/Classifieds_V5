@@ -332,7 +332,7 @@ CREATE TABLE "users" (
 	"status" varchar(32) DEFAULT 'active' NOT NULL,
 	"ban_reason" text,
 	"kyc_status" varchar(32) DEFAULT 'unsubmitted' NOT NULL,
-	"email_subscribed" boolean DEFAULT true NOT NULL,
+	"email_subscribed" boolean DEFAULT false NOT NULL,
 	"email_unsubscribed_at" timestamp with time zone,
 	"city" varchar(128) DEFAULT 'Mumbai' NOT NULL,
 	"state" varchar(128) DEFAULT 'Maharashtra' NOT NULL,

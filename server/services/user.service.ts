@@ -1,11 +1,14 @@
 import { userRepository } from '@/server/repositories/user.repository';
 import { favoriteRepository } from '@/server/repositories/favorite.repository';
 import { adminRepository } from '@/server/repositories/admin.repository';
-import { UserAccount, KycStatus } from '@/lib/types';
+import { UserAccount } from '@/lib/types';
 
 export class UserService {
-  public async getUsers(filter: string = 'all'): Promise<UserAccount[]> {
-    const all = await userRepository.findAllForAdmin();
+  public async getUsers(
+    filter: string = 'all',
+    options?: { includeKycDocuments?: boolean; limit?: number; offset?: number }
+  ): Promise<UserAccount[]> {
+    const all = await userRepository.findAllForAdmin(options);
     if (filter === 'regular' || filter === 'users') {
       return all.filter((u) => u.type === 'user');
     }
@@ -25,23 +28,38 @@ export class UserService {
     return await userRepository.findById(id);
   }
 
+  public async getUserForAdmin(id: string, includeKycDocument: boolean = false): Promise<UserAccount | null> {
+    return await userRepository.findByIdForAdmin(id, includeKycDocument);
+  }
+
   public async updateUser(
     id: string, 
-    updatedData: Partial<UserAccount & { adminRole?: string | null }>,
+    updatedData: Partial<UserAccount & { adminRole?: string | null; avatarUrl?: string; city?: string; state?: string }>,
     actor?: { id: string; name: string; ipAddress?: string }
   ): Promise<UserAccount | null> {
     const fields: any = {};
+    const anyData = updatedData as any;
+
     if (updatedData.name !== undefined) fields.name = updatedData.name;
     if (updatedData.email !== undefined) fields.email = updatedData.email;
     if (updatedData.phone !== undefined) fields.phone = updatedData.phone;
     if (updatedData.status !== undefined) fields.status = updatedData.status;
     if (updatedData.type !== undefined) fields.type = updatedData.type;
+    if (updatedData.kycStatus !== undefined) fields.kycStatus = updatedData.kycStatus;
     if (updatedData.adminRole !== undefined) fields.adminRole = updatedData.adminRole;
-    if (updatedData.emailSubscribed !== undefined) fields.emailSubscribed = updatedData.emailSubscribed;
+    if (updatedData.emailSubscribed !== undefined) {
+      fields.emailSubscribed = updatedData.emailSubscribed;
+      if (!updatedData.emailSubscribed) {
+        fields.emailUnsubscribedAt = new Date();
+      } else {
+        fields.emailUnsubscribedAt = null;
+      }
+    }
     if (updatedData.emailVerified !== undefined) fields.emailVerified = updatedData.emailVerified;
     if (updatedData.emailVerifiedAt !== undefined) fields.emailVerifiedAt = updatedData.emailVerifiedAt;
-    
-    const anyData = updatedData as any;
+    if (anyData.avatarUrl !== undefined) fields.avatarUrl = anyData.avatarUrl;
+    else if (updatedData.avatar !== undefined) fields.avatarUrl = updatedData.avatar;
+
     if (updatedData.businessDetails?.companyName !== undefined || anyData.businessName !== undefined) {
       fields.businessName = updatedData.businessDetails?.companyName ?? anyData.businessName;
     }
@@ -51,9 +69,17 @@ export class UserService {
     if (updatedData.businessDetails?.verifiedBusiness !== undefined || anyData.verifiedBusiness !== undefined) {
       fields.verifiedBusiness = updatedData.businessDetails?.verifiedBusiness ?? anyData.verifiedBusiness;
     }
-    if (updatedData.location) {
-      if (updatedData.location.city) fields.city = updatedData.location.city;
-      if (updatedData.location.state) fields.state = updatedData.location.state;
+
+    if (anyData.city !== undefined) {
+      fields.city = anyData.city;
+    } else if (updatedData.location?.city !== undefined) {
+      fields.city = updatedData.location.city;
+    }
+
+    if (anyData.state !== undefined) {
+      fields.state = anyData.state;
+    } else if (updatedData.location?.state !== undefined) {
+      fields.state = updatedData.location.state;
     }
 
     const updated = await userRepository.update(id, fields);
@@ -115,7 +141,7 @@ export class UserService {
     const user = await userRepository.findById(userId);
     if (!user) return false;
 
-    await userRepository.update(userId, { status: 'active' });
+    await userRepository.update(userId, { status: 'active', banReason: null });
 
     await adminRepository.createAuditLog({
       adminId: actor?.id || 'system',
@@ -140,7 +166,7 @@ export class UserService {
     const user = await userRepository.findById(userId);
     if (!user) return false;
 
-    await userRepository.updateKycStatus(userId, status, notes);
+    await userRepository.updateKycStatus(userId, status, notes, actor?.id);
 
     await adminRepository.createAuditLog({
       adminId: actor?.id || 'system',

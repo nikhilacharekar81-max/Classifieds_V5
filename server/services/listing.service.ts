@@ -356,7 +356,7 @@ export class ListingService {
       return { success: false, error: 'Seller authentication required', status: 401 };
     }
 
-    // Validate category existence
+    // Validate category existence and active status
     if (!data.categoryId || typeof data.categoryId !== 'string' || !data.categoryId.trim()) {
       return { success: false, error: 'Category ID is required', status: 400 };
     }
@@ -365,15 +365,26 @@ export class ListingService {
     if (!existingCategory) {
       return { success: false, error: `Category '${data.categoryId}' does not exist`, status: 400 };
     }
+    if (!existingCategory.isActive) {
+      return { success: false, error: `Category '${existingCategory.name || data.categoryId}' is inactive and cannot accept listings`, status: 400 };
+    }
 
     let cleanSubcategoryId: string | null = null;
+    let existingSubcategory: Awaited<ReturnType<typeof categoryRepository.findById>> = null;
     if (data.subcategoryId) {
       cleanSubcategoryId = String(data.subcategoryId).trim();
-      const existingSubcategory = await categoryRepository.findById(cleanSubcategoryId);
+      existingSubcategory = await categoryRepository.findById(cleanSubcategoryId);
       if (!existingSubcategory || existingSubcategory.parentId !== cleanCategoryId) {
         return {
           success: false,
           error: `Subcategory '${data.subcategoryId}' does not exist or does not belong to category '${data.categoryId}'`,
+          status: 400,
+        };
+      }
+      if (!existingSubcategory.isActive) {
+        return {
+          success: false,
+          error: `Subcategory '${existingSubcategory.name || data.subcategoryId}' is inactive and cannot accept listings`,
           status: 400,
         };
       }
@@ -440,14 +451,23 @@ export class ListingService {
     let parentCategoryFee: number | undefined = undefined;
     if (existingCategory.parentId) {
       const parentCat = await categoryRepository.findById(existingCategory.parentId);
-      if (parentCat && parentCat.postingFee !== undefined) {
+      if (parentCat && parentCat.postingFee !== undefined && parentCat.postingFee !== null) {
         parentCategoryFee = Number(parentCat.postingFee);
       }
     }
-    
-    // Priority: Category quota -> System default. Use ?? to treat 0 as free.
-    const quotaLimit = existingCategory.freeListingsQuota ?? settings.freeListingsLimit ?? 3;
-    const rawPostingFee = existingCategory.postingFee ?? parentCategoryFee ?? settings.extraListingFee ?? 0;
+
+    // Priority: Subcategory -> Category -> Parent Category -> System default. Use ?? to preserve 0 as free.
+    const quotaLimit =
+      existingSubcategory?.freeListingsQuota ??
+      existingCategory.freeListingsQuota ??
+      settings.freeListingsLimit ??
+      3;
+    const rawPostingFee =
+      existingSubcategory?.postingFee ??
+      existingCategory.postingFee ??
+      parentCategoryFee ??
+      settings.extraListingFee ??
+      0;
     const postingFee = Math.max(0, Number(rawPostingFee) || 0);
 
     const paidCfg = settings.paidFeatures as any;
@@ -826,11 +846,12 @@ export class ListingService {
         return { success: false, error: 'Category ID cannot be empty', status: 400 };
       }
       const cleanCategoryId = updatedData.categoryId.trim();
-      if (cleanCategoryId !== existing.categoryId) {
-        const cat = await categoryRepository.findById(cleanCategoryId);
-        if (!cat) {
-          return { success: false, error: `Category '${updatedData.categoryId}' does not exist`, status: 400 };
-        }
+      const cat = await categoryRepository.findById(cleanCategoryId);
+      if (!cat) {
+        return { success: false, error: `Category '${updatedData.categoryId}' does not exist`, status: 400 };
+      }
+      if (!cat.isActive) {
+        return { success: false, error: `Category '${cat.name || updatedData.categoryId}' is inactive and cannot accept listings`, status: 400 };
       }
       safeFields.categoryId = cleanCategoryId;
     }
@@ -842,15 +863,20 @@ export class ListingService {
         safeFields.subcategoryId = null;
       } else {
         const cleanSubcategoryId = String(updatedData.subcategoryId).trim();
-        if (cleanSubcategoryId !== existing.subcategoryId || safeFields.categoryId !== undefined) {
-          const sub = await categoryRepository.findById(cleanSubcategoryId);
-          if (!sub || sub.parentId !== effectiveCategoryId) {
-            return {
-              success: false,
-              error: `Subcategory '${updatedData.subcategoryId}' does not exist or does not belong to category '${effectiveCategoryId}'`,
-              status: 400,
-            };
-          }
+        const sub = await categoryRepository.findById(cleanSubcategoryId);
+        if (!sub || sub.parentId !== effectiveCategoryId) {
+          return {
+            success: false,
+            error: `Subcategory '${updatedData.subcategoryId}' does not exist or does not belong to category '${effectiveCategoryId}'`,
+            status: 400,
+          };
+        }
+        if (!sub.isActive) {
+          return {
+            success: false,
+            error: `Subcategory '${sub.name || updatedData.subcategoryId}' is inactive and cannot accept listings`,
+            status: 400,
+          };
         }
         safeFields.subcategoryId = cleanSubcategoryId;
       }

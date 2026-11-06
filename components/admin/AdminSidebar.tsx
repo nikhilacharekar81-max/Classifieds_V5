@@ -2,6 +2,8 @@
 import React, { useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { useRouter } from '@/lib/router/useRouter';
+import { hasPermission } from '@/lib/auth/roles';
+import { getAdminRouteAccessRule } from '@/components/admin/AdminWorkspaceRouter';
 import {
   LayoutDashboard,
   Store,
@@ -59,6 +61,7 @@ export const AdminSidebar: React.FC = () => {
     reports,
     mobileSidebarOpen,
     setMobileSidebarOpen,
+    currentAdmin,
   } = useApp();
   const { navigateTo } = useRouter();
 
@@ -86,7 +89,16 @@ export const AdminSidebar: React.FC = () => {
     setExpandedSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const menuSections = [
+  const canViewTab = (tab: string): boolean => {
+    if (!currentAdmin) return false;
+    const isActualAdmin = currentAdmin.role === 'admin' || currentAdmin.role === 'super_admin';
+    const rule = getAdminRouteAccessRule(`/admin/${tab}`, tab);
+    if (rule.requireActualAdmin) return isActualAdmin;
+    if (rule.requiredPermission) return hasPermission(currentAdmin.role, rule.requiredPermission);
+    return true;
+  };
+
+  const rawMenuSections = [
     {
       id: 'dashboard',
       label: 'Dashboard',
@@ -263,6 +275,17 @@ export const AdminSidebar: React.FC = () => {
       ],
     },
   ];
+
+  const menuSections = rawMenuSections
+    .map((section) => {
+      if (section.isDirect) {
+        return canViewTab(section.tab!) ? section : null;
+      }
+      const allowedChildren = (section.children || []).filter((child) => canViewTab(child.tab));
+      if (allowedChildren.length === 0) return null;
+      return { ...section, children: allowedChildren };
+    })
+    .filter((section): section is NonNullable<typeof section> => section !== null);
 
   return (
     <>

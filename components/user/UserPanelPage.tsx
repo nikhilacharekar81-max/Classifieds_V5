@@ -36,6 +36,8 @@ export const UserPanelPage: React.FC = () => {
     checkDuplicateTitle,
     settings,
     currentUser: authUser,
+    currentAdmin,
+    updateAuth,
     isAuthChecking,
   } = useApp();
 
@@ -85,6 +87,47 @@ export const UserPanelPage: React.FC = () => {
     }
   }, [currentUser?.id]);
 
+  // Fetch authoritative KYC status & masked document details from server
+  React.useEffect(() => {
+    if (!currentUser?.id) return;
+    let active = true;
+    fetch('/api/user/kyc', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !data) return;
+        const serverKycStatus = data.kycStatus || currentUser.kycStatus;
+        const serverDoc = data.document
+          ? {
+              type: data.document.documentType,
+              docNumber: data.document.documentNumber,
+              submittedAt: data.document.submittedAt
+                ? String(data.document.submittedAt).split('T')[0]
+                : new Date().toISOString().split('T')[0],
+              fileUrl: data.document.fileUrl || '',
+            }
+          : currentUser.kycDocument;
+
+        if (
+          serverKycStatus !== currentUser.kycStatus ||
+          serverDoc?.docNumber !== currentUser.kycDocument?.docNumber
+        ) {
+          updateAuth(
+            {
+              ...currentUser,
+              kycStatus: serverKycStatus,
+              kycDocument: serverDoc,
+            },
+            currentAdmin,
+            currentUser.id
+          );
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [currentUser?.id]);
+
   const userEmails = React.useMemo(() => {
     if (!currentUser) return [];
     return emailLogs.filter(
@@ -116,6 +159,7 @@ export const UserPanelPage: React.FC = () => {
     expired: number;
     sold: number;
     rejected: number;
+    activeQuotaCount?: number;
   }>({
     all: 0,
     approved: 0,
@@ -190,9 +234,20 @@ export const UserPanelPage: React.FC = () => {
     : currentUser?.id
       ? listings.filter((l) => l.sellerId === currentUser.id)
       : [];
-  const activeUserApprovedListingsCount = sellerStatusCounts.approved || userListings.filter((l) => l.status === 'approved').length;
-  const freeQuotaLimit = settings.freeListingsLimit ?? 3;
-  const extraListingFeeRate = settings.extraListingFee ?? 99;
+  const nowMs = Date.now();
+  const fallbackQuotaCount = userListings.filter(
+    (l) =>
+      (l.status === 'approved' || l.status === 'pending') &&
+      (!l.expiresAt || new Date(l.expiresAt).getTime() >= nowMs)
+  ).length;
+  const activeUserApprovedListingsCount =
+    typeof sellerStatusCounts.activeQuotaCount === 'number'
+      ? sellerStatusCounts.activeQuotaCount
+      : sellerStatusCounts.approved + sellerStatusCounts.pending > 0
+      ? sellerStatusCounts.approved + sellerStatusCounts.pending
+      : fallbackQuotaCount;
+  const freeQuotaLimit = settings.paidFeatures?.freeListingsLimit ?? settings.freeListingsLimit ?? 3;
+  const extraListingFeeRate = settings.paidFeatures?.extraListingFee ?? settings.extraListingFee ?? 99;
   const isQuotaExceeded = activeUserApprovedListingsCount >= freeQuotaLimit;
   const freeQuotaSlotsRemaining = Math.max(0, freeQuotaLimit - activeUserApprovedListingsCount);
 
@@ -294,6 +349,7 @@ export const UserPanelPage: React.FC = () => {
 
   const handleKycSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUser) return;
     if (!kycDocNumber.trim()) {
       addToast({ type: 'error', title: 'KYC Document Required', message: 'Please enter a valid document number.' });
       return;
@@ -321,19 +377,22 @@ export const UserPanelPage: React.FC = () => {
       }
 
       const returnedDocUrl = data?.document?.fileUrl || kycFileData;
+      const maskedDocNumber = data?.document?.documentNumber || '****';
 
       const updated: UserAccount = {
         ...currentUser,
         kycStatus: 'pending',
         kycDocument: {
           type: kycDocType,
-          docNumber: kycDocNumber.trim(),
-          submittedAt: new Date().toISOString().split('T')[0],
+          docNumber: maskedDocNumber,
+          submittedAt: data?.document?.submittedAt
+            ? String(data.document.submittedAt).split('T')[0]
+            : new Date().toISOString().split('T')[0],
           fileUrl: returnedDocUrl,
         },
       };
 
-      updateUser(updated);
+      updateAuth(updated, currentAdmin, currentUser.id);
       setKycModalOpen(false);
       setKycDocNumber('');
       setKycFileData(null);

@@ -533,9 +533,12 @@ export class ListingRepository {
           })
           .returning();
 
-        await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS, tx);
         return inserted[0];
       });
+
+      if ((data.status || 'pending') === 'approved') {
+        await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS).catch(() => {});
+      }
 
       return this.mapRowToListing(insertedRow);
     } catch (error) {
@@ -546,25 +549,6 @@ export class ListingRepository {
 
   public async update(id: string, fields: Partial<typeof schema.listings.$inferInsert>): Promise<Listing | null> {
     try {
-      if (doesListingUpdateAffectCounts(fields)) {
-        const updatedRow = await db.transaction(async (tx) => {
-          const updated = await tx
-            .update(schema.listings)
-            .set({
-              ...fields,
-              updatedAt: new Date(),
-            })
-            .where(eq(schema.listings.id, id))
-            .returning();
-
-          if (!updated.length) return null;
-          await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS, tx);
-          return updated[0];
-        });
-
-        return updatedRow ? this.mapRowToListing(updatedRow) : null;
-      }
-
       const updated = await db
         .update(schema.listings)
         .set({
@@ -575,6 +559,9 @@ export class ListingRepository {
         .returning();
 
       if (!updated.length) return null;
+      if (doesListingUpdateAffectCounts(fields)) {
+        await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS).catch(() => {});
+      }
       return this.mapRowToListing(updated[0]);
     } catch (error) {
       console.error(`ListingRepository.update error for ${id}:`, error);
@@ -584,17 +571,15 @@ export class ListingRepository {
 
   public async delete(id: string): Promise<boolean> {
     try {
-      return await db.transaction(async (tx) => {
-        const res = await tx
-          .delete(schema.listings)
-          .where(eq(schema.listings.id, id))
-          .returning({ id: schema.listings.id });
+      const res = await db
+        .delete(schema.listings)
+        .where(eq(schema.listings.id, id))
+        .returning({ id: schema.listings.id });
 
-        if (res.length > 0) {
-          await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS, tx);
-        }
-        return res.length > 0;
-      });
+      if (res.length > 0) {
+        await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS).catch(() => {});
+      }
+      return res.length > 0;
     } catch (error) {
       console.error(`ListingRepository.delete error for ${id}:`, error);
       throw new Error(`Failed to delete listing ${id}`, { cause: error });
@@ -615,22 +600,20 @@ export class ListingRepository {
 
   public async bulkUpdateStatus(ids: string[], status: string, rejectionReason?: string): Promise<{ updatedCount: number }> {
     try {
-      return await db.transaction(async (tx) => {
-        const res = await tx
-          .update(schema.listings)
-          .set({
-            status,
-            rejectionReason: rejectionReason || null,
-            updatedAt: new Date(),
-          })
-          .where(inArray(schema.listings.id, ids))
-          .returning({ id: schema.listings.id });
+      const res = await db
+        .update(schema.listings)
+        .set({
+          status,
+          rejectionReason: rejectionReason || null,
+          updatedAt: new Date(),
+        })
+        .where(inArray(schema.listings.id, ids))
+        .returning({ id: schema.listings.id });
 
-        if (res.length > 0) {
-          await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS, tx);
-        }
-        return { updatedCount: res.length };
-      });
+      if (res.length > 0) {
+        await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS).catch(() => {});
+      }
+      return { updatedCount: res.length };
     } catch (error) {
       console.error('ListingRepository.bulkUpdateStatus error:', error);
       throw new Error('Bulk update failed in PostgreSQL', { cause: error });
@@ -639,17 +622,15 @@ export class ListingRepository {
 
   public async bulkDelete(ids: string[]): Promise<{ deletedCount: number }> {
     try {
-      return await db.transaction(async (tx) => {
-        const res = await tx
-          .delete(schema.listings)
-          .where(inArray(schema.listings.id, ids))
-          .returning({ id: schema.listings.id });
+      const res = await db
+        .delete(schema.listings)
+        .where(inArray(schema.listings.id, ids))
+        .returning({ id: schema.listings.id });
 
-        if (res.length > 0) {
-          await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS, tx);
-        }
-        return { deletedCount: res.length };
-      });
+      if (res.length > 0) {
+        await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS).catch(() => {});
+      }
+      return { deletedCount: res.length };
     } catch (error) {
       console.error('ListingRepository.bulkDelete error:', error);
       throw new Error('Bulk delete failed in PostgreSQL', { cause: error });
@@ -663,6 +644,7 @@ export class ListingRepository {
     expired: number;
     sold: number;
     rejected: number;
+    activeQuotaCount: number;
   }> {
     const counts = {
       all: 0,
@@ -671,26 +653,44 @@ export class ListingRepository {
       expired: 0,
       sold: 0,
       rejected: 0,
+      activeQuotaCount: 0,
     };
     try {
-      const rows = await withDbRetry(() =>
-        db
-          .select({
-            status: schema.listings.status,
-            count: sql<number>`count(*)::int`,
-          })
-          .from(schema.listings)
-          .where(eq(schema.listings.sellerId, sellerId))
-          .groupBy(schema.listings.status)
-      );
+      const [rows, activeQuotaRes] = await Promise.all([
+        withDbRetry(() =>
+          db
+            .select({
+              status: schema.listings.status,
+              count: sql<number>`count(*)::int`,
+            })
+            .from(schema.listings)
+            .where(eq(schema.listings.sellerId, sellerId))
+            .groupBy(schema.listings.status)
+        ),
+        withDbRetry(() =>
+          db
+            .select({
+              count: sql<number>`count(*)::int`,
+            })
+            .from(schema.listings)
+            .where(
+              and(
+                eq(schema.listings.sellerId, sellerId),
+                inArray(schema.listings.status, ['approved', 'pending']),
+                sql`${schema.listings.expiresAt} >= NOW()`
+              )
+            )
+        ),
+      ]);
 
       for (const row of rows) {
         const c = Number(row.count) || 0;
-        if (row.status in counts && row.status !== 'all') {
+        if (row.status in counts && row.status !== 'all' && row.status !== 'activeQuotaCount') {
           counts[row.status as keyof typeof counts] = c;
         }
         counts.all += c;
       }
+      counts.activeQuotaCount = Number(activeQuotaRes[0]?.count || 0);
       return counts;
     } catch (error) {
       console.error('ListingRepository.getSellerStatusCounts error:', error);
@@ -724,9 +724,6 @@ export class ListingRepository {
           ))
           .returning({ id: schema.listings.id });
 
-        if (res.length > 0) {
-          await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS, tx);
-        }
         return { renewedCount: res.length };
       });
     } catch (error) {
@@ -835,7 +832,6 @@ export class ListingRepository {
         })
         .returning();
 
-      await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS, tx);
       return this.mapRowToListing(inserted[0]);
     };
 
@@ -850,7 +846,7 @@ export class ListingRepository {
     fields: Partial<typeof schema.listings.$inferInsert>,
     sellerId: string
   ): Promise<Listing | null> {
-    return await db.transaction(async (tx) => {
+    const updatedRow = await db.transaction(async (tx) => {
       await tx.execute(
         sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW()`
       );
@@ -880,12 +876,14 @@ export class ListingRepository {
         .returning();
 
       if (!updated.length) return null;
-
-      if (doesListingUpdateAffectCounts(fields)) {
-        await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS, tx);
-      }
-      return this.mapRowToListing(updated[0]);
+      return updated[0];
     });
+
+    if (!updatedRow) return null;
+    if (doesListingUpdateAffectCounts(fields)) {
+      await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS).catch(() => {});
+    }
+    return this.mapRowToListing(updatedRow);
   }
 }
 

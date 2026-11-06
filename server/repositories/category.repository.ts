@@ -1,6 +1,6 @@
 import { db, withDbRetry } from '@/src/db/index';
 import * as schema from '@/src/db/schema';
-import { eq, asc, and, gte, ilike, sql } from '@/src/db/pg-orm';
+import { eq, asc, and, or, inArray, gte, ilike, sql } from '@/src/db/pg-orm';
 import { Category, CustomFieldDefinition } from '@/lib/types';
 import { ensureDatabaseSeeded, isDatabaseInitialized } from '@/server/seed-postgres';
 import { getCategoriesWithLiveCounts } from '@/server/cache/reference-data.cache';
@@ -226,14 +226,18 @@ export class CategoryRepository {
     try {
       const hasListings = await this.checkHasAnyListings(id);
       if (hasListings) {
-        throw new Error('Cannot delete category because it or its subcategories still contain listings');
+        const conflictErr: any = new Error('Cannot delete category because it or its subcategories still contain listings');
+        conflictErr.code = 'CATEGORY_HAS_LISTINGS';
+        throw conflictErr;
       }
 
       const res = await db.delete(schema.categories).where(eq(schema.categories.id, id)).returning({ id: schema.categories.id });
       return res.length > 0;
     } catch (error: any) {
       console.error(`CategoryRepository.delete error for ${id}:`, error);
-      throw new Error(error.message || `Failed to delete category ${id}`, { cause: error });
+      const wrapped: any = new Error(error.message || `Failed to delete category ${id}`, { cause: error });
+      if (error.code) wrapped.code = error.code;
+      throw wrapped;
     }
   }
 

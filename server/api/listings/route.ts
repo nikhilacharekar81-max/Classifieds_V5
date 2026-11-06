@@ -177,6 +177,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const rawCustomAttrs =
+      body.customAttributes && typeof body.customAttributes === 'object' ? { ...body.customAttributes } : {};
+    const sellerRequestedFeatured =
+      !isActualAdmin &&
+      Boolean(body.requestedFeatured || body.isFeatured || body.isBoosted || rawCustomAttrs.requestedFeatured);
+    if (sellerRequestedFeatured) {
+      rawCustomAttrs.requestedFeatured = true;
+    }
+
     // Strip sensitive fields that sellers cannot assign to themselves
     const safePayload: any = {
       title: body.title.trim(),
@@ -190,7 +199,7 @@ export async function POST(req: NextRequest) {
         locality: body.locality ? String(body.locality).trim() : '',
       },
       images: body.images,
-      customAttributes: body.customAttributes && typeof body.customAttributes === 'object' ? body.customAttributes : {},
+      customAttributes: rawCustomAttrs,
       sellerName: authContext.user.name,
       sellerPhone: sellerAccountPhone,
       sellerId: authContext.userId, // Derived strictly from verified session

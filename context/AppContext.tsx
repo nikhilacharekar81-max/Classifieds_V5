@@ -399,13 +399,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
     refreshData();
   }, [initialServerData]);
 
-  const switchAdminRole = (role: Role) => {
+  const switchAdminRole = (_role: Role) => {
     if (!currentAdmin) return;
-    setCurrentAdmin({ ...currentAdmin, role });
     addToast({
-      type: 'info',
-      title: `Role Switched to ${role}`,
-      message: 'UI updated. Server-side permissions are still enforced based on your session.',
+      type: 'warning',
+      title: 'Server Role Enforced',
+      message: `Administrative permissions are strictly bound to your authenticated server role (${currentAdmin.role}).`,
     });
   };
 
@@ -520,6 +519,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
     users,
     setUsers,
     currentUser,
+    setAuthUser,
     setListings,
     setReports,
     rules,

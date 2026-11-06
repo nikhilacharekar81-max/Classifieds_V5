@@ -1,7 +1,8 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
 import { PaidFeaturesConfig, Category } from '@/lib/types';
+import { DEFAULT_PAID_FEATURES_CONFIG } from '@/lib/data/initialData';
 import {
   Sparkles,
   Coins,
@@ -38,29 +39,24 @@ export const PaidFeaturesModule: React.FC = () => {
   } = useApp();
 
   const defaultPaidFeatures: PaidFeaturesConfig = {
-    masterMonetizationEnabled: true,
-    freemiumQuotaEnabled: true,
-    freeListingsLimit: settings.freeListingsLimit || 3,
-    extraListingFee: settings.extraListingFee || 99,
-    paidSubcategoriesEnabled: true,
-    defaultSubcategoryFee: 149,
-    featuredAdEnabled: true,
-    featuredAdPrice: 100,
-    featuredAdDurationDays: 30,
-    adBoostEnabled: true,
-    quickBoostPrice: 49,
-    spotlightBoostPrice: 199,
-    premiumSurgeBoostPrice: 499,
-    displayAdsEnabled: true,
-    headerBannerEnabled: true,
-    inFeedBannerEnabled: true,
-    sidebarBannerEnabled: true,
-    bannerDailyRate: 299,
+    ...DEFAULT_PAID_FEATURES_CONFIG,
+    freeListingsLimit: settings.freeListingsLimit ?? DEFAULT_PAID_FEATURES_CONFIG.freeListingsLimit,
+    extraListingFee: settings.extraListingFee ?? DEFAULT_PAID_FEATURES_CONFIG.extraListingFee,
   };
 
   const [form, setForm] = useState<PaidFeaturesConfig>(
     settings.paidFeatures ? { ...defaultPaidFeatures, ...settings.paidFeatures } : defaultPaidFeatures
   );
+
+  useEffect(() => {
+    if (settings.paidFeatures) {
+      setForm((prev) => ({
+        ...prev,
+        ...defaultPaidFeatures,
+        ...settings.paidFeatures,
+      }));
+    }
+  }, [settings.paidFeatures, settings.freeListingsLimit, settings.extraListingFee]);
 
   const [categorySearch, setCategorySearch] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'quotas' | 'categories' | 'featured' | 'boosts' | 'banners'>('all');

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { adminService } from '@/server/services/admin.service';
+import { getAuthenticatedUser } from '@/lib/auth/session';
+import { hasPermission } from '@/lib/auth/roles';
 
 export async function PUT(
   req: NextRequest,
@@ -7,9 +9,12 @@ export async function PUT(
 ) {
   const { id } = await params;
   try {
-    const authContext = req.auth;
+    const authContext = req.auth || await getAuthenticatedUser(req);
     if (!authContext) {
       return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
+    }
+    if (!hasPermission(authContext.adminRole, 'canManageCategories')) {
+      return NextResponse.json({ error: 'Forbidden: Category management permission required' }, { status: 403 });
     }
 
     const body = await req.json();
@@ -27,15 +32,20 @@ export async function PUT(
     if (body.freeListingsQuota !== undefined) updateData.freeListingsQuota = body.freeListingsQuota;
 
     const updated = await adminService.updateCategory(
-      id, 
+      id,
       updateData,
       { id: authContext.userId, name: authContext.user.name, ipAddress: authContext.ipAddress }
     );
 
+    if (!updated) {
+      return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+    }
+
     return NextResponse.json(updated);
   } catch (error: any) {
     console.error(`API /api/admin/categories/${id} PUT error:`, error);
-    return NextResponse.json({ error: error.message || 'Failed to update category' }, { status: 500 });
+    const status = String(error?.message || '').includes('cycle') ? 400 : 500;
+    return NextResponse.json({ error: error.message || 'Failed to update category' }, { status });
   }
 }
 
@@ -45,9 +55,12 @@ export async function DELETE(
 ) {
   const { id } = await params;
   try {
-    const authContext = req.auth;
+    const authContext = req.auth || await getAuthenticatedUser(req);
     if (!authContext) {
       return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
+    }
+    if (!hasPermission(authContext.adminRole, 'canManageCategories')) {
+      return NextResponse.json({ error: 'Forbidden: Category management permission required' }, { status: 403 });
     }
 
     const success = await adminService.deleteCategory(
@@ -55,9 +68,21 @@ export async function DELETE(
       { id: authContext.userId, name: authContext.user.name, ipAddress: authContext.ipAddress }
     );
 
+    if (!success) {
+      return NextResponse.json({ error: 'Category not found' }, { status: 404 });
+    }
+
     return NextResponse.json({ success: true, message: 'Category deleted' });
   } catch (error: any) {
     console.error(`API /api/admin/categories/${id} DELETE error:`, error);
-    return NextResponse.json({ error: error.message || 'Failed to delete category' }, { status: 500 });
+    const isConflict =
+      error?.code === 'CATEGORY_HAS_LISTINGS' ||
+      error?.code === '23503' ||
+      error?.cause?.code === '23503' ||
+      String(error?.message || '').includes('still contain listings');
+    return NextResponse.json(
+      { error: error.message || 'Failed to delete category' },
+      { status: isConflict ? 409 : 500 }
+    );
   }
 }

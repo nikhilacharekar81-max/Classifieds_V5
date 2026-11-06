@@ -65,7 +65,7 @@ const MIGRATIONS: Record<string, string> = {
     );
   `,
   '005_posting_orders': `
-    CREATE TABLE IF NOT EXISTS "posting_orders" (
+      CREATE TABLE IF NOT EXISTS "posting_orders" (
         "order_id" varchar(64) PRIMARY KEY NOT NULL,
         "user_id" varchar(64) NOT NULL REFERENCES "users"("id"),
         "category_id" varchar(64) NOT NULL,
@@ -75,6 +75,9 @@ const MIGRATIONS: Record<string, string> = {
         "status" varchar(32) DEFAULT 'pending' NOT NULL,
         "created_at" timestamp with time zone DEFAULT now() NOT NULL
     );
+  `,
+  '006_email_opt_in_default': `
+    ALTER TABLE "users" ALTER COLUMN "email_subscribed" SET DEFAULT false;
   `,
 };
 
@@ -245,6 +248,15 @@ export const createPool = (): Pool => {
       return global._postgresPool;
     }
 
+    const isSslEnabled =
+      process.env.SQL_SSL === 'true' ||
+      process.env.SQL_SSL === '1' ||
+      process.env.PGSSLMODE === 'require';
+    const statementTimeoutMs = Math.max(
+      1000,
+      parseInt(process.env.SQL_STATEMENT_TIMEOUT_MS || '30000', 10) || 30000
+    );
+
     global._postgresPool = new Pool({
       host: process.env.SQL_HOST,
       user: process.env.SQL_USER || process.env.SQL_ADMIN_USER,
@@ -252,6 +264,11 @@ export const createPool = (): Pool => {
       database: process.env.SQL_DB_NAME,
       max: 10,
       connectionTimeoutMillis: 15000,
+      statement_timeout: statementTimeoutMs,
+      query_timeout: statementTimeoutMs,
+      ssl: isSslEnabled
+        ? { rejectUnauthorized: process.env.SQL_SSL_REJECT_UNAUTHORIZED !== 'false' }
+        : undefined,
     });
 
     global._postgresPool.on('error', (err) => {
@@ -320,6 +337,15 @@ export async function ensurePgSchemaApplied(): Promise<void> {
       return;
     }
 
+    const isSslEnabled =
+      process.env.SQL_SSL === 'true' ||
+      process.env.SQL_SSL === '1' ||
+      process.env.PGSSLMODE === 'require';
+    const statementTimeoutMs = Math.max(
+      1000,
+      parseInt(process.env.SQL_STATEMENT_TIMEOUT_MS || '30000', 10) || 30000
+    );
+
     const adminPool = new Pool({
       host: process.env.SQL_HOST,
       user: adminUser,
@@ -327,6 +353,11 @@ export async function ensurePgSchemaApplied(): Promise<void> {
       database: process.env.SQL_DB_NAME,
       max: 2,
       connectionTimeoutMillis: 15000,
+      statement_timeout: statementTimeoutMs,
+      query_timeout: statementTimeoutMs,
+      ssl: isSslEnabled
+        ? { rejectUnauthorized: process.env.SQL_SSL_REJECT_UNAUTHORIZED !== 'false' }
+        : undefined,
     });
 
     try {

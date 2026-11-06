@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { moderationService } from '@/server/services/moderation.service';
+import { getAuthenticatedUser } from '@/lib/auth/session';
+import { hasPermission } from '@/lib/auth/roles';
 
 export async function GET(req: NextRequest) {
   try {
-    const authContext = req.auth;
+    const authContext = req.auth || (await getAuthenticatedUser(req));
     if (!authContext) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (!hasPermission(authContext.adminRole, 'canModerateListings')) {
+      return NextResponse.json({ error: 'Forbidden: Insufficient role permissions' }, { status: 403 });
     }
 
     const { searchParams } = new URL(req.url);
@@ -23,9 +28,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const authContext = req.auth;
+    const authContext = req.auth || (await getAuthenticatedUser(req));
     if (!authContext) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (!hasPermission(authContext.adminRole, 'canModerateListings')) {
+      return NextResponse.json({ error: 'Forbidden: Insufficient role permissions' }, { status: 403 });
     }
 
     const { action, reportId, note, actionType, targetListingId, ruleData, appealId, decision, reviewNotes, unbanUser } = await req.json();

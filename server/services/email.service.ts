@@ -150,11 +150,17 @@ export class EmailService {
     return await emailRepository.findAllCampaigns();
   }
 
-  public async filterAudienceUsers(filter: NewsletterAudienceFilter | string, customState?: string, customCity?: string): Promise<UserAccount[]> {
+  public async filterAudienceUsers(
+    filter: NewsletterAudienceFilter | string,
+    customState?: string,
+    customCity?: string,
+    limit = 500,
+    offset = 0
+  ): Promise<UserAccount[]> {
     const target = typeof filter === 'string' ? filter : filter.target;
     const city = customCity || (typeof filter !== 'string' ? filter.city : undefined);
     const state = customState || (typeof filter !== 'string' ? filter.state : undefined);
-    return await emailRepository.findAudienceUsers(target, state, city);
+    return await emailRepository.findAudienceUsers(target, state, city, limit, offset);
   }
 
   public async createNewsletterCampaign(data: Omit<NewsletterCampaign, 'id' | 'createdAt' | 'sentCount'>): Promise<NewsletterCampaign> {
@@ -187,48 +193,66 @@ export class EmailService {
       };
     }
 
-    const recipients = await this.filterAudienceUsers(campaign.targetAudience || 'all_subscribed', campaign.targetState, campaign.targetCity);
-    const count = recipients.length;
-
     const baseUrl = process.env.APP_URL || 'http://localhost:3000';
-    
+    const batchSize = 100;
+    let offset = 0;
+    let count = 0;
     let deliveredCount = 0;
     let failedCount = 0;
     let notConfiguredCount = 0;
 
-    for (const user of recipients) {
-      const unsubToken = await userRepository.generateUnsubscribeToken(user.id);
-      const unsubUrl = `${baseUrl.replace(/\/$/, '')}/api/auth/unsubscribe?token=${unsubToken}`;
-      
-      const safeName = escapeHtml(user.name);
-      const safeCity = escapeHtml(user.location?.city || 'India');
-
-      const personalizedBody = (campaign.contentHtml || '')
-        .replace(/\{\{user_name\}\}/g, () => safeName)
-        .replace(/\{\{city\}\}/g, () => safeCity)
-        .replace(/\{\{unsubscribe_url\}\}/g, () => unsubUrl);
-
-      const personalizedSubject = campaign.subject
-        .replace(/\{\{user_name\}\}/g, () => safeName)
-        .replace(/\{\{city\}\}/g, () => safeCity);
-
-      const logResult = await this.sendEmail({
-        toEmail: user.email,
-        toName: user.name,
-        subject: personalizedSubject,
-        body: personalizedBody,
-        type: 'newsletter',
-        isMarketing: true,
-        relatedUserId: user.id,
-      });
-
-      if (logResult.status === 'delivered') {
-        deliveredCount++;
-      } else if (logResult.status === 'not_configured') {
-        notConfiguredCount++;
-      } else {
-        failedCount++;
+    while (true) {
+      const batch = await this.filterAudienceUsers(
+        campaign.targetAudience || 'all_subscribed',
+        campaign.targetState,
+        campaign.targetCity,
+        batchSize,
+        offset
+      );
+      if (batch.length === 0) {
+        break;
       }
+
+      for (const user of batch) {
+        count++;
+        const unsubToken = await userRepository.generateUnsubscribeToken(user.id);
+        const unsubUrl = `${baseUrl.replace(/\/$/, '')}/api/auth/unsubscribe?token=${unsubToken}`;
+
+        const safeName = escapeHtml(user.name);
+        const safeCity = escapeHtml(user.location?.city || 'India');
+
+        const personalizedBody = (campaign.contentHtml || '')
+          .replace(/\{\{user_name\}\}/g, () => safeName)
+          .replace(/\{\{city\}\}/g, () => safeCity)
+          .replace(/\{\{unsubscribe_url\}\}/g, () => unsubUrl);
+
+        const personalizedSubject = campaign.subject
+          .replace(/\{\{user_name\}\}/g, () => safeName)
+          .replace(/\{\{city\}\}/g, () => safeCity);
+
+        const logResult = await this.sendEmail({
+          toEmail: user.email,
+          toName: user.name,
+          subject: personalizedSubject,
+          body: personalizedBody,
+          type: 'newsletter',
+          isMarketing: true,
+          relatedUserId: user.id,
+        });
+
+        if (logResult.status === 'delivered') {
+          deliveredCount++;
+        } else if (logResult.status === 'not_configured') {
+          notConfiguredCount++;
+        } else {
+          failedCount++;
+        }
+      }
+
+      if (batch.length < batchSize) {
+        break;
+      }
+      offset += batchSize;
     }
 
     // Honest status reporting:

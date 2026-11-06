@@ -124,8 +124,8 @@ export interface AppContextType {
   toggleLocationPopular: (id: string) => void;
 
   // User Operations
-  verifyUserKyc: (userId: string, status: 'verified' | 'rejected') => void;
-  updateUser: (user: UserAccount) => void;
+  verifyUserKyc: (userId: string, status: 'verified' | 'rejected', notes?: string) => void;
+  updateUser: (user: UserAccount) => Promise<boolean>;
   banUser: (userId: string, reason: string) => void;
   unbanUser: (userId: string) => void;
 

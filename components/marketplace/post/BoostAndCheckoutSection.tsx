@@ -94,8 +94,8 @@ export const BoostAndCheckoutSection: React.FC<BoostAndCheckoutSectionProps> = (
               </label>
             </div>
             {wantFeatured && (
-              <span className="text-xs font-bold text-amber-600 flex items-center gap-1 animate-pulse">
-                ⚡ Premium Boost Active
+              <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2.5 py-1 rounded-full flex items-center gap-1">
+                Payment Pending (Gateway Not Configured)
               </span>
             )}
           </div>
@@ -118,15 +118,19 @@ export const BoostAndCheckoutSection: React.FC<BoostAndCheckoutSectionProps> = (
                   Secured Payment Summary
                 </h3>
                 <p className="text-xs text-slate-600 mt-0.5">
-                  Complete payment to publish your ad with selected premium upgrades.
+                  Verified payment is required before paid postings or featured upgrades become active.
                 </p>
               </div>
             </div>
 
             <div className="text-right shrink-0">
-              <span className="text-2xl font-black text-slate-950">₹{totalFee}</span>
+              <span className="text-2xl font-black text-slate-950">{currencySymbol}{totalFee}</span>
               <span className="block text-[10px] text-slate-500 font-medium">Includes 18% GST</span>
             </div>
+          </div>
+
+          <div className="bg-white/80 border border-amber-300 rounded-xl p-3 text-xs text-amber-900">
+            <strong>Payment Gateway Status:</strong> Online payment gateway is not currently configured. Optional Featured upgrades are recorded as pending requests and will <strong>not</strong> activate until payment is verified.
           </div>
 
           {/* Detailed Invoice Breakdown */}
@@ -134,7 +138,7 @@ export const BoostAndCheckoutSection: React.FC<BoostAndCheckoutSectionProps> = (
             {isPaidSubcategory && (
               <div className="flex justify-between">
                 <span>Base Posting Fee ({selectedSubcategory?.name || selectedCategory?.name}):</span>
-                <span className="font-semibold">₹{postingFeeAmount}</span>
+                <span className="font-semibold">{currencySymbol}{postingFeeAmount}</span>
               </div>
             )}
             {isVolumeQuotaExceeded ? (
@@ -142,27 +146,27 @@ export const BoostAndCheckoutSection: React.FC<BoostAndCheckoutSectionProps> = (
                 <span className="flex items-center gap-1">
                   <Layers className="w-3 h-3 text-amber-600" /> Volume Quota Fee (Listing #{userActiveListingsCount + 1}):
                 </span>
-                <span>₹{volumeQuotaFee}</span>
+                <span>{currencySymbol}{volumeQuotaFee}</span>
               </div>
             ) : (
               <div className="flex justify-between text-emerald-800 font-medium">
                 <span className="flex items-center gap-1">
                   <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Free Active Listing Quota ({userActiveListingsCount + 1}/{freeQuotaLimit}):
                 </span>
-                <span className="font-bold text-emerald-700">FREE (₹0)</span>
+                <span className="font-bold text-emerald-700">FREE ({currencySymbol}0)</span>
               </div>
             )}
             {wantFeatured && (
               <div className="flex justify-between">
                 <span className="flex items-center gap-1 text-amber-900 font-semibold">
-                  <Sparkles className="w-3 h-3 text-amber-600" /> Premium Featured Promotion (30 days):
+                  <Sparkles className="w-3 h-3 text-amber-600" /> Premium Featured Promotion ({featuredAdDurationDays} days - Pending Payment):
                 </span>
-                <span className="font-bold text-amber-950">₹100</span>
+                <span className="font-bold text-amber-950">{currencySymbol}{featuredAdPrice}</span>
               </div>
             )}
             <div className="flex justify-between border-t border-amber-200/60 pt-1.5 text-sm font-black text-slate-900">
               <span>Grand Total to Pay:</span>
-              <span>₹{totalFee}</span>
+              <span>{currencySymbol}{totalFee}</span>
             </div>
           </div>
 

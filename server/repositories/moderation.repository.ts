@@ -32,9 +32,16 @@ export class ModerationRepository {
     };
   }
 
-  public async findAllReports(): Promise<ReportItem[]> {
+  public async findAllReports(limit = 500, offset = 0): Promise<ReportItem[]> {
     try {
-      const rows = await db.select().from(schema.abuseReports).orderBy(desc(schema.abuseReports.createdAt));
+      const safeLimit = Math.min(Math.max(1, Number(limit) || 500), 1000);
+      const safeOffset = Math.max(0, Number(offset) || 0);
+      const rows = await db
+        .select()
+        .from(schema.abuseReports)
+        .orderBy(desc(schema.abuseReports.createdAt))
+        .limit(safeLimit)
+        .offset(safeOffset);
       return rows.map((r) => this.mapRowToReport(r));
     } catch (error) {
       console.error('ModerationRepository.findAllReports error:', error);
@@ -91,9 +98,11 @@ export class ModerationRepository {
     }
   }
 
-  public async findAllRules(): Promise<ModerationRule[]> {
+  public async findAllRules(limit = 200, offset = 0): Promise<ModerationRule[]> {
     try {
-      const rows = await db.select().from(schema.moderationRules);
+      const safeLimit = Math.min(Math.max(1, Number(limit) || 200), 1000);
+      const safeOffset = Math.max(0, Number(offset) || 0);
+      const rows = await db.select().from(schema.moderationRules).limit(safeLimit).offset(safeOffset);
       return rows.map((r) => this.mapRowToRule(r));
     } catch (error) {
       console.error('ModerationRepository.findAllRules error:', error);

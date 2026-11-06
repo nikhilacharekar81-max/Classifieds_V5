@@ -721,37 +721,70 @@ export async function invalidateSettingsReferenceCache(tx?: DbExecutor): Promise
   }
 }
 
+let activeListingCountsInvalidation: Promise<void> | null = null;
+
 export async function invalidateLiveListingCountsCache(): Promise<void> {
-  let success = false;
-  let errStr: string | undefined = undefined;
-  let eventId: string | undefined;
-  let generation: number | undefined;
-
-  try {
-    const enqueueRes = await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS);
-    eventId = enqueueRes.id;
-    generation = enqueueRes.generation;
-  } catch (e) {
-    console.error(`[ReferenceCache] Failed to enqueue durable outbox for tag "${REFERENCE_CACHE_TAGS.LISTING_COUNTS}":`, e);
+  if (activeListingCountsInvalidation) {
+    return activeListingCountsInvalidation;
   }
 
-  try {
-    await revalidateTag(REFERENCE_CACHE_TAGS.LISTING_COUNTS);
-    failedInvalidationTags.delete(REFERENCE_CACHE_TAGS.LISTING_COUNTS);
-    success = true;
-  } catch (error: any) {
-    console.error(`[ReferenceCache] Failed to revalidate tag "${REFERENCE_CACHE_TAGS.LISTING_COUNTS}":`, error);
-    failedInvalidationTags.add(REFERENCE_CACHE_TAGS.LISTING_COUNTS);
-    errStr = String(error?.message || error);
-  }
-  try {
-    revalidatePath('/', 'layout');
-  } catch (error) {
-    console.error('[ReferenceCache] Failed to revalidate root layout path after listing count mutation:', error);
-  }
-  try {
-    await recordDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS, success, errStr, undefined, generation, eventId);
-  } catch (outboxErr) {
-    console.error('[ReferenceCache] Error recording outbox invalidation:', outboxErr);
-  }
+  activeListingCountsInvalidation = (async () => {
+    const tag = REFERENCE_CACHE_TAGS.LISTING_COUNTS;
+    const now = new Date();
+    const id = `outbox_${tag}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    let success = false;
+    let errStr: string | undefined = undefined;
+
+    try {
+      await revalidateTag(tag);
+      failedInvalidationTags.delete(tag);
+      success = true;
+    } catch (error: any) {
+      console.error(`[ReferenceCache] Failed to revalidate tag "${tag}":`, error);
+      failedInvalidationTags.add(tag);
+      errStr = String(error?.message || error);
+    }
+
+    try {
+      revalidatePath('/', 'layout');
+    } catch (error) {
+      console.error('[ReferenceCache] Failed to revalidate root layout path after listing count mutation:', error);
+    }
+
+    try {
+      if (success) {
+        await withDbRetry(async () =>
+          await db
+            .insert(cacheInvalidationOutbox)
+            .values({
+              id,
+              tag,
+              status: 'completed',
+              attempts: 1,
+              lastError: null,
+              nextRetryAt: now,
+              completedAt: now,
+            })
+            .onConflictDoUpdate({
+              target: cacheInvalidationOutbox.tag,
+              set: {
+                status: 'completed',
+                lastError: null,
+                completedAt: now,
+              },
+            })
+        );
+      } else {
+        hasKnownPendingOutboxEntries = true;
+        await enqueueDurableInvalidation(tag);
+      }
+    } catch (outboxErr) {
+      console.error('[ReferenceCache] Error recording outbox invalidation:', outboxErr);
+    }
+  })().finally(() => {
+    activeListingCountsInvalidation = null;
+  });
+
+  return activeListingCountsInvalidation;
 }
+

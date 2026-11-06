@@ -40,9 +40,16 @@ export class BoostRepository {
     };
   }
 
-  public async findAllPackages(): Promise<PromotionalPackage[]> {
+  public async findAllPackages(limit = 100, offset = 0): Promise<PromotionalPackage[]> {
     try {
-      const rows = await db.select().from(schema.boostPackages).orderBy(desc(schema.boostPackages.createdAt));
+      const safeLimit = Math.min(Math.max(1, Number(limit) || 100), 500);
+      const safeOffset = Math.max(0, Number(offset) || 0);
+      const rows = await db
+        .select()
+        .from(schema.boostPackages)
+        .orderBy(desc(schema.boostPackages.createdAt))
+        .limit(safeLimit)
+        .offset(safeOffset);
       return rows.map((r) => this.mapRowToPackage(r));
     } catch (error) {
       console.error('BoostRepository.findAllPackages error:', error);
@@ -218,9 +225,16 @@ export class BoostRepository {
     }
   }
 
-  public async findAllTransactions(): Promise<OrderTransaction[]> {
+  public async findAllTransactions(limit = 500, offset = 0): Promise<OrderTransaction[]> {
     try {
-      const rows = await db.select().from(schema.boostTransactions).orderBy(desc(schema.boostTransactions.createdAt));
+      const safeLimit = Math.min(Math.max(1, Number(limit) || 500), 1000);
+      const safeOffset = Math.max(0, Number(offset) || 0);
+      const rows = await db
+        .select()
+        .from(schema.boostTransactions)
+        .orderBy(desc(schema.boostTransactions.createdAt))
+        .limit(safeLimit)
+        .offset(safeOffset);
       return rows.map((r) => this.mapRowToTransaction(r));
     } catch (error) {
       console.error('BoostRepository.findAllTransactions error:', error);

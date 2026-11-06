@@ -24,6 +24,7 @@ interface UseAdminAndTaxonomyActionsParams {
   users: UserAccount[];
   setUsers: React.Dispatch<React.SetStateAction<UserAccount[]>>;
   currentUser: UserAccount;
+  setAuthUser?: React.Dispatch<React.SetStateAction<UserAccount | null>>;
   setListings: React.Dispatch<React.SetStateAction<Listing[]>>;
   setReports: React.Dispatch<React.SetStateAction<ReportItem[]>>;
   rules: ModerationRule[];
@@ -50,6 +51,7 @@ export function useAdminAndTaxonomyActions({
   users,
   setUsers,
   currentUser,
+  setAuthUser,
   setListings,
   setReports,
   rules,
@@ -558,22 +560,57 @@ export function useAdminAndTaxonomyActions({
   };
 
   const updateUser = (updatedUser: UserAccount) => {
-    fetch(`/api/admin/users/${updatedUser.id}`, {
+    const isSelfUpdate = Boolean(currentUser && updatedUser.id === currentUser.id);
+    const endpoint = isSelfUpdate ? '/api/user/account' : `/api/admin/users/${updatedUser.id}`;
+    const payload = isSelfUpdate
+      ? {
+          name: updatedUser.name,
+          email: updatedUser.email,
+          phone: updatedUser.phone,
+          avatar: updatedUser.avatar,
+          emailSubscribed: updatedUser.emailSubscribed,
+          location: updatedUser.location,
+          businessDetails: updatedUser.businessDetails
+            ? {
+                companyName: updatedUser.businessDetails.companyName,
+                gstNumber: updatedUser.businessDetails.gstNumber,
+              }
+            : undefined,
+        }
+      : updatedUser;
+
+    fetch(endpoint, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updatedUser),
+      body: JSON.stringify(payload),
     })
-      .then((res) => {
+      .then(async (res) => {
+        const data = await res.json().catch(() => null);
         if (!res.ok) {
           console.error(`Failed to update user ${updatedUser.id}: ${res.statusText}`);
           addToast({
             type: 'error',
             title: 'Action Failed',
-            message: 'Failed to update profile settings on server.',
+            message: data?.error || 'Failed to update profile settings on server.',
           });
           return;
         }
-        setUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+        const savedUser: UserAccount = data && data.id ? { ...updatedUser, ...data } : updatedUser;
+        setUsers((prev) => prev.map((u) => (u.id === savedUser.id ? savedUser : u)));
+        if (isSelfUpdate && setAuthUser) {
+          setAuthUser((prev) => (prev && prev.id === savedUser.id ? { ...prev, ...savedUser } : prev));
+        }
+        setListings((prev) =>
+          prev.map((l) =>
+            l.sellerId === savedUser.id
+              ? {
+                  ...l,
+                  sellerName: savedUser.name || l.sellerName,
+                  sellerPhone: savedUser.phone || l.sellerPhone,
+                }
+              : l
+          )
+        );
         addToast({
           type: 'success',
           title: 'Profile Updated',
@@ -590,36 +627,59 @@ export function useAdminAndTaxonomyActions({
       });
   };
 
-  const verifyUserKyc = (userId: string, status: 'verified' | 'rejected') => {
+  const verifyUserKyc = (userId: string, status: 'verified' | 'rejected', notes?: string) => {
     const user = users.find((u) => u.id === userId);
-    if (!user) return;
     fetch('/api/admin/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'verify_kyc', userId, status }),
+      body: JSON.stringify({
+        action: 'verify_kyc',
+        userId,
+        status,
+        kycStatus: status,
+        notes,
+        reason: notes,
+      }),
     })
-      .then((res) => {
+      .then(async (res) => {
+        const data = await res.json().catch(() => null);
         if (!res.ok) {
           console.error(`Failed to update KYC status for user ${userId}: ${res.statusText}`);
           addToast({
             type: 'error',
             title: 'Action Failed',
-            message: 'Failed to persist KYC decision on server.',
+            message: data?.error || 'Failed to persist KYC decision on server.',
           });
           return;
         }
-        setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, kycStatus: status } : u)));
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === userId
+              ? {
+                  ...u,
+                  kycStatus: status,
+                  kycDocument: u.kycDocument
+                    ? ({
+                        ...u.kycDocument,
+                        status,
+                        rejectionReason: status === 'rejected' ? notes : undefined,
+                      } as any)
+                    : undefined,
+                }
+              : u
+          )
+        );
         recordAuditLog(
           status === 'verified' ? 'VERIFY_USER_KYC' : 'REJECT_USER_KYC',
           'Users / Verification',
           userId,
-          user.name,
-          `Manual KYC status set to ${status}`
+          user?.name || userId,
+          notes || `Manual KYC status set to ${status}`
         );
         addToast({
           type: status === 'verified' ? 'success' : 'error',
           title: status === 'verified' ? 'User KYC Verified' : 'User KYC Rejected',
-          message: user.name,
+          message: user?.name || `User #${userId}`,
         });
       })
       .catch((err) => {

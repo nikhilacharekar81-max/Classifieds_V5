@@ -1,5 +1,5 @@
 'use client';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import {
   ArrowLeft,
@@ -12,18 +12,57 @@ import {
   MapPin,
   Mail,
   Phone,
-  User,
 } from 'lucide-react';
 import { Badge } from '@/components/common/Badge';
 import { navigateTo } from '@/lib/router/useRouter';
+import { UserAccount } from '@/lib/types';
 
 interface KycVerificationPageProps {
   userId: string;
 }
 
 export const KycVerificationPage: React.FC<KycVerificationPageProps> = ({ userId }) => {
-  const { users, verifyUserKyc, addToast } = useApp();
-  const user = users.find((u) => u.id === userId);
+  const { users, verifyUserKyc } = useApp();
+  const contextUser = users.find((u) => u.id === userId);
+  const [fetchedUser, setFetchedUser] = useState<UserAccount | null>(null);
+  const [loading, setLoading] = useState<boolean>(!contextUser?.kycDocument);
+  const [reviewNotes, setReviewNotes] = useState<string>('');
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    fetch(`/api/admin/users/${encodeURIComponent(userId)}`, { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active) return;
+        if (data && data.id) {
+          setFetchedUser(data);
+          if ((data.kycDocument as any)?.rejectionReason) {
+            setReviewNotes((data.kycDocument as any).rejectionReason);
+          }
+        }
+        setLoading(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+
+  const user = fetchedUser || contextUser;
+
+  if (loading && (!user || !user.kycDocument)) {
+    return (
+      <div className="p-8 max-w-xl mx-auto text-center space-y-4">
+        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
+        <p className="text-xs font-semibold text-slate-500">Loading persisted KYC submission...</p>
+      </div>
+    );
+  }
 
   if (!user || !user.kycDocument) {
     return (
@@ -50,22 +89,16 @@ export const KycVerificationPage: React.FC<KycVerificationPageProps> = ({ userId
   const kyc = user.kycDocument;
 
   const handleApprove = () => {
-    verifyUserKyc(user.id, 'verified');
-    addToast({
-      title: 'KYC Verified',
-      message: `User ${user.name} has been verified and granted the KYC Blue Tick badge.`,
-      type: 'success',
-    });
+    verifyUserKyc(user.id, 'verified', reviewNotes.trim() || 'Verified by administrator');
     navigateTo('/admin/users/verification');
   };
 
   const handleReject = () => {
-    verifyUserKyc(user.id, 'rejected');
-    addToast({
-      title: 'KYC Rejected',
-      message: `User ${user.name}'s document has been rejected. Notification sent to seller.`,
-      type: 'warning',
-    });
+    verifyUserKyc(
+      user.id,
+      'rejected',
+      reviewNotes.trim() || 'Document did not pass compliance verification'
+    );
     navigateTo('/admin/users/verification');
   };
 
@@ -163,7 +196,7 @@ export const KycVerificationPage: React.FC<KycVerificationPageProps> = ({ userId
               </div>
               <div className="bg-slate-50 dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
                 <span className="text-slate-400 block text-[10px] uppercase font-bold">
-                  Document ID
+                  Masked Document ID
                 </span>
                 <span className="font-mono font-bold text-slate-800 dark:text-white mt-0.5 block">
                   {kyc.docNumber}
@@ -196,6 +229,19 @@ export const KycVerificationPage: React.FC<KycVerificationPageProps> = ({ userId
             <p className="text-xs text-slate-500">
               Ensure photo matches, legal name matches registration, and document number is valid.
             </p>
+
+            <div>
+              <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
+                Review Notes / Rejection Reason
+              </label>
+              <textarea
+                rows={2}
+                value={reviewNotes}
+                onChange={(e) => setReviewNotes(e.target.value)}
+                placeholder="Optional note on approval, or reason for rejection..."
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
+              />
+            </div>
 
             <div className="flex flex-col sm:flex-row gap-3 pt-2">
               <button

@@ -27,7 +27,7 @@ export const users = pgTable('users', {
   status: varchar('status', { length: 32 }).notNull().default('active'),
   banReason: text('ban_reason'),
   kycStatus: varchar('kyc_status', { length: 32 }).notNull().default('unsubmitted'),
-  emailSubscribed: boolean('email_subscribed').notNull().default(true),
+  emailSubscribed: boolean('email_subscribed').notNull().default(false),
   emailUnsubscribedAt: timestamp('email_unsubscribed_at', { withTimezone: true }),
   city: varchar('city', { length: 128 }).notNull().default('Mumbai'),
   state: varchar('state', { length: 128 }).notNull().default('Maharashtra'),

@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { adminService } from '@/server/services/admin.service';
 import { cmsRepository } from '@/server/repositories/cms.repository';
+import { getAuthenticatedUser } from '@/lib/auth/session';
+import { hasPermission } from '@/lib/auth/roles';
 
 export async function GET(req: NextRequest) {
   try {
-    const authContext = req.auth;
-    const isStaff = !!(authContext?.isAdmin || authContext?.isModerator);
+    const authContext = req.auth || (await getAuthenticatedUser(req));
+    const canManageCms = !!(authContext && hasPermission(authContext.adminRole, 'canManageCms'));
     const allPages = await cmsRepository.findAllPages();
-    const cmsPages = isStaff ? allPages : allPages.filter((p) => p.status === 'published');
+    const cmsPages = canManageCms ? allPages : allPages.filter((p) => p.status === 'published');
 
     return NextResponse.json(cmsPages);
   } catch (error: any) {
@@ -18,9 +20,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const authContext = req.auth;
+    const authContext = req.auth || (await getAuthenticatedUser(req));
     if (!authContext) {
       return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
+    }
+    if (!hasPermission(authContext.adminRole, 'canManageCms')) {
+      return NextResponse.json({ error: 'Forbidden: Insufficient role permissions' }, { status: 403 });
     }
 
     const body = await req.json();

@@ -1,7 +1,7 @@
-import { db } from '@/src/db/index';
+import { db, pool } from '@/src/db/index';
 import * as schema from '@/src/db/schema';
 import { and, desc, eq } from '@/src/db/pg-orm';
-import { EmailTemplate, EmailLog, NewsletterCampaign } from '@/lib/types';
+import { EmailTemplate, EmailLog, NewsletterCampaign, UserAccount } from '@/lib/types';
 
 export class EmailRepository {
   private mapRowToTemplate(row: typeof schema.emailTemplates.$inferSelect): EmailTemplate {
@@ -239,7 +239,13 @@ export class EmailRepository {
     }
   }
 
-  public async findAudienceUsers(target: string, state?: string, city?: string): Promise<UserAccount[]> {
+  public async findAudienceUsers(
+    target: string,
+    state?: string,
+    city?: string,
+    limit = 500,
+    offset = 0
+  ): Promise<UserAccount[]> {
     try {
       let sqlWhere = `status = 'active' AND email_subscribed = TRUE`;
       const params: any[] = [];
@@ -261,7 +267,16 @@ export class EmailRepository {
         paramIdx++;
       }
 
-      const rows = await db.execute(`SELECT * FROM users WHERE ${sqlWhere}`, params);
+      const safeLimit = Math.min(Math.max(1, Number(limit) || 500), 1000);
+      const safeOffset = Math.max(0, Number(offset) || 0);
+      params.push(safeLimit, safeOffset);
+      const limitParam = `$${paramIdx}`;
+      const offsetParam = `$${paramIdx + 1}`;
+
+      const rows = await pool.query(
+        `SELECT * FROM users WHERE ${sqlWhere} ORDER BY id ASC LIMIT ${limitParam} OFFSET ${offsetParam}`,
+        params
+      );
       const rowsList = Array.isArray(rows) ? rows : (rows as any).rows || [];
       return rowsList.map((r: any) => ({
         id: r.id,
@@ -290,3 +305,4 @@ export class EmailRepository {
 }
 
 export const emailRepository = new EmailRepository();
+

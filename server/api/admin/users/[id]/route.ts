@@ -2,7 +2,40 @@ import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { userRepository } from '@/server/repositories/user.repository';
 import { emailService } from '@/server/services/email.service';
 import { userService } from '@/server/services/user.service';
+import { getAuthenticatedUser } from '@/lib/auth/session';
+import { hasPermission } from '@/lib/auth/roles';
 import crypto from 'node:crypto';
+
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  try {
+    const authContext = req.auth || (await getAuthenticatedUser(req));
+    if (!authContext) {
+      return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
+    }
+    if (!hasPermission(authContext.adminRole, 'canManageUsers')) {
+      return NextResponse.json({ error: 'Forbidden: Insufficient role permissions' }, { status: 403 });
+    }
+
+    const role = authContext.adminRole || authContext.user?.adminRole;
+    const isActualAdmin = Boolean(
+      authContext.isSuperAdmin || role === 'super_admin' || role === 'admin'
+    );
+
+    const user = await userService.getUserForAdmin(id, isActualAdmin);
+    if (!user) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    return NextResponse.json(user);
+  } catch (error: any) {
+    console.error(`API /api/admin/users/${id} GET error:`, error);
+    return NextResponse.json({ error: error.message || 'Failed to fetch user' }, { status: 500 });
+  }
+}
 
 export async function PUT(
   req: NextRequest,
@@ -10,9 +43,21 @@ export async function PUT(
 ) {
   const { id } = await params;
   try {
-    const authContext = req.auth;
+    const authContext = req.auth || (await getAuthenticatedUser(req));
     if (!authContext) {
       return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
+    }
+
+    const role = authContext.adminRole || authContext.user?.adminRole;
+    const isSuperAdmin = Boolean(authContext.isSuperAdmin || role === 'super_admin');
+    const isActualAdmin = isSuperAdmin || role === 'admin';
+    const hasUserMgmt = hasPermission(role, 'canManageUsers');
+
+    if (!hasUserMgmt) {
+      return NextResponse.json(
+        { error: 'Forbidden: Administrative user-management permission required' },
+        { status: 403 }
+      );
     }
 
     const targetUser = await userRepository.findById(id);
@@ -21,16 +66,6 @@ export async function PUT(
     }
 
     const isSelf = authContext.userId === id;
-    const role = authContext.adminRole || authContext.user?.adminRole;
-    const isSuperAdmin = Boolean(authContext.isSuperAdmin || role === 'super_admin');
-    const isActualAdmin = isSuperAdmin || role === 'admin';
-    const isModerator = Boolean(authContext.isModerator || role === 'moderator');
-    const hasUserMgmt = Boolean(authContext.isAdmin); // canAccessAdmin
-    const isStaff = isActualAdmin || isModerator || hasUserMgmt;
-
-    if (!isSelf && !isStaff) {
-      return NextResponse.json({ error: 'Forbidden: You can only edit your own account' }, { status: 403 });
-    }
 
     // Role Hierarchy: Non-admins cannot edit Admin or Super Admin accounts
     const targetRow = await userRepository.findByEmail(targetUser.email);

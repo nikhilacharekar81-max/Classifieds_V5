@@ -143,10 +143,17 @@ export class UserRepository {
     return rows[0] || null;
   }
 
-  public async findAll(): Promise<UserAccount[]> {
+  public async findAll(limit: number = 500, offset: number = 0): Promise<UserAccount[]> {
+    const safeLimit = Math.min(Math.max(1, Number(limit) || 500), 1000);
+    const safeOffset = Math.max(0, Number(offset) || 0);
     try {
       const rows = (await withDbRetry(() =>
-        db.select().from(schema.users).orderBy(desc(schema.users.createdAt))
+        db
+          .select()
+          .from(schema.users)
+          .orderBy(desc(schema.users.createdAt))
+          .limit(safeLimit)
+          .offset(safeOffset)
       )) as any[];
       const users = rows.map((r) => this.mapRowToUser(r));
 
@@ -190,20 +197,31 @@ export class UserRepository {
     }
   }
 
-  public async findAllForAdmin(): Promise<UserAccount[]> {
+  public async findAllForAdmin(options?: {
+    includeKycDocuments?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<UserAccount[]> {
+    const includeKyc = options?.includeKycDocuments ?? true;
+    const safeLimit = Math.min(Math.max(1, Number(options?.limit) || 500), 1000);
+    const safeOffset = Math.max(0, Number(options?.offset) || 0);
     try {
-      const users = await this.findAll();
-      const kycRows = (await withDbRetry(() =>
-        db
-          .select()
-          .from(schema.kycDocuments)
-          .orderBy(desc(schema.kycDocuments.submittedAt))
-      )) as any[];
+      const users = await this.findAll(safeLimit, safeOffset);
 
       const kycByUserId = new Map<string, typeof schema.kycDocuments.$inferSelect>();
-      for (const kyc of kycRows) {
-        if (!kycByUserId.has(kyc.userId)) {
-          kycByUserId.set(kyc.userId, kyc);
+      if (includeKyc) {
+        const kycRows = (await withDbRetry(() =>
+          db
+            .select()
+            .from(schema.kycDocuments)
+            .orderBy(desc(schema.kycDocuments.submittedAt))
+            .limit(1000)
+        )) as any[];
+
+        for (const kyc of kycRows) {
+          if (!kycByUserId.has(kyc.userId)) {
+            kycByUserId.set(kyc.userId, kyc);
+          }
         }
       }
 
@@ -216,6 +234,7 @@ export class UserRepository {
           })
           .from(schema.userSessions)
           .orderBy(desc(schema.userSessions.createdAt))
+          .limit(1000)
       )) as any[];
 
       const ipByUserId = new Map<string, string>();
@@ -226,9 +245,9 @@ export class UserRepository {
       }
 
       return users.map((u) => {
-        const kyc = kycByUserId.get(u.id);
+        const kyc = includeKyc ? kycByUserId.get(u.id) : undefined;
         const lastIp = ipByUserId.get(u.id) || 'Not recorded';
-        const base = {
+        const base: UserAccount = {
           ...u,
           lastIp,
         };
@@ -240,15 +259,42 @@ export class UserRepository {
               docNumber: kyc.documentNumber,
               submittedAt: kyc.submittedAt.toISOString().split('T')[0],
               fileUrl: kyc.fileUrl,
-            },
+              status: kyc.status as any,
+              rejectionReason: kyc.rejectionReason || undefined,
+              reviewedBy: kyc.reviewedBy || undefined,
+              reviewedAt: kyc.reviewedAt ? kyc.reviewedAt.toISOString() : undefined,
+            } as any,
           };
         }
         return base;
       });
     } catch (error) {
       console.error('UserRepository.findAllForAdmin error:', error);
-      return await this.findAll();
+      return await this.findAll(safeLimit, safeOffset);
     }
+  }
+
+  public async findByIdForAdmin(id: string, includeKycDocument: boolean = false): Promise<UserAccount | null> {
+    const user = await this.findById(id);
+    if (!user) return null;
+    if (!includeKycDocument) return user;
+
+    const kyc = await this.findLatestKycDocument(id);
+    if (!kyc) return user;
+
+    return {
+      ...user,
+      kycDocument: {
+        type: kyc.documentType as any,
+        docNumber: kyc.documentNumber,
+        submittedAt: kyc.submittedAt.toISOString().split('T')[0],
+        fileUrl: kyc.fileUrl,
+        status: kyc.status as any,
+        rejectionReason: kyc.rejectionReason || undefined,
+        reviewedBy: kyc.reviewedBy || undefined,
+        reviewedAt: kyc.reviewedAt ? kyc.reviewedAt.toISOString() : undefined,
+      } as any,
+    };
   }
 
   public async create(data: {
@@ -266,6 +312,7 @@ export class UserRepository {
     gstNumber?: string;
     verifiedBusiness?: boolean;
     adminRole?: string;
+    emailSubscribed?: boolean;
   }): Promise<UserAccount> {
     if (!data.phone || typeof data.phone !== 'string' || !data.phone.trim()) {
       throw new Error('A valid phone number is required to register an account');
@@ -294,6 +341,7 @@ export class UserRepository {
           gstNumber: data.gstNumber || null,
           verifiedBusiness: data.verifiedBusiness ?? false,
           adminRole: data.adminRole || null,
+          emailSubscribed: Boolean(data.emailSubscribed),
           emailVerified: Boolean((data as any).emailVerified),
         })
         .returning();

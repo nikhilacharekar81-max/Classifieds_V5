@@ -79,59 +79,41 @@ export async function checkIsFullyInitialized(executor: SeedDbExecutor = db): Pr
     return false;
   }
 
+  // Once the completion marker ('init_complete_v3') is persisted in system_settings,
+  // verify that core reference tables exist and are populated without re-seeding
+  // individual categories, custom fields, locations, or rules that an admin intentionally deleted.
   const categoryCountRes = await executor
     .select({ count: sql<number>`count(*)::int` })
-    .from(schema.categories)
-    .where(inArray(schema.categories.id, REQUIRED_CATEGORY_IDS));
-  if (Number(categoryCountRes[0]?.count || 0) !== REQUIRED_CATEGORY_IDS.length) {
-    return false;
-  }
-
-  const customFieldCountRes = await executor
-    .select({ count: sql<number>`count(*)::int` })
-    .from(schema.categoryCustomFields)
-    .where(inArray(schema.categoryCustomFields.id, REQUIRED_CUSTOM_FIELD_IDS));
-  if (Number(customFieldCountRes[0]?.count || 0) !== REQUIRED_CUSTOM_FIELD_IDS.length) {
+    .from(schema.categories);
+  if (Number(categoryCountRes[0]?.count || 0) === 0) {
     return false;
   }
 
   const locationCountRes = await executor
     .select({ count: sql<number>`count(*)::int` })
-    .from(schema.locations)
-    .where(inArray(schema.locations.id, REQUIRED_LOCATION_IDS));
-  if (Number(locationCountRes[0]?.count || 0) !== REQUIRED_LOCATION_IDS.length) {
+    .from(schema.locations);
+  if (Number(locationCountRes[0]?.count || 0) === 0) {
     return false;
   }
 
   const packageCountRes = await executor
     .select({ count: sql<number>`count(*)::int` })
-    .from(schema.boostPackages)
-    .where(inArray(schema.boostPackages.id, REQUIRED_PACKAGE_IDS));
-  if (Number(packageCountRes[0]?.count || 0) !== REQUIRED_PACKAGE_IDS.length) {
-    return false;
-  }
-
-  const moderationRuleCountRes = await executor
-    .select({ count: sql<number>`count(*)::int` })
-    .from(schema.moderationRules)
-    .where(inArray(schema.moderationRules.id, REQUIRED_MODERATION_RULE_IDS));
-  if (Number(moderationRuleCountRes[0]?.count || 0) !== REQUIRED_MODERATION_RULE_IDS.length) {
+    .from(schema.boostPackages);
+  if (Number(packageCountRes[0]?.count || 0) === 0) {
     return false;
   }
 
   const emailTemplateCountRes = await executor
     .select({ count: sql<number>`count(*)::int` })
-    .from(schema.emailTemplates)
-    .where(inArray(schema.emailTemplates.id, REQUIRED_EMAIL_TEMPLATE_IDS));
-  if (Number(emailTemplateCountRes[0]?.count || 0) !== REQUIRED_EMAIL_TEMPLATE_IDS.length) {
+    .from(schema.emailTemplates);
+  if (Number(emailTemplateCountRes[0]?.count || 0) === 0) {
     return false;
   }
 
   const cmsPageCountRes = await executor
     .select({ count: sql<number>`count(*)::int` })
-    .from(schema.cmsPages)
-    .where(inArray(schema.cmsPages.slug, REQUIRED_CMS_PAGE_SLUGS));
-  if (Number(cmsPageCountRes[0]?.count || 0) !== REQUIRED_CMS_PAGE_SLUGS.length) {
+    .from(schema.cmsPages);
+  if (Number(cmsPageCountRes[0]?.count || 0) === 0) {
     return false;
   }
 

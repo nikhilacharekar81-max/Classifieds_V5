@@ -2016,7 +2016,7 @@ function assertSafeWhereClause(
       );
     }
     throw new Error(
-      `ORM Safety: ${operation} query has unrestricted or tautological .where(). Execution blocked.`
+      `ORM Safety: ${operation} query has unrestricted .where() (tautological or constant condition). Execution blocked.`
     );
   }
 }

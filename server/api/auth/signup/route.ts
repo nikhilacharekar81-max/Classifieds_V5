@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 
 export async function POST(req: NextRequest) {
   try {
-    const { name, email, password, phone, city, state, type } = await req.json().catch(() => ({}));
+    const { name, email, password, phone, city, state, type, emailSubscribed } = await req.json().catch(() => ({}));
 
     if (!name || typeof name !== 'string' || !name.trim()) {
       return addSecurityHeaders(
@@ -90,6 +90,7 @@ export async function POST(req: NextRequest) {
       type: accountType,
       city: cleanCity,
       state: cleanState,
+      emailSubscribed: Boolean(emailSubscribed),
     });
 
     // Verification token
