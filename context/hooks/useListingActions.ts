@@ -883,7 +883,8 @@ export function useListingActions({
   const boostListing = async (
     listingId: string,
     packageId: string,
-    paymentMethod: 'upi' | 'card' | 'netbanking' = 'upi'
+    paymentMethod: 'upi' | 'card' | 'netbanking' = 'upi',
+    paymentDetails?: { paymentId: string; signature: string; amount: number; currency: string }
   ): Promise<{ success: boolean; message: string; listing?: Listing; transaction?: OrderTransaction }> => {
     const listing = listings.find((l) => l.id === listingId);
     if (!listing) {
@@ -900,6 +901,10 @@ export function useListingActions({
     const pkg = packages.find((p) => p.id === packageId);
     if (!pkg) {
       return { success: false, message: 'Selected boost package not found' };
+    }
+
+    if (!paymentDetails) {
+      return { success: false, message: 'Payment details are required to complete boost.' };
     }
 
     try {
@@ -923,7 +928,6 @@ export function useListingActions({
       }
 
       const orderData = await orderRes.json();
-      const paymentId = `pay_boost_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`;
       const gatewayName = paymentMethod === 'upi' ? 'UPI' : paymentMethod === 'card' ? 'Razorpay' : 'Netbanking';
 
       const verifyRes = await fetch('/api/boost/verify-payment', {
@@ -933,8 +937,11 @@ export function useListingActions({
           orderId: orderData.orderId,
           listingId,
           packageId,
-          paymentId,
+          paymentId: paymentDetails.paymentId,
           paymentGateway: gatewayName,
+          signature: paymentDetails.signature,
+          amount: paymentDetails.amount,
+          currency: paymentDetails.currency,
           userId: currentUser?.id || listing.sellerId,
         }),
       });
@@ -964,7 +971,7 @@ export function useListingActions({
         'Marketplace / Ads',
         listingId,
         listing.title,
-        `Boosted with package ${pkg.name} for ₹${pkg.price} (Payment Ref: ${paymentId})`
+        `Boosted with package ${pkg.name} for ₹${pkg.price} (Payment Ref: ${paymentDetails.paymentId})`
       );
 
       addToast({

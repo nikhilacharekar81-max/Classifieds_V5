@@ -332,20 +332,11 @@ export const PostAdPage: React.FC = () => {
     }
 
     if (newAd && requiresPayment && wantFeatured) {
-       const boostResult = await boostListing(newAd.id, 'some-pkg-id', paymentMethod); // This needs a real package ID
-       if (boostResult.success) {
-         addToast({
-            title: 'Payment and Boost Successful',
-            message: 'Your ad has been featured.',
-            type: 'success',
-         });
-       } else {
-         addToast({
-            title: 'Boost Failed',
-            message: boostResult.message,
-            type: 'error',
-         });
-       }
+       addToast({
+          title: 'Payment Required',
+          message: 'Boosted listing requires payment through a secure gateway. Please use the "My Ads" section to complete payment for your featured ad.',
+          type: 'info',
+       });
     }
     
     navigateTo(buildChillyUrl({ listing: newAd, categories }));
