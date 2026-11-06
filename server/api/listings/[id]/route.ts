@@ -16,48 +16,53 @@ export async function GET(
     Expires: '0',
   };
 
-  const listing = await listingService.getListingById(id);
-  if (!listing) {
-    return NextResponse.json({ error: 'Listing not found' }, { status: 404, headers: noCacheHeaders });
-  }
+  try {
+    const listing = await listingService.getListingById(id);
+    if (!listing) {
+      return NextResponse.json({ error: 'Listing not found' }, { status: 404, headers: noCacheHeaders });
+    }
 
-  const authContext = await getAuthenticatedUser(req);
-  const isOwner = Boolean(authContext?.userId && authContext.userId === listing.sellerId);
-  const isActualAdmin = Boolean(
-    authContext?.isSuperAdmin ||
-    authContext?.adminRole === 'admin' ||
-    authContext?.adminRole === 'super_admin'
-  );
-  const isModerator = Boolean(
-    authContext?.isModerator ||
-    authContext?.adminRole === 'moderator'
-  );
+    const authContext = await getAuthenticatedUser(req);
+    const isOwner = Boolean(authContext?.userId && authContext.userId === listing.sellerId);
+    const isActualAdmin = Boolean(
+      authContext?.isSuperAdmin ||
+      authContext?.adminRole === 'admin' ||
+      authContext?.adminRole === 'super_admin'
+    );
+    const isModerator = Boolean(
+      authContext?.isModerator ||
+      authContext?.adminRole === 'moderator'
+    );
 
-  // Expiration Check: If listing is expired, only owner or actual admin can view it
-  const isExpired = listing.expiresAt && new Date(listing.expiresAt) <= new Date();
+    // Expiration Check: If listing is expired, only owner or actual admin can view it
+    const isExpired = listing.expiresAt && new Date(listing.expiresAt) <= new Date();
 
-  if (isExpired) {
+    if (isExpired) {
+      if (!isOwner && !isActualAdmin) {
+        return NextResponse.json({ error: 'Listing not found or expired' }, { status: 404, headers: noCacheHeaders });
+      }
+    } else if (listing.status !== 'approved') {
+      if (!isOwner && !isActualAdmin && !isModerator) {
+        return NextResponse.json({ error: 'Listing not found or expired' }, { status: 404, headers: noCacheHeaders });
+      }
+    }
+
+    // Increment ordinary view count in PostgreSQL for eligible public buyer page views (non-blocking)
+    const isPublicBuyer = !isOwner && !isActualAdmin && !isModerator;
+    if (isPublicBuyer && !isExpired && listing.status === 'approved') {
+      listingService.incrementViews(listing.id).catch(console.warn);
+    }
+
+    // Strip internal/administrator-only fields unless caller is owner or actual administrator (admin / super_admin)
     if (!isOwner && !isActualAdmin) {
-      return NextResponse.json({ error: 'Listing not found or expired' }, { status: 404, headers: noCacheHeaders });
+      return NextResponse.json(toPublicListingDTO(listing), { headers: noCacheHeaders });
     }
-  } else if (listing.status !== 'approved') {
-    if (!isOwner && !isActualAdmin && !isModerator) {
-      return NextResponse.json({ error: 'Listing not found or expired' }, { status: 404, headers: noCacheHeaders });
-    }
-  }
 
-  // Increment ordinary view count in PostgreSQL for eligible public buyer page views (non-blocking)
-  const isPublicBuyer = !isOwner && !isActualAdmin && !isModerator;
-  if (isPublicBuyer && !isExpired && listing.status === 'approved') {
-    listingService.incrementViews(listing.id).catch(console.warn);
+    return NextResponse.json(listing, { headers: noCacheHeaders });
+  } catch (err: any) {
+    console.error(`API /api/listings/${id} GET error:`, err);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500, headers: noCacheHeaders });
   }
-
-  // Strip internal/administrator-only fields unless caller is owner or actual administrator (admin / super_admin)
-  if (!isOwner && !isActualAdmin) {
-    return NextResponse.json(toPublicListingDTO(listing), { headers: noCacheHeaders });
-  }
-
-  return NextResponse.json(listing, { headers: noCacheHeaders });
 }
 
 export async function PUT(

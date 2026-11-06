@@ -51,21 +51,21 @@ export const PublicListingDetailPage: React.FC<PublicListingDetailPageProps> = (
     .slice(0, 4);
 
   const cityUrl = buildChillyUrl({
-    city: listing.location.city || 'All India',
+    city: listing?.location?.city || 'All India',
     categories,
   });
 
   const categoryUrl = buildChillyUrl({
-    city: listing.location.city || 'All India',
-    categoryId: listing.categoryId,
+    city: listing?.location?.city || 'All India',
+    categoryId: listing?.categoryId,
     subcategoryId: 'all',
     categories,
   });
 
   const subcategoryUrl = subcategory
     ? buildChillyUrl({
-        city: listing.location.city || 'All India',
-        categoryId: listing.categoryId,
+        city: listing?.location?.city || 'All India',
+        categoryId: listing?.categoryId,
         subcategoryId: subcategory.id,
         categories,
       })
@@ -74,17 +74,17 @@ export const PublicListingDetailPage: React.FC<PublicListingDetailPageProps> = (
   return (
     <div className="min-h-screen bg-[#f8f9fa] text-[#202124] pb-20">
       <MarketplaceHeader
-        effectiveCity={listing.location?.city || 'All India'}
+        effectiveCity={listing?.location?.city || 'All India'}
         categories={categories}
         locations={locations}
-        activeCategoryId={listing.categoryId}
-        activeSubcategoryId={listing.subcategoryId}
+        activeCategoryId={listing?.categoryId}
+        activeSubcategoryId={listing?.subcategoryId}
       />
 
       <CategorySubNavbar
-        currentCity={listing.location?.city}
-        activeCategoryId={listing.categoryId}
-        activeSubcategoryId={listing.subcategoryId}
+        currentCity={listing?.location?.city}
+        activeCategoryId={listing?.categoryId}
+        activeSubcategoryId={listing?.subcategoryId}
         categories={categories}
       />
 
@@ -101,7 +101,7 @@ export const PublicListingDetailPage: React.FC<PublicListingDetailPageProps> = (
             >
               Home
             </NavLink>
-            {listing.location?.city && (
+            {listing?.location?.city && (
               <>
                 <span className="text-slate-300">/</span>
                 <NavLink
@@ -136,9 +136,9 @@ export const PublicListingDetailPage: React.FC<PublicListingDetailPageProps> = (
               </>
             )}
             <span className="text-slate-900 font-semibold truncate max-w-xs sm:max-w-md">
-              {listing.title}{' '}
-              {listing.location.locality ? `in ${listing.location.locality}` : ''}{' '}
-              {listing.location.city ? `, ${listing.location.city}` : ''}
+              {listing?.title}{' '}
+              {listing?.location?.locality ? `in ${listing.location.locality}` : ''}{' '}
+              {listing?.location?.city ? `, ${listing.location.city}` : ''}
             </span>
           </div>
 
@@ -157,7 +157,7 @@ export const PublicListingDetailPage: React.FC<PublicListingDetailPageProps> = (
         >
           <meta itemProp="name" content={listing.title} />
           <meta itemProp="description" content={listing.description} />
-          <meta itemProp="image" content={listing.images[0] || '/default-listing-image.png'} />
+          <meta itemProp="image" content={listing?.images?.[0] || '/default-listing-image.png'} />
           <div
             itemProp="offers"
             itemScope
@@ -192,11 +192,11 @@ export const PublicListingDetailPage: React.FC<PublicListingDetailPageProps> = (
             <SellerLiveChatBox listing={listing} />
 
             <ListingMapWidget
-              cityName={listing.location.city}
-              locality={listing.location.locality}
-              state={listing.location.state}
-              title={listing.title}
-              priceFormatted={listing.price !== null && listing.price !== undefined ? `₹${listing.price.toLocaleString('en-IN')}` : 'Price on request'}
+              cityName={listing?.location?.city}
+              locality={listing?.location?.locality}
+              state={listing?.location?.state}
+              title={listing?.title}
+              priceFormatted={listing?.price !== null && listing?.price !== undefined ? `₹${listing.price.toLocaleString('en-IN')}` : 'Price on request'}
             />
 
             <BuyerSafetyBanner />
@@ -205,7 +205,7 @@ export const PublicListingDetailPage: React.FC<PublicListingDetailPageProps> = (
 
         <SimilarListingsSection
           relatedListings={filteredRelated}
-          cityName={listing.location.city}
+          cityName={listing?.location?.city}
           categories={categories}
         />
       </main>
