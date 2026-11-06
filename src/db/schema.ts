@@ -493,6 +493,7 @@ export const banAppeals = pgTable('ban_appeals', {
 // 26. Posting Orders (Server-authoritative orders for paid ad postings)
 export const postingOrders = pgTable('posting_orders', {
   orderId: varchar('order_id', { length: 64 }).primaryKey(),
+  providerOrderId: varchar('provider_order_id', { length: 128 }),
   userId: varchar('user_id', { length: 64 }).notNull().references(() => users.id),
   categoryId: varchar('category_id', { length: 64 }).notNull(),
   amount: numeric('amount', { precision: 10, scale: 2 }).notNull(),

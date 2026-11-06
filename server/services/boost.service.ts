@@ -10,6 +10,20 @@ import * as schema from '@/src/db/schema';
 import { sql } from '@/src/db/pg-orm';
 
 
+export function getRazorpayConfig() {
+  const keyId = (process.env.RAZORPAY_KEY_ID || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID)?.trim();
+  const keySecret = (process.env.RAZORPAY_KEY_SECRET || process.env.PAYMENT_GATEWAY_SECRET)?.trim();
+  const webhookSecret = (process.env.RAZORPAY_WEBHOOK_SECRET || process.env.PAYMENT_WEBHOOK_SECRET || keySecret)?.trim();
+
+  const isConfigured = Boolean(keyId && keySecret);
+  return {
+    keyId: keyId || '',
+    keySecret: keySecret || '',
+    webhookSecret: webhookSecret || keySecret || '',
+    isConfigured,
+  };
+}
+
 export class BoostService {
   public async getPackages(): Promise<PromotionalPackage[]> {
     return await boostRepository.findAllPackages();
@@ -47,13 +61,17 @@ export class BoostService {
     return await boostRepository.updatePackage(id, { isActive: !pkg.isActive });
   }
 
+  public getRazorpayConfig() {
+    return getRazorpayConfig();
+  }
+
   /**
    * Checks whether a real payment gateway secret (and optional provider constraint) is configured.
-   * Fail-closed: returns false whenever PAYMENT_GATEWAY_SECRET is absent or blank.
+   * Fail-closed: returns false whenever gateway credentials are missing.
    */
   public isGatewayConfigured(paymentGateway?: string): boolean {
-    const secret = process.env.PAYMENT_GATEWAY_SECRET?.trim();
-    if (!secret) {
+    const config = this.getRazorpayConfig();
+    if (!config.isConfigured) {
       return false;
     }
     const configuredProvider = process.env.PAYMENT_GATEWAY_PROVIDER?.trim();
@@ -155,7 +173,8 @@ export class BoostService {
   }
 
   /**
-   * Cryptographically verifies HMAC-SHA256 signature from payment gateway.
+   * Cryptographically verifies HMAC-SHA256 signature from Razorpay provider.
+   * HMAC-SHA256(razorpay_order_id + "|" + razorpay_payment_id, RAZORPAY_KEY_SECRET)
    * Strictly fail-closed: returns false if secret or signature is missing or invalid.
    */
   public verifyPaymentSignature(params: {
@@ -164,18 +183,19 @@ export class BoostService {
     signature?: string;
     secret?: string;
   }): boolean {
-    const secret = (params.secret ?? process.env.PAYMENT_GATEWAY_SECRET)?.trim();
+    const config = this.getRazorpayConfig();
+    const secret = (params.secret ?? config.keySecret)?.trim();
     if (!secret || !params.signature || !params.orderId || !params.paymentId) {
       return false;
     }
 
     const expected = crypto
       .createHmac('sha256', secret)
-      .update(`${params.orderId}|${params.paymentId}`)
+      .update(`${params.orderId.trim()}|${params.paymentId.trim()}`)
       .digest('hex');
 
     const expectedBuf = Buffer.from(expected, 'utf8');
-    const providedBuf = Buffer.from(params.signature, 'utf8');
+    const providedBuf = Buffer.from(params.signature.trim(), 'utf8');
     if (expectedBuf.length !== providedBuf.length) {
       return false;
     }
@@ -184,7 +204,7 @@ export class BoostService {
   }
 
   /**
-   * Cryptographically verifies HMAC-SHA256 webhook signature.
+   * Cryptographically verifies HMAC-SHA256 Razorpay webhook signature against raw body.
    * Strictly fail-closed: returns false if webhook secret or signature is missing or invalid.
    */
   public verifyWebhookSignature(params: {
@@ -192,7 +212,8 @@ export class BoostService {
     signature?: string | null;
     secret?: string;
   }): boolean {
-    const secret = (params.secret ?? process.env.PAYMENT_WEBHOOK_SECRET)?.trim();
+    const config = this.getRazorpayConfig();
+    const secret = (params.secret ?? config.webhookSecret ?? config.keySecret)?.trim();
     if (!secret || !params.signature || !params.rawBody) {
       return false;
     }
@@ -203,7 +224,7 @@ export class BoostService {
       .digest('hex');
 
     const expectedBuf = Buffer.from(expected, 'utf8');
-    const providedBuf = Buffer.from(params.signature, 'utf8');
+    const providedBuf = Buffer.from(params.signature.trim(), 'utf8');
     if (expectedBuf.length !== providedBuf.length) {
       return false;
     }
@@ -436,6 +457,7 @@ export class BoostService {
   public async verifyCapturedPaymentEvent(
     params: {
       orderId: string;
+      providerOrderId?: string;
       paymentId: string;
       paymentGateway?: string;
       expectedAmount: number;
@@ -444,13 +466,18 @@ export class BoostService {
     txOrDb?: any
   ): Promise<{ verified: boolean; reason?: string }> {
     const schema = await import('@/src/db/schema');
-    const { eq } = await import('@/src/db/pg-orm');
+    const { eq, or } = await import('@/src/db/pg-orm');
     const queryDb = txOrDb || db;
 
     const events = await queryDb
       .select()
       .from(schema.paymentWebhookEvents)
-      .where(eq(schema.paymentWebhookEvents.orderId, params.orderId));
+      .where(
+        or(
+          eq(schema.paymentWebhookEvents.orderId, params.orderId),
+          params.providerOrderId ? eq(schema.paymentWebhookEvents.orderId, params.providerOrderId) : eq(schema.paymentWebhookEvents.orderId, params.orderId)
+        )
+      );
 
     if (!events || events.length === 0) {
       return {
@@ -464,7 +491,7 @@ export class BoostService {
 
     for (const ev of events) {
       const evGw = String(ev.gateway || '').trim().toLowerCase();
-      if (expectedGw && evGw && evGw !== expectedGw) {
+      if (expectedGw && evGw && evGw !== expectedGw && !evGw.includes('razorpay')) {
         continue;
       }
 
@@ -509,6 +536,7 @@ export class BoostService {
       }
 
       const recordedOrderId = String(
+        payload.providerOrderId ??
         payload.orderId ??
         payload?.payload?.payment?.entity?.order_id ??
         payload?.data?.object?.client_reference_id ??
@@ -516,7 +544,11 @@ export class BoostService {
         ''
       ).trim();
 
-      if (recordedOrderId !== params.orderId.trim()) {
+      const matchesOrder =
+        recordedOrderId === params.orderId.trim() ||
+        (params.providerOrderId && recordedOrderId === params.providerOrderId.trim());
+
+      if (!matchesOrder) {
         continue;
       }
 
@@ -550,154 +582,185 @@ export class BoostService {
   }
 
   /**
-   * Durable, atomically idempotent webhook handler backed by PostgreSQL.
-   * Uses database-enforced ON CONFLICT DO NOTHING and row-level locking inside activateBoostInTransaction.
+   * Durable, atomically idempotent native Razorpay webhook handler backed by PostgreSQL.
+   * Uses database-enforced ON CONFLICT DO NOTHING and row-level locking.
    */
-  public async handleWebhook(event: {
-    eventId: string;
-    eventType: string;
-    orderId: string;
-    paymentId: string;
-    paymentGateway: string;
+  public async handleWebhook(params: {
+    eventId?: string;
+    eventType?: string;
+    orderId?: string;
+    paymentId?: string;
+    paymentGateway?: string;
     amount?: number;
     currency?: string;
     payload?: any;
   }): Promise<{ success: boolean; message: string; duplicate?: boolean; status?: number }> {
-    const { eventId, eventType, orderId, paymentId, paymentGateway, amount, currency, payload } = event;
+    const body = params.payload || {};
+    const eventType = String(params.eventType || body.event || body.eventType || '').trim();
+    const paymentEntity = body.payload?.payment?.entity || body.payload?.payment || body;
 
-    if (!eventId || !orderId || !paymentId || !paymentGateway) {
-      return { success: false, message: 'Missing required webhook fields', status: 400 };
+    const paymentId = String(
+      params.paymentId || paymentEntity.id || body.paymentId || ''
+    ).trim();
+
+    const providerOrderId = String(
+      paymentEntity.order_id || params.orderId || body.orderId || ''
+    ).trim();
+
+    const internalOrderId = String(
+      paymentEntity.notes?.internal_order_id || body.notes?.internal_order_id || ''
+    ).trim();
+
+    const eventId = String(
+      params.eventId || body.event_id || body.id || `evt_${crypto.randomUUID()}`
+    ).trim();
+
+    const gateway = String(params.paymentGateway || 'Razorpay').trim();
+
+    if (!paymentId || (!providerOrderId && !internalOrderId)) {
+      return { success: false, message: 'Missing required Razorpay paymentId or orderId in webhook payload', status: 400 };
     }
 
-    const configuredProvider = process.env.PAYMENT_GATEWAY_PROVIDER?.trim();
-    if (configuredProvider && configuredProvider.toLowerCase() !== paymentGateway.trim().toLowerCase()) {
-      return {
-        success: false,
-        message: `Unrecognized payment gateway provider: ${paymentGateway}`,
-        status: 400,
-      };
+    // Razorpay amounts are in paise (divide by 100 to get INR rupees)
+    let verifiedAmount: number | undefined = undefined;
+    if (typeof paymentEntity.amount === 'number' && paymentEntity.amount > 0) {
+      verifiedAmount = paymentEntity.amount > 1000 ? paymentEntity.amount / 100 : paymentEntity.amount;
+    } else if (typeof params.amount === 'number') {
+      verifiedAmount = params.amount > 1000 ? params.amount / 100 : params.amount;
+    } else if (typeof body.amount === 'number') {
+      verifiedAmount = body.amount > 1000 ? body.amount / 100 : body.amount;
     }
 
-    if (eventType === 'payment.captured' || eventType === 'checkout.session.completed') {
-      const order = await boostRepository.findOrderById(orderId);
-      if (!order) {
-        const schema = await import('@/src/db/schema');
-        const { eq } = await import('@/src/db/pg-orm');
-        const postingOrderRows = await db
-          .select()
-          .from(schema.postingOrders)
-          .where(eq(schema.postingOrders.orderId, orderId))
-          .limit(1);
+    const verifiedCurrency = String(
+      paymentEntity.currency || params.currency || body.currency || 'INR'
+    ).trim().toUpperCase();
 
-        const postingOrder = postingOrderRows[0];
-        if (!postingOrder) {
-          return { success: false, message: `Order ${orderId} not found`, status: 404 };
+    const paymentStatus = String(
+      paymentEntity.status || body.status || ''
+    ).trim().toLowerCase();
+
+    const isCaptured =
+      eventType === 'payment.captured' ||
+      eventType === 'checkout.session.completed' ||
+      paymentStatus === 'captured' ||
+      paymentStatus === 'paid';
+
+    if (!isCaptured) {
+      return { success: true, message: `Ignored non-capture event: ${eventType}`, status: 200 };
+    }
+
+    if (verifiedAmount === undefined || isNaN(verifiedAmount) || verifiedAmount <= 0) {
+      return { success: false, message: 'Invalid or missing payment amount in webhook payload', status: 400 };
+    }
+
+    const { db } = await import('@/src/db/index');
+    const { eq, or, sql } = await import('@/src/db/pg-orm');
+    const schema = await import('@/src/db/schema');
+
+    // 1. Check posting_orders table first
+    const postingOrderRows = await db
+      .select()
+      .from(schema.postingOrders)
+      .where(
+        or(
+          providerOrderId ? eq(schema.postingOrders.providerOrderId, providerOrderId) : sql`1=0`,
+          internalOrderId ? eq(schema.postingOrders.orderId, internalOrderId) : sql`1=0`,
+          providerOrderId ? eq(schema.postingOrders.orderId, providerOrderId) : sql`1=0`
+        )
+      )
+      .limit(1);
+
+    const postingOrder = postingOrderRows[0];
+    if (postingOrder) {
+      const expectedTotal = Number(postingOrder.amount);
+      if (Math.abs(verifiedAmount - expectedTotal) >= 0.01) {
+        return {
+          success: false,
+          message: `Payment amount mismatch for posting order: expected ₹${expectedTotal.toFixed(2)}, got ₹${verifiedAmount.toFixed(2)}`,
+          status: 400,
+        };
+      }
+
+      if (verifiedCurrency !== postingOrder.currency.toUpperCase()) {
+        return {
+          success: false,
+          message: `Payment currency mismatch: expected ${postingOrder.currency}, got ${verifiedCurrency}`,
+          status: 400,
+        };
+      }
+
+      const newlyRecorded = await paymentRepository.recordWebhookEvent(
+        eventId,
+        gateway,
+        postingOrder.orderId,
+        {
+          eventType,
+          orderId: postingOrder.orderId,
+          providerOrderId: postingOrder.providerOrderId || providerOrderId,
+          paymentId,
+          amount: verifiedAmount,
+          currency: verifiedCurrency,
+          status: paymentStatus || 'captured',
+          payload: body,
         }
+      );
 
-        const { amount: verifiedAmount, currency: verifiedCurrency } = this.parseProviderAmountAndCurrency(
-          paymentGateway,
-          payload,
-          amount,
-          currency
-        );
-
-        if (verifiedAmount === undefined || verifiedCurrency === undefined) {
-          return {
-            success: false,
-            message: 'Missing or unverifiable payment amount or currency in provider payload',
-            status: 400,
-          };
-        }
-
-        const expectedTotal = Number(postingOrder.amount);
-        if (Math.abs(verifiedAmount - expectedTotal) >= 0.01) {
-          return {
-            success: false,
-            message: `Payment amount mismatch: expected ${expectedTotal.toFixed(2)}, got ${verifiedAmount.toFixed(2)}`,
-            status: 400,
-          };
-        }
-
-        if (verifiedCurrency.toUpperCase() !== postingOrder.currency.toUpperCase()) {
-          return {
-            success: false,
-            message: `Payment currency mismatch: expected ${postingOrder.currency}, got ${verifiedCurrency}`,
-            status: 400,
-          };
-        }
-
-        const newlyRecorded = await paymentRepository.recordWebhookEvent(
-          eventId,
-          paymentGateway.trim(),
-          orderId,
-          {
-            ...(payload || {}),
-            eventType,
-            orderId,
-            paymentId,
-            amount: verifiedAmount,
-            currency: verifiedCurrency,
-          }
-        );
-
-        if (!newlyRecorded) {
-          return {
-            success: true,
-            duplicate: true,
-            message: `Webhook event ${eventId} already processed (idempotent skipped)`,
-            status: 200,
-          };
-        }
-
+      if (!newlyRecorded) {
         return {
           success: true,
-          duplicate: false,
-          message: 'Posting fee payment capture recorded via webhook',
+          duplicate: true,
+          message: `Webhook event ${eventId} already processed (idempotent skipped)`,
           status: 200,
         };
       }
 
-      const { amount: verifiedAmount, currency: verifiedCurrency } = this.parseProviderAmountAndCurrency(
-        paymentGateway,
-        payload,
-        amount,
-        currency
-      );
+      return {
+        success: true,
+        duplicate: false,
+        message: 'Posting fee payment capture recorded via Razorpay webhook',
+        status: 200,
+      };
+    }
 
-      if (verifiedAmount === undefined || verifiedCurrency === undefined) {
-        return {
-          success: false,
-          message: 'Missing or unverifiable payment amount or currency in provider payload',
-          status: 400,
-        };
-      }
+    // 2. Check boost_orders table
+    const boostOrderRows = await db
+      .select()
+      .from(schema.boostOrders)
+      .where(
+        or(
+          providerOrderId ? eq(schema.boostOrders.orderId, providerOrderId) : sql`1=0`,
+          internalOrderId ? eq(schema.boostOrders.orderId, internalOrderId) : sql`1=0`
+        )
+      )
+      .limit(1);
 
-      const expectedTotal = Number(order.totalAmount);
-
+    const boostOrder = boostOrderRows[0];
+    if (boostOrder) {
+      const expectedTotal = Number(boostOrder.totalAmount);
       if (Math.abs(verifiedAmount - expectedTotal) >= 0.01) {
         return {
           success: false,
-          message: `Payment amount mismatch: expected ${expectedTotal.toFixed(2)}, got ${verifiedAmount.toFixed(2)}`,
+          message: `Payment amount mismatch for boost order: expected ₹${expectedTotal.toFixed(2)}, got ₹${verifiedAmount.toFixed(2)}`,
           status: 400,
         };
       }
 
-      if (verifiedCurrency.toUpperCase() !== order.currency.toUpperCase()) {
+      if (verifiedCurrency !== boostOrder.currency.toUpperCase()) {
         return {
           success: false,
-          message: `Payment currency mismatch: expected ${order.currency}, got ${verifiedCurrency}`,
+          message: `Payment currency mismatch: expected ${boostOrder.currency}, got ${verifiedCurrency}`,
           status: 400,
         };
       }
 
       const invoiceNumber = `INV-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
       const txResult = await paymentRepository.activateBoostInTransaction({
-        orderId,
+        orderId: boostOrder.orderId,
         paymentId,
-        paymentGateway: paymentGateway.trim(),
+        paymentGateway: gateway,
         invoiceNumber,
         eventId,
-        webhookPayload: payload || {},
+        webhookPayload: body,
         verifiedAmount,
         verifiedCurrency,
       });
@@ -720,22 +783,12 @@ export class BoostService {
       return {
         success: true,
         duplicate: false,
-        message: 'Boost activated via webhook',
+        message: 'Boost activated via Razorpay webhook',
         status: 200,
       };
     }
 
-    // Atomically record non-payment webhook event via ON CONFLICT DO NOTHING
-    const newlyRecorded = await paymentRepository.recordWebhookEvent(eventId, paymentGateway, orderId, payload || {});
-    if (!newlyRecorded) {
-      return {
-        success: true,
-        duplicate: true,
-        message: `Webhook event ${eventId} already processed (idempotent skipped)`,
-        status: 200,
-      };
-    }
-    return { success: true, duplicate: false, message: 'Webhook event processed', status: 200 };
+    return { success: false, message: `Order '${providerOrderId || internalOrderId}' not found in database`, status: 404 };
   }
 
   /**

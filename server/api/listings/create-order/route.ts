@@ -32,7 +32,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: result.error }, { status: result.status });
     }
 
-    return NextResponse.json({ success: true, order: result.order, orderId: result.order?.orderId }, { status: 201 });
+    return NextResponse.json({
+      success: true,
+      order: result.order,
+      orderId: result.order?.orderId,
+      providerOrderId: result.order?.providerOrderId,
+      keyId: (result as any).keyId,
+      amount: result.order?.amount,
+      currency: result.order?.currency || 'INR',
+    }, { status: 201 });
   } catch (err: any) {
     console.error('API /api/listings/create-order error:', err);
     return NextResponse.json({ error: err.message || 'Error creating posting order' }, { status: 500 });

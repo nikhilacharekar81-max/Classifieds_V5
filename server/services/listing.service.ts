@@ -635,7 +635,7 @@ export class ListingService {
 
         // Preserve seller's selected featured upgrade as a pending order/request without activating it for free
         if (sellerRequestedFeatured) {
-          let pendingFeaturedOrderId: string | undefined = rawCustomAttrs.pendingFeaturedOrderId;
+          let pendingFeaturedOrderId: string | undefined = typeof rawCustomAttrs.pendingFeaturedOrderId === 'string' ? rawCustomAttrs.pendingFeaturedOrderId : undefined;
           const featuredPrice = Math.max(0, Number(paidCfg?.featuredAdPrice ?? 100) || 100);
           if (!pendingFeaturedOrderId) {
             const crypto = await import('node:crypto');
@@ -768,7 +768,7 @@ export class ListingService {
     purpose?: string;
     listingId?: string;
     amount?: number;
-  }): Promise<{ success: boolean; order?: any; error?: string; status: number }> {
+  }): Promise<{ success: boolean; order?: any; keyId?: string; error?: string; status: number }> {
     const { categoryId, subcategoryId, userId, purpose = 'posting_fee', amount: reqAmount } = params;
     const category = await categoryRepository.findById(categoryId);
     if (!category) {
@@ -820,14 +820,66 @@ export class ListingService {
       return { success: false, error: 'No posting fee is required for this category', status: 400 };
     }
 
+    const { getRazorpayConfig } = await import('@/server/services/boost.service');
+    const rzpConfig = getRazorpayConfig();
+
+    if (!rzpConfig.isConfigured) {
+      return {
+        success: false,
+        error: 'Razorpay payment gateway credentials (RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET) are not configured on the server. Paid listings cannot be created without a configured payment gateway.',
+        status: 503,
+      };
+    }
+
     const { db } = await import('@/src/db/index');
     const schema = await import('@/src/db/schema');
     const crypto = await import('node:crypto');
     const prefix = purpose === 'featured_ad' ? 'ORD-FEAT-' : 'ORD-POST-';
     const orderId = `${prefix}${crypto.randomUUID()}`;
 
+    let providerOrderId: string | undefined = undefined;
+    try {
+      const authHeader = 'Basic ' + Buffer.from(`${rzpConfig.keyId}:${rzpConfig.keySecret}`).toString('base64');
+      const rzpRes = await fetch('https://api.razorpay.com/v1/orders', {
+        method: 'POST',
+        headers: {
+          Authorization: authHeader,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          amount: Math.round(postingFee * 100), // amount in paise
+          currency: 'INR',
+          receipt: orderId,
+          notes: {
+            internal_order_id: orderId,
+            user_id: userId,
+            purpose,
+          },
+        }),
+      });
+
+      const rzpData = await rzpRes.json();
+      if (!rzpRes.ok || !rzpData.id) {
+        console.error('Razorpay Orders API error:', rzpData);
+        return {
+          success: false,
+          error: rzpData.error?.description || 'Failed to create genuine Razorpay provider order.',
+          status: rzpRes.status || 500,
+        };
+      }
+      providerOrderId = rzpData.id;
+    } catch (rzpErr: any) {
+      console.error('Razorpay API connection error:', rzpErr);
+      return {
+        success: false,
+        error: 'Could not connect to Razorpay Orders API: ' + (rzpErr.message || 'Network error'),
+        status: 500,
+      };
+    }
+
     await db.insert(schema.postingOrders).values({
       orderId,
+      providerOrderId,
       userId,
       categoryId: subcategoryId || categoryId,
       amount: String(postingFee),
@@ -840,10 +892,12 @@ export class ListingService {
       success: true,
       order: {
         orderId,
+        providerOrderId,
         amount: postingFee,
         currency: 'INR',
         purpose,
       },
+      keyId: rzpConfig.keyId,
       status: 201,
     };
   }

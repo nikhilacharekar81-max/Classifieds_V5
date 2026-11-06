@@ -79,6 +79,9 @@ const MIGRATIONS: Record<string, string> = {
   '006_email_opt_in_default': `
     ALTER TABLE "users" ALTER COLUMN "email_subscribed" SET DEFAULT false;
   `,
+  '007_posting_orders_provider_order_id': `
+    ALTER TABLE "posting_orders" ADD COLUMN IF NOT EXISTS "provider_order_id" varchar(128);
+  `,
 };
 
 async function runMigrations(executor: { query: (sql: string, params?: any[]) => Promise<any> }) {

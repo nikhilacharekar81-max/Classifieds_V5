@@ -388,30 +388,32 @@ export const PostAdPage: React.FC = () => {
           return;
         }
         createdOrderId = orderData.orderId;
+        const rzpKey = orderData.keyId;
+        const rzpOrderId = orderData.providerOrderId || orderData.orderId;
 
-        // Open genuine payment provider checkout (e.g. Razorpay SDK) if available
-        if (typeof window !== 'undefined' && (window as any).Razorpay) {
+        // Open genuine payment provider checkout (Razorpay SDK) if key and provider order ID are returned
+        if (typeof window !== 'undefined' && (window as any).Razorpay && rzpKey && orderData.providerOrderId) {
           const razorpayPayment = await new Promise<{
             paymentId: string;
             orderId: string;
             signature: string;
           }>((resolve, reject) => {
             const rzp = new (window as any).Razorpay({
-              key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_key',
-              amount: Math.round(mandatoryPostingFee * 100),
-              currency: 'INR',
+              key: rzpKey,
+              amount: Math.round((orderData.amount || mandatoryPostingFee) * 100),
+              currency: orderData.currency || 'INR',
               name: 'Chillyads Classifieds',
               description: `Posting Fee for ${postForm.title.substring(0, 30)}`,
-              order_id: createdOrderId,
+              order_id: rzpOrderId,
               handler: function (response: any) {
                 if (response.razorpay_payment_id && response.razorpay_signature) {
                   resolve({
                     paymentId: response.razorpay_payment_id,
-                    orderId: response.razorpay_order_id || createdOrderId!,
+                    orderId: response.razorpay_order_id || rzpOrderId,
                     signature: response.razorpay_signature,
                   });
                 } else {
-                  reject(new Error('Invalid response received from payment provider checkout.'));
+                  reject(new Error('Invalid response received from Razorpay payment checkout.'));
                 }
               },
               modal: {
@@ -427,10 +429,10 @@ export const PostAdPage: React.FC = () => {
           postingFeeSignature = razorpayPayment.signature;
           selectedPaymentGateway = 'Razorpay';
         } else {
-          // If payment gateway SDK is not loaded or direct provider checkout is unavailable
+          // If payment gateway SDK is not loaded or credentials/provider order creation is unavailable
           addToast({
-            title: 'Online Payment Unavailable',
-            message: `Online payment gateway checkout is currently unavailable. Paid listing creation requires a verified payment provider. Your form details and photos have been preserved.`,
+            title: 'Online Payment Checkout Unavailable',
+            message: `Razorpay payment gateway credentials or SDK are not available on the server. Paid listing creation requires a configured payment provider. Your form details and photos have been preserved.`,
             type: 'error',
           });
           return;
