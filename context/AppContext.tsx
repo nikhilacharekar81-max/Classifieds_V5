@@ -108,6 +108,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
             status: 'active',
           } : null;
           updateAuth(data.user, admin, data.user.id);
+          if (data.favoriteListingIds) {
+            setFavoriteListingIds(data.favoriteListingIds);
+          }
         } else {
           updateAuth(null, null, null);
         }
@@ -148,6 +151,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
   const [emailSettings, setEmailSettings] = useState<EmailSettings>(INITIAL_EMAIL_SETTINGS);
   const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>(INITIAL_EMAIL_TEMPLATES);
   const [newsletters, setNewsletters] = useState<NewsletterCampaign[]>([]);
+  const [favoriteListingIds, setFavoriteListingIds] = useState<string[]>([]);
 
   // Sync server-provided reference data when root layout revalidates
   useEffect(() => {
@@ -368,6 +372,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
         }
         if (data.currentUser) {
           setActiveUserId(data.currentUser.id);
+          if (data.favoriteListingIds) {
+            setFavoriteListingIds(data.favoriteListingIds);
+          }
         }
       }
     } catch (err) {
@@ -526,6 +533,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
     recordAuditLog,
   });
 
+  const toggleFavorite = async (listingId: string) => {
+    if (!currentUser) {
+      addToast({ type: 'warning', title: 'Login Required', message: 'Please sign in to save items to your watchlist.' });
+      return;
+    }
+    try {
+      const res = await fetch(`/api/listings/${listingId}/favorite`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update favorites');
+      
+      setFavoriteListingIds(prev => 
+        data.isFavorited ? [...prev, listingId] : prev.filter(id => id !== listingId)
+      );
+
+      // Update the listing's like count in local state
+      setListings(prev => prev.map(l => l.id === listingId ? { ...l, likes: data.count } : l));
+
+      addToast({
+        type: 'success',
+        title: data.isFavorited ? 'Saved to Watchlist' : 'Removed from Watchlist',
+        message: data.isFavorited ? 'Listing added to your saved items.' : 'Listing removed from your saved items.',
+      });
+    } catch (err: any) {
+      addToast({ type: 'error', title: 'Error', message: err.message });
+    }
+  };
+
   // Periodic automatic cleanup of expired boosts
   useEffect(() => {
     listingActions.cleanupExpiredBoosts();
@@ -574,8 +608,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
         emailSettings,
         emailTemplates,
         newsletters,
+        favoriteListingIds,
         ...emailActions,
         ...adminActions,
+        toggleFavorite,
         isListingBoosted,
         addToast,
         removeToast,

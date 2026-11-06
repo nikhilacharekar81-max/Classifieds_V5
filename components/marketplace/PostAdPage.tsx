@@ -283,6 +283,9 @@ export const PostAdPage: React.FC = () => {
       }
     }
 
+    const listingDurationDays = settings.listingDurationDays || 30;
+    const featuredDurationDays = paidCfg?.featuredAdDurationDays || 30;
+
     const { listing: newAd, error, code } = await addListing({
       title: postForm.title,
       categoryId: postForm.categoryId,
@@ -297,7 +300,7 @@ export const PostAdPage: React.FC = () => {
       images: finalImages,
       status: 'pending',
       isFeatured: wantFeatured,
-      featuredUntil: wantFeatured ? new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0] : undefined,
+      featuredUntil: wantFeatured ? new Date(Date.now() + featuredDurationDays * 86400000).toISOString().split('T')[0] : undefined,
       isBoosted: wantFeatured,
       location: {
         city: postForm.city,
@@ -305,7 +308,7 @@ export const PostAdPage: React.FC = () => {
         locality: postForm.locality,
       },
       customAttributes: postForm.dynamicAttributes,
-      expiresAt: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+      expiresAt: new Date(Date.now() + listingDurationDays * 86400000).toISOString().split('T')[0],
     });
 
     if (!newAd) {

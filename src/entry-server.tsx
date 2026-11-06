@@ -37,6 +37,7 @@ export interface SsrRenderResult {
   pageTitle: string;
   metaDescription: string;
   ssrProps: AppClientRouterProps;
+  statusCode?: number;
 }
 
 const CITY_CATALOG_FILTER_KEYS = [
@@ -96,6 +97,9 @@ export async function renderSsrPage(
     const rawListing = await getCachedPublicListingById(parsedRoute.listingId);
     if (isListingPubliclyAccessible(rawListing)) {
       initialListing = rawListing;
+      // Increment views asynchronously (non-blocking for SSR performance)
+      listingService.incrementViews(rawListing.id).catch(console.warn);
+      
       const relatedItems = await listingService.getCachedRelatedListings(
         rawListing.categoryId,
         rawListing.id,
@@ -103,6 +107,26 @@ export async function renderSsrPage(
       );
       initialListings = relatedItems;
       initialTotalListings = relatedItems.length;
+    } else {
+      // 404 if listing not found, expired, or rejected
+      return {
+        appHtml: '',
+        headTagsHtml: '',
+        pageTitle: 'Listing Not Found',
+        metaDescription: 'The requested classified listing could not be found or has been removed.',
+        ssrProps: {
+          initialPath: urlPath,
+          initialQuery: queryObj,
+          initialServerData: {
+            categories,
+            locations,
+            settings,
+            cmsPages: allCmsPages.filter((p) => p.status === 'published'),
+            listings: [],
+          },
+        },
+        statusCode: 404,
+      };
     }
   } else if (
     parsedRoute.routeType === 'home' ||
@@ -325,5 +349,6 @@ export async function renderSsrPage(
     pageTitle,
     metaDescription: metaDesc,
     ssrProps,
+    statusCode: 200,
   };
 }

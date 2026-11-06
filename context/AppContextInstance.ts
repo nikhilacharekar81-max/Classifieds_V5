@@ -62,6 +62,7 @@ export interface AppContextType {
   auditLogs: AuditLog[];
   settings: SystemSettings;
   toasts: ToastMessage[];
+  favoriteListingIds: string[];
 
   // Listing Operations
   approveListing: (id: string) => void;
@@ -85,6 +86,7 @@ export interface AppContextType {
   bulkApproveListings: (ids: string[]) => void;
   bulkRejectListings: (ids: string[], reason: string) => void;
   bulkDeleteListings: (ids: string[]) => void;
+  toggleFavorite: (listingId: string) => Promise<void>;
 
   // Email System, Newsletters & Logs
   emailLogs: EmailLog[];

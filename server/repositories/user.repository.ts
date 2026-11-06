@@ -132,6 +132,17 @@ export class UserRepository {
     }
   }
 
+  public async generateUnsubscribeToken(userId: string): Promise<string> {
+    const token = `unsub_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+    await db.update(schema.users).set({ unsubscribeToken: token }).where(eq(schema.users.id, userId));
+    return token;
+  }
+
+  public async findByUnsubscribeToken(token: string): Promise<typeof schema.users.$inferSelect | null> {
+    const rows = await db.select().from(schema.users).where(eq(schema.users.unsubscribeToken, token)).limit(1);
+    return rows[0] || null;
+  }
+
   public async findAll(): Promise<UserAccount[]> {
     try {
       const rows = (await withDbRetry(() =>

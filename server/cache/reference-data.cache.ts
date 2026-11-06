@@ -4,6 +4,7 @@ import { categoryRepository } from '@/server/repositories/category.repository';
 import { locationRepository } from '@/server/repositories/location.repository';
 import { adminRepository } from '@/server/repositories/admin.repository';
 import { db, withDbRetry } from '@/src/db/index';
+import { LRUCache } from 'lru-cache';
 import { cacheInvalidationOutbox } from '@/src/db/schema';
 import { eq, and, lte, inArray, sql } from '@/src/db/pg-orm';
 import type { Category, LocationItem, SystemSettings } from '@/lib/types';
@@ -359,15 +360,23 @@ type LiveListingCountsResult = {
   rows?: Array<{ categoryId: string | null; subcategoryId: string | null; count: number }>;
 };
 
-function normalizeCityCacheKey(city?: string): string {
+async function normalizeCityCacheKey(city?: string): Promise<string> {
   if (!city) return '__ALL_INDIA__';
   const clean = city.replace(/[-_]/g, ' ').trim();
   if (!clean) return '__ALL_INDIA__';
   const lower = clean.toLowerCase();
-  if (lower === 'all india' || lower === 'all') {
+  if (lower === 'all india' || lower === 'all' || lower === 'all-india') {
     return '__ALL_INDIA__';
   }
-  return clean;
+
+  // Strict validation against location repository
+  const locations = await locationRepository.findAll();
+  const match = locations.find(l => 
+    l.type === 'city' && 
+    (l.name.toLowerCase() === lower || (l.slug && l.slug.toLowerCase() === lower))
+  );
+
+  return match && match.slug ? match.slug : '__ALL_INDIA__';
 }
 
 const fetchCachedLiveListingCountsInternal = unstable_cache(
@@ -383,8 +392,14 @@ const fetchCachedLiveListingCountsInternal = unstable_cache(
 );
 
 let lastOutboxCheckMs = 0;
-const lastKnownGoodCountsByCity = new Map<string, LiveListingCountsResult>();
-const lastKnownGoodCategoriesByCity = new Map<string, Category[]>();
+const lastKnownGoodCountsByCity = new LRUCache<string, LiveListingCountsResult>({
+  max: 500,
+  ttl: 1000 * 60 * 60 * 24, // 24 hours
+});
+const lastKnownGoodCategoriesByCity = new LRUCache<string, Category[]>({
+  max: 500,
+  ttl: 1000 * 60 * 60 * 24, // 24 hours
+});
 
 export const getCachedCategoryHierarchy = cache(async (): Promise<Category[]> => {
   if (
@@ -411,7 +426,7 @@ export const getCachedLiveListingCounts = cache(async (city?: string): Promise<L
     }
   }
 
-  const cityKey = normalizeCityCacheKey(city);
+  const cityKey = await normalizeCityCacheKey(city);
   const cityFilter = cityKey === '__ALL_INDIA__' ? undefined : cityKey;
   let result: LiveListingCountsResult;
 
@@ -427,7 +442,7 @@ export const getCachedLiveListingCounts = cache(async (city?: string): Promise<L
 });
 
 export const getCategoriesWithLiveCounts = cache(async (city?: string): Promise<Category[]> => {
-  const cityKey = normalizeCityCacheKey(city);
+  const cityKey = await normalizeCityCacheKey(city);
   try {
     const [hierarchy, counts] = await Promise.all([
       getCachedCategoryHierarchy(),

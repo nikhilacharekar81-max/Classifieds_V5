@@ -224,9 +224,9 @@ export class CategoryRepository {
 
   public async delete(id: string): Promise<boolean> {
     try {
-      const hasListings = await this.checkHasActiveListings(id);
+      const hasListings = await this.checkHasAnyListings(id);
       if (hasListings) {
-        throw new Error('Cannot delete category with active listings');
+        throw new Error('Cannot delete category because it or its subcategories still contain listings');
       }
 
       const res = await db.delete(schema.categories).where(eq(schema.categories.id, id)).returning({ id: schema.categories.id });
@@ -237,14 +237,32 @@ export class CategoryRepository {
     }
   }
 
-  public async checkHasActiveListings(categoryId: string): Promise<boolean> {
+  /**
+   * Comprehensive check for ANY listings referencing this category OR its subcategories.
+   * Required to prevent foreign key violations and orphaned data regardless of listing status.
+   */
+  public async checkHasAnyListings(categoryId: string): Promise<boolean> {
+    // 1. Get all descendent category IDs including self
+    const allCategories = await this.findAllHierarchy();
+    const subcategoryIds = new Set<string>([categoryId]);
+    
+    // Simple one-level child check (current system only supports one level of nesting)
+    for (const cat of allCategories) {
+      if (cat.parentId === categoryId) {
+        subcategoryIds.add(cat.id);
+      }
+    }
+
+    const ids = Array.from(subcategoryIds);
+
+    // 2. Check for any listings in any of these categories
     const rows = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(schema.listings)
       .where(
-        and(
-          or(eq(schema.listings.categoryId, categoryId), eq(schema.listings.subcategoryId, categoryId)),
-          eq(schema.listings.status, 'approved')
+        or(
+          inArray(schema.listings.categoryId, ids),
+          inArray(schema.listings.subcategoryId, ids)
         )
       );
     return (rows[0]?.count || 0) > 0;

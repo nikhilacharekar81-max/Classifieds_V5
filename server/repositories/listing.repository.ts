@@ -755,6 +755,7 @@ export class ListingRepository {
     status?: string;
     expiresAt?: Date;
     isFeatured?: boolean;
+    featuredUntil?: Date;
     isBoosted?: boolean;
   }): Promise<Listing> {
     return await db.transaction(async (tx) => {
@@ -797,7 +798,10 @@ export class ListingRepository {
           images: data.images || [],
           customAttributes: data.customAttributes || {},
           isFeatured: data.isFeatured ?? false,
+          featuredUntil: data.featuredUntil || null,
           isBoosted: data.isBoosted ?? false,
+          boostStatus: (data.isBoosted || data.isFeatured) ? 'active' : 'inactive',
+          boostExpiresAt: data.featuredUntil || null,
           status: data.status || 'pending',
           expiresAt: data.expiresAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         })

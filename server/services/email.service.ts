@@ -191,12 +191,26 @@ export class EmailService {
     const recipients = await this.filterAudienceUsers(campaign.targetAudience || 'all_subscribed', campaign.targetState, campaign.targetCity);
     const count = recipients.length;
 
+    const baseUrl = process.env.APP_URL || 'http://localhost:3000';
+    
     for (const user of recipients) {
+      const unsubToken = await userRepository.generateUnsubscribeToken(user.id);
+      const unsubUrl = `${baseUrl.replace(/\/$/, '')}/api/auth/unsubscribe?token=${unsubToken}`;
+      
+      const personalizedBody = (campaign.contentHtml || '')
+        .replace(/\{\{user_name\}\}/g, user.name)
+        .replace(/\{\{city\}\}/g, user.location?.city || 'India')
+        .replace(/\{\{unsubscribe_url\}\}/g, unsubUrl);
+
+      const personalizedSubject = campaign.subject
+        .replace(/\{\{user_name\}\}/g, user.name)
+        .replace(/\{\{city\}\}/g, user.location?.city || 'India');
+
       await this.sendEmail({
         toEmail: user.email,
         toName: user.name,
-        subject: campaign.subject,
-        body: campaign.contentHtml || '',
+        subject: personalizedSubject,
+        body: personalizedBody,
         type: 'newsletter',
         isMarketing: true,
         relatedUserId: user.id,

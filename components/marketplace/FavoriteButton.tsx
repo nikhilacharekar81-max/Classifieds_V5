@@ -1,9 +1,7 @@
-'use client';
-
-import React, { useCallback, useSyncExternalStore } from 'react';
+import React, { useMemo } from 'react';
 import { Heart } from 'lucide-react';
 import { Listing } from '@/lib/types';
-import { dispatchPublicToast } from '@/components/common/ChunkErrorRecovery';
+import { useApp } from '@/context/AppContext';
 
 export interface FavoriteButtonProps {
   listing?: Listing;
@@ -13,23 +11,6 @@ export interface FavoriteButtonProps {
   variant?: 'grid' | 'listicle';
 }
 
-const WATCHLIST_STORAGE_KEY = 'chilly_saved_watchlist_ids';
-const WATCHLIST_EVENT_NAME = 'chilly_watchlist_change';
-
-function subscribeWatchlist(callback: () => void) {
-  if (typeof window === 'undefined') return () => {};
-  window.addEventListener(WATCHLIST_EVENT_NAME, callback);
-  window.addEventListener('storage', callback);
-  return () => {
-    window.removeEventListener(WATCHLIST_EVENT_NAME, callback);
-    window.removeEventListener('storage', callback);
-  };
-}
-
-function getServerSavedSnapshot(): boolean {
-  return false;
-}
-
 export const FavoriteButton: React.FC<FavoriteButtonProps> = ({
   listing,
   listingId,
@@ -37,59 +18,24 @@ export const FavoriteButton: React.FC<FavoriteButtonProps> = ({
   onSaveWatchlist,
   variant = 'grid',
 }) => {
+  const { toggleFavorite, favoriteListingIds } = useApp();
   const effectiveId = listingId || listing?.id || '';
-  const effectiveTitle = listingTitle || listing?.title || 'Listing';
 
-  const getClientSavedSnapshot = useCallback(() => {
-    if (typeof window === 'undefined' || !effectiveId) return false;
-    try {
-      const raw = window.localStorage.getItem(WATCHLIST_STORAGE_KEY);
-      if (!raw) return false;
-      const ids = JSON.parse(raw) as string[];
-      return Array.isArray(ids) && ids.includes(effectiveId);
-    } catch {
-      return false;
-    }
-  }, [effectiveId]);
-
-  const isSaved = useSyncExternalStore(
-    subscribeWatchlist,
-    getClientSavedSnapshot,
-    getServerSavedSnapshot
+  const isSaved = useMemo(() => 
+    favoriteListingIds.includes(effectiveId), 
+    [favoriteListingIds, effectiveId]
   );
 
-  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+  const handleClick = async (e: React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
     e.stopPropagation();
     if (!effectiveId) return;
 
-    let nextSaved = !isSaved;
-    try {
-      const raw = window.localStorage.getItem(WATCHLIST_STORAGE_KEY);
-      const ids: string[] = raw ? JSON.parse(raw) : [];
-      const exists = ids.includes(effectiveId);
-      const updated = exists
-        ? ids.filter((id) => id !== effectiveId)
-        : [...ids, effectiveId];
-      window.localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(updated));
-      nextSaved = !exists;
-      window.dispatchEvent(new CustomEvent(WATCHLIST_EVENT_NAME));
-    } catch {
-      // ignore storage errors
-    }
+    await toggleFavorite(effectiveId);
 
     if (onSaveWatchlist && listing) {
       onSaveWatchlist(listing);
-      return;
     }
-
-    dispatchPublicToast({
-      type: 'info',
-      title: nextSaved ? 'Saved to Watchlist' : 'Removed from Watchlist',
-      message: nextSaved
-        ? `"${effectiveTitle}" saved to your watchlist.`
-        : `"${effectiveTitle}" removed from your watchlist.`,
-    });
   };
 
   if (variant === 'listicle') {

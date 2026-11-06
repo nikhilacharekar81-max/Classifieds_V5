@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { getAuthenticatedUser } from '@/lib/auth/session';
+import { listingService } from '@/server/services/listing.service';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,8 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const favoriteListingIds = await listingService.getFavoriteListingIds(authContext.userId);
+
   return NextResponse.json(
     {
       authenticated: true,
@@ -27,6 +30,7 @@ export async function GET(req: NextRequest) {
       isModerator: authContext.isModerator,
       isFinance: authContext.isFinance,
       impersonatedBy: authContext.impersonatedBy || null,
+      favoriteListingIds,
     },
     { status: 200, headers: noCacheHeaders }
   );

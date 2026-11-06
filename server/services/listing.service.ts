@@ -14,6 +14,7 @@ import {
   invalidateLiveListingCountsCache,
   REFERENCE_CACHE_TAGS,
   isListingCacheBypassed,
+  getCachedSystemSettings,
 } from '@/server/cache/reference-data.cache';
 import { locationRepository } from '@/server/repositories/location.repository';
 import { Listing } from '@/lib/types';
@@ -260,7 +261,15 @@ export class ListingService {
       };
     }
 
-    return await fetchCachedPaginatedCatalogInternal(serializedFilter, requestedPage, pageSize);
+    const paginatedResult = await fetchCachedPaginatedCatalogInternal(serializedFilter, requestedPage, pageSize);
+    
+    // Record boost impressions asynchronously
+    const boostedIds = paginatedResult.items.filter(l => l.isBoosted).map(l => l.id);
+    if (boostedIds.length > 0) {
+      this.incrementBoostImpressions(boostedIds).catch(console.warn);
+    }
+
+    return paginatedResult;
   }
 
   public async getCachedLatestListings(city?: string, limit: number = 10): Promise<Listing[]> {
@@ -278,7 +287,15 @@ export class ListingService {
       return res.items.map(toPublicListingCard);
     }
 
-    return await fetchCachedLatestListingsInternal(cityKey, limit);
+    const latestListings = await fetchCachedLatestListingsInternal(cityKey, limit);
+    
+    // Record boost impressions asynchronously
+    const boostedIds = latestListings.filter(l => l.isBoosted).map(l => l.id);
+    if (boostedIds.length > 0) {
+      this.incrementBoostImpressions(boostedIds).catch(console.warn);
+    }
+
+    return latestListings;
   }
 
   public async getCachedRelatedListings(
@@ -306,9 +323,16 @@ export class ListingService {
     const cleanId = id.trim();
     if (isListingCacheBypassed()) {
       const item = await listingRepository.findById(cleanId);
+      if (item && item.isBoosted) {
+        this.incrementBoostClick(item.id).catch(console.warn);
+      }
       return item ? toPublicListingDetail(item) : null;
     }
-    return await fetchCachedListingByIdInternal(cleanId);
+    const cachedItem = await fetchCachedListingByIdInternal(cleanId);
+    if (cachedItem && cachedItem.isBoosted) {
+      this.incrementBoostClick(cachedItem.id).catch(console.warn);
+    }
+    return cachedItem;
   }
 
   public async checkDuplicateTitle(sellerId: string, title: string, excludeListingId?: string) {
@@ -400,7 +424,32 @@ export class ListingService {
 
     // Collision-resistant ID
     const id = `lst_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const expiresAt = new Date(Date.now() + 30 * 24 * 3600 * 1000);
+    
+    // Fetch settings for duration and quota
+    const settings = await getCachedSystemSettings();
+    const durationDays = settings.listingDurationDays || 30;
+    const expiresAt = new Date(Date.now() + durationDays * 24 * 3600 * 1000);
+
+    // Enforce Quota and Fees (Integrity check)
+    const seller = await userRepository.findById(sellerId);
+    const activeCount = seller?.activeListings || 0;
+    
+    // Priority: Category quota -> System default
+    const quotaLimit = existingCategory.freeListingsQuota ?? settings.freeListingsLimit ?? 3;
+    const postingFee = Number(existingCategory.postingFee) > 0 ? Number(existingCategory.postingFee) : (settings.extraListingFee || 0);
+
+    if (activeCount >= quotaLimit && !actorMeta?.isAdminAction) {
+      // If over quota, require payment. Since no gateway is integrated yet, we block and inform the UI.
+      return { 
+        success: false, 
+        error: `Listing quota exceeded. You have ${activeCount} active ads. A posting fee of ₹${postingFee} is required for additional listings.`,
+        status: 402 // Payment Required
+      };
+    }
+
+    const paidCfg = settings.paidFeatures as any;
+    const featuredDurationDays = paidCfg?.featuredAdDurationDays || 30;
+    const featuredUntil = data.isFeatured ? new Date(Date.now() + featuredDurationDays * 24 * 3600 * 1000) : null;
 
     try {
     // Perform duplicate title check and stale ad expiration in the same transaction
@@ -423,6 +472,9 @@ export class ListingService {
       customAttributes: data.customAttributes || {},
       status: data.status || 'pending',
       expiresAt,
+      isFeatured: data.isFeatured ?? false,
+      featuredUntil: featuredUntil || undefined,
+      isBoosted: data.isFeatured ?? false, // Sync boost with featured for now as per UI
     });
 
       // 1. Immediately trigger listing count invalidation right after successful database insert
@@ -810,6 +862,49 @@ export class ListingService {
     await listingRepository.incrementViews(id);
   }
 
+  public async incrementBoostImpressions(ids: string[]): Promise<void> {
+    if (!ids.length) return;
+    try {
+      const { db } = await import('@/src/db/index');
+      const { inArray, and, eq, sql, gt } = await import('@/src/db/pg-orm');
+      const schema = await import('@/src/db/schema');
+
+      await db
+        .update(schema.listings)
+        .set({ boostImpressions: sql`${schema.listings.boostImpressions} + 1` })
+        .where(
+          and(
+            inArray(schema.listings.id, ids),
+            eq(schema.listings.boostStatus, 'active'),
+            gt(schema.listings.boostExpiresAt, new Date())
+          )
+        );
+    } catch (error) {
+      console.warn('Failed to increment boost impressions:', error);
+    }
+  }
+
+  public async incrementBoostClick(id: string): Promise<void> {
+    try {
+      const { db } = await import('@/src/db/index');
+      const { and, eq, sql, gt } = await import('@/src/db/pg-orm');
+      const schema = await import('@/src/db/schema');
+
+      await db
+        .update(schema.listings)
+        .set({ boostClicks: sql`${schema.listings.boostClicks} + 1` })
+        .where(
+          and(
+            eq(schema.listings.id, id),
+            eq(schema.listings.boostStatus, 'active'),
+            gt(schema.listings.boostExpiresAt, new Date())
+          )
+        );
+    } catch (error) {
+      console.warn('Failed to increment boost click:', error);
+    }
+  }
+
   public async getSellerPhoneForListing(id: string): Promise<string | null> {
     if (!id) return null;
     const cleanId = id.trim();
@@ -834,6 +929,63 @@ export class ListingService {
     });
 
     return res.items.filter((l) => l.id !== current.id).slice(0, limit);
+  }
+
+  public async toggleFavorite(listingId: string, userId: string): Promise<{ isFavorited: boolean; count: number }> {
+    const { db } = await import('@/src/db/index');
+    const { and, eq, sql } = await import('@/src/db/pg-orm');
+    const schema = await import('@/src/db/schema');
+
+    return await db.transaction(async (tx) => {
+      const existing = await tx
+        .select()
+        .from(schema.userFavorites)
+        .where(and(eq(schema.userFavorites.listingId, listingId), eq(schema.userFavorites.userId, userId)))
+        .limit(1);
+
+      let isFavorited = false;
+      if (existing.length > 0) {
+        await tx
+          .delete(schema.userFavorites)
+          .where(and(eq(schema.userFavorites.listingId, listingId), eq(schema.userFavorites.userId, userId)));
+        
+        await tx
+          .update(schema.listings)
+          .set({ likes: sql`${schema.listings.likes} - 1` })
+          .where(eq(schema.listings.id, listingId));
+        isFavorited = false;
+      } else {
+        await tx
+          .insert(schema.userFavorites)
+          .values({ listingId, userId });
+        
+        await tx
+          .update(schema.listings)
+          .set({ likes: sql`${schema.listings.likes} + 1` })
+          .where(eq(schema.listings.id, listingId));
+        isFavorited = true;
+      }
+
+      const listing = await tx
+        .select({ likes: schema.listings.likes })
+        .from(schema.listings)
+        .where(eq(schema.listings.id, listingId))
+        .limit(1);
+
+      return { isFavorited, count: listing[0]?.likes || 0 };
+    });
+  }
+
+  public async getFavoriteListingIds(userId: string): Promise<string[]> {
+    const { db } = await import('@/src/db/index');
+    const { eq } = await import('@/src/db/pg-orm');
+    const schema = await import('@/src/db/schema');
+
+    const rows = await db
+      .select({ listingId: schema.userFavorites.listingId })
+      .from(schema.userFavorites)
+      .where(eq(schema.userFavorites.userId, userId));
+    return rows.map(r => r.listingId);
   }
 }
 

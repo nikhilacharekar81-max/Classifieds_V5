@@ -26,12 +26,14 @@ import * as authChangePasswordRoute from './server/api/auth/change-password/rout
 import * as authVerifyEmailRequestRoute from './server/api/auth/verify-email/request/route.ts';
 import * as authVerifyEmailConfirmRoute from './server/api/auth/verify-email/confirm/route.ts';
 import * as authLogoutAllRoute from './server/api/auth/logout-all/route.ts';
+import * as authUnsubscribeRoute from './server/api/auth/unsubscribe/route.ts';
 import * as listingsRoute from './server/api/listings/route.ts';
 import * as listingsUploadRoute from './server/api/listings/upload/route.ts';
 import * as listingsByIdRoute from './server/api/listings/[id]/route.ts';
 import * as listingsRevealPhoneRoute from './server/api/listings/[id]/reveal-phone/route.ts';
 import * as listingsCheckDuplicateRoute from './server/api/listings/check-duplicate/route.ts';
 import * as listingsBulkActionRoute from './server/api/listings/bulk-action/route.ts';
+import * as listingsFavoriteRoute from './server/api/listings/[id]/favorite/route.ts';
 import * as boostPackagesRoute from './server/api/boost/packages/route.ts';
 import * as boostPackageByIdRoute from './server/api/boost/packages/[id]/route.ts';
 import * as boostCreateOrderRoute from './server/api/boost/create-order/route.ts';
@@ -54,6 +56,12 @@ import * as chatRoute from './server/api/chat/route.ts';
 import * as reportsRoute from './server/api/reports/route.ts';
 import * as userKycRoute from './server/api/user/kyc/route.ts';
 import * as adminImpersonateRoute from './server/api/admin/impersonate/route.ts';
+import * as adminEmailTemplatesRoute from './server/api/admin/email/templates/route.ts';
+import * as adminEmailLogsRoute from './server/api/admin/email/logs/route.ts';
+import * as adminEmailNewslettersRoute from './server/api/admin/email/newsletters/route.ts';
+import * as adminEmailNewsletterSendRoute from './server/api/admin/email/newsletters/[id]/send/route.ts';
+import * as adminEmailTestSmtpRoute from './server/api/admin/email/test-smtp/route.ts';
+import * as adminEmailCustomSendRoute from './server/api/admin/email/custom-send/route.ts';
 
 function escapeHtml(str: string): string {
   return String(str || '')
@@ -155,12 +163,14 @@ async function startServer() {
   app.all('/api/auth/verify-email/request', createExpressRouteHandler(authVerifyEmailRequestRoute));
   app.all('/api/auth/verify-email/confirm', createExpressRouteHandler(authVerifyEmailConfirmRoute));
   app.all('/api/auth/logout-all', createExpressRouteHandler(authLogoutAllRoute));
+  app.all('/api/auth/unsubscribe', createExpressRouteHandler(authUnsubscribeRoute));
 
   // Listings Routes
   app.all('/api/listings/upload', createExpressRouteHandler(listingsUploadRoute));
   app.all('/api/listings/check-duplicate', createExpressRouteHandler(listingsCheckDuplicateRoute));
   app.all('/api/listings/bulk-action', createExpressRouteHandler(listingsBulkActionRoute));
   app.all('/api/listings/:id/reveal-phone', createExpressRouteHandler(listingsRevealPhoneRoute));
+  app.all('/api/listings/:id/favorite', createExpressRouteHandler(listingsFavoriteRoute));
   app.all('/api/listings/:id', createExpressRouteHandler(listingsByIdRoute));
   app.all('/api/listings', createExpressRouteHandler(listingsRoute));
 
@@ -189,6 +199,14 @@ async function startServer() {
   app.all('/api/reports', createExpressRouteHandler(reportsRoute));
   app.all('/api/user/kyc', createExpressRouteHandler(userKycRoute));
   app.all('/api/admin/impersonate', createExpressRouteHandler(adminImpersonateRoute));
+  
+  // Email Management Routes
+  app.all('/api/admin/email/templates', createExpressRouteHandler(adminEmailTemplatesRoute));
+  app.all('/api/admin/email/logs', createExpressRouteHandler(adminEmailLogsRoute));
+  app.all('/api/admin/email/newsletters/:id/send', createExpressRouteHandler(adminEmailNewsletterSendRoute));
+  app.all('/api/admin/email/newsletters', createExpressRouteHandler(adminEmailNewslettersRoute));
+  app.all('/api/admin/email/test-smtp', createExpressRouteHandler(adminEmailTestSmtpRoute));
+  app.all('/api/admin/email/custom-send', createExpressRouteHandler(adminEmailCustomSendRoute));
 
   // SEO robots.txt
   app.get('/robots.txt', (req, res) => {
@@ -325,7 +343,7 @@ ${urls
           () => `    <script id="__SSR_STATE__" type="application/json">${serializedState}</script>\n  </body>`
         );
 
-      res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8' }).end(fullHtml);
+      res.status(ssrResult.statusCode || 200).set({ 'Content-Type': 'text/html; charset=utf-8' }).end(fullHtml);
     } catch (err: any) {
       if (vite) {
         vite.ssrFixStacktrace(err);

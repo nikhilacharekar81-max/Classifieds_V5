@@ -40,6 +40,7 @@ export const users = pgTable('users', {
   twoFactorEnabled: boolean('two_factor_enabled').notNull().default(false),
   emailVerified: boolean('email_verified').notNull().default(false),
   emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+  unsubscribeToken: varchar('unsubscribe_token', { length: 128 }).unique(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
