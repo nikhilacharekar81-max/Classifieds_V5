@@ -18,7 +18,15 @@ export async function PUT(
       return NextResponse.json({ error: 'Forbidden: Insufficient role permissions' }, { status: 403 });
     }
 
+    const body = await req.json();
     const { name, type, slug, code, parentId, popular, latitude, longitude, orderIndex } = body;
+    
+    if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+      return NextResponse.json({ error: 'Valid location name is required' }, { status: 400 });
+    }
+    if (type !== undefined && !['city', 'state', 'locality'].includes(type)) {
+      return NextResponse.json({ error: 'Invalid location type' }, { status: 400 });
+    }
 
     const lat = latitude !== undefined && latitude !== null ? Number(latitude) : undefined;
     const lon = longitude !== undefined && longitude !== null ? Number(longitude) : undefined;
