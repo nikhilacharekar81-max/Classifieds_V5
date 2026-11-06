@@ -841,10 +841,69 @@ function stripPgTypeCasts(operand: string): string {
 }
 
 const SQL_RESERVED_NON_COLUMN_WORDS = new Set([
+  'select',
+  'from',
+  'where',
+  'group',
+  'by',
+  'having',
+  'order',
+  'limit',
+  'offset',
+  'fetch',
+  'first',
+  'next',
+  'row',
+  'rows',
+  'only',
+  'for',
+  'update',
+  'delete',
+  'insert',
+  'into',
+  'values',
+  'set',
+  'returning',
+  'with',
+  'recursive',
+  'as',
+  'distinct',
+  'on',
+  'all',
+  'union',
+  'intersect',
+  'except',
+  'lateral',
+  'table',
+  'join',
+  'inner',
+  'left',
+  'right',
+  'full',
+  'outer',
+  'cross',
+  'natural',
+  'using',
+  'window',
+  'over',
+  'partition',
+  'range',
+  'groups',
+  'preceding',
+  'following',
+  'unbounded',
+  'current',
+  'filter',
+  'within',
+  'asc',
+  'desc',
+  'nulls',
+  'last',
   'true',
   'false',
   'null',
   'unknown',
+  'default',
   'not',
   'and',
   'or',
@@ -854,18 +913,21 @@ const SQL_RESERVED_NON_COLUMN_WORDS = new Set([
   'ilike',
   'similar',
   'to',
+  'escape',
   'between',
-  'distinct',
-  'from',
   'any',
   'some',
-  'all',
   'exists',
   'case',
   'when',
   'then',
   'else',
   'end',
+  'symmetric',
+  'asymmetric',
+  'isnull',
+  'notnull',
+  'overlaps',
   'cast',
   'coalesce',
   'nullif',
@@ -875,15 +937,105 @@ const SQL_RESERVED_NON_COLUMN_WORDS = new Set([
   'current_timestamp',
   'current_date',
   'current_time',
+  'localtime',
+  'localtimestamp',
+  'current_user',
+  'session_user',
+  'user',
+  'current_catalog',
+  'current_role',
+  'current_schema',
+  'today',
+  'tomorrow',
+  'yesterday',
+  'epoch',
+  'infinity',
+  'nan',
   'interval',
   'extract',
-  'epoch',
+  'array',
+  'boolean',
+  'bool',
+  'integer',
+  'int',
+  'int2',
+  'int4',
+  'int8',
+  'smallint',
+  'bigint',
+  'decimal',
+  'numeric',
+  'real',
+  'float',
+  'float4',
+  'float8',
+  'double',
+  'precision',
+  'varchar',
+  'char',
+  'character',
+  'varying',
+  'text',
+  'uuid',
+  'json',
+  'jsonb',
+  'date',
+  'time',
+  'timestamp',
+  'timestamptz',
+  'timetz',
+  'bytea',
+  'serial',
+  'bigserial',
+  'oid',
+  'regclass',
+  'regtype',
+  'void',
+  'record',
+  'year',
+  'years',
+  'month',
+  'months',
+  'day',
+  'days',
+  'hour',
+  'hours',
+  'minute',
+  'minutes',
+  'second',
+  'seconds',
+  'millisecond',
+  'milliseconds',
+  'microsecond',
+  'microseconds',
+  'week',
+  'weeks',
+  'quarter',
+  'decade',
+  'century',
+  'millennium',
+  'dow',
+  'doy',
+  'isodow',
+  'isoyear',
+  'timezone',
+  'timezone_hour',
+  'timezone_minute',
   'lower',
   'upper',
   'trim',
   'btrim',
   'ltrim',
   'rtrim',
+  'leading',
+  'trailing',
+  'both',
+  'position',
+  'overlay',
+  'substring',
+  'placing',
+  'collation',
+  'collate',
   'length',
   'char_length',
   'count',
@@ -896,34 +1048,489 @@ const SQL_RESERVED_NON_COLUMN_WORDS = new Set([
   'floor',
   'ceil',
   'ceiling',
+  'random',
+  'ctid',
+  'xmin',
+  'xmax',
+  'cmin',
+  'cmax',
+  'tableoid',
+  '__subquery__',
 ]);
 
-function containsColumnIdentifier(expr: string): boolean {
-  const s = stripPgTypeCasts(expr);
+function isSubqueryClause(raw: string): boolean {
+  const s = stripPgTypeCasts(raw);
   if (!s) return false;
+  return /^(select|with|values|table)\b/i.test(s);
+}
 
-  // Double-quoted identifier (e.g., "id" or "users"."id") with non-empty column name
-  const doubleQuotedMatches = s.match(/"([^"]+)"/g);
-  if (doubleQuotedMatches && doubleQuotedMatches.some((m) => m.replace(/"/g, '').trim().length > 0)) {
-    return true;
+function stripParenthesizedSubqueries(expr: string): { stripped: string; subqueries: string[] } {
+  const subqueries: string[] = [];
+  let out = '';
+  let inSingle = false;
+  let inDouble = false;
+  let i = 0;
+
+  while (i < expr.length) {
+    const ch = expr[i];
+    const next = expr[i + 1];
+
+    if (!inDouble && ch === "'") {
+      out += ch;
+      if (inSingle && next === "'") {
+        out += next;
+        i += 2;
+        continue;
+      }
+      inSingle = !inSingle;
+      i++;
+      continue;
+    }
+
+    if (!inSingle && ch === '"') {
+      out += ch;
+      if (inDouble && next === '"') {
+        out += next;
+        i += 2;
+        continue;
+      }
+      inDouble = !inDouble;
+      i++;
+      continue;
+    }
+
+    if (!inSingle && !inDouble && ch === '(') {
+      let depth = 1;
+      let j = i + 1;
+      let subSingle = false;
+      let subDouble = false;
+      while (j < expr.length && depth > 0) {
+        const c = expr[j];
+        const n = expr[j + 1];
+        if (!subDouble && c === "'") {
+          if (subSingle && n === "'") {
+            j += 2;
+            continue;
+          }
+          subSingle = !subSingle;
+        } else if (!subSingle && c === '"') {
+          if (subDouble && n === '"') {
+            j += 2;
+            continue;
+          }
+          subDouble = !subDouble;
+        } else if (!subSingle && !subDouble) {
+          if (c === '(') depth++;
+          else if (c === ')') depth--;
+        }
+        j++;
+      }
+
+      if (depth === 0) {
+        const inner = expr.slice(i + 1, j - 1).trim();
+        if (isSubqueryClause(inner)) {
+          subqueries.push(unwrapOuterParens(inner));
+          out += ' __subquery__ ';
+        } else {
+          const nested = stripParenthesizedSubqueries(inner);
+          subqueries.push(...nested.subqueries);
+          out += `(${nested.stripped})`;
+        }
+        i = j;
+        continue;
+      }
+    }
+
+    out += ch;
+    i++;
   }
 
-  // Remove single-quoted literals and double-quoted identifiers before scanning for unquoted column identifiers
-  const withoutStrings = s
-    .replace(/'(?:''|[^'])*'/g, ' ')
-    .replace(/"(?:\"\"|[^"])*"/g, ' ')
-    .replace(/\$\d+/g, ' ');
+  return { stripped: out, subqueries };
+}
 
-  const tokens = withoutStrings.match(/\b[a-zA-Z_][a-zA-Z0-9_.]*\b/g) || [];
-  for (const rawTok of tokens) {
-    const parts = rawTok.toLowerCase().split('.');
-    for (const part of parts) {
-      if (part && !SQL_RESERVED_NON_COLUMN_WORDS.has(part)) {
-        return true;
+function getKnownTableColumns(table?: PgTableWithColumns<any>): {
+  tableName?: string;
+  columns: Set<string>;
+} {
+  const columns = new Set<string>();
+  if (!table) return { columns };
+  const tableName = table._tableName ? table._tableName.toLowerCase() : undefined;
+  if (table._columns && typeof table._columns === 'object') {
+    for (const [propKey, colDef] of Object.entries(table._columns)) {
+      if (propKey) columns.add(propKey.toLowerCase());
+      if (colDef && typeof colDef === 'object' && colDef._colName) {
+        columns.add(String(colDef._colName).toLowerCase());
       }
     }
   }
+  return { tableName, columns };
+}
+
+function isValidTargetColumnToken(
+  qualifier: string | undefined,
+  colName: string,
+  table?: PgTableWithColumns<any>,
+  requireTableQualifier = false
+): boolean {
+  const cleanCol = colName.trim().toLowerCase();
+  if (!cleanCol || SQL_RESERVED_NON_COLUMN_WORDS.has(cleanCol)) {
+    return false;
+  }
+
+  const { tableName, columns } = getKnownTableColumns(table);
+  const cleanQual = qualifier ? qualifier.trim().toLowerCase() : undefined;
+
+  if (requireTableQualifier) {
+    if (!tableName || !cleanQual || cleanQual !== tableName) {
+      return false;
+    }
+  } else if (cleanQual && tableName && cleanQual !== tableName) {
+    return false;
+  }
+
+  if (columns.size > 0 && !columns.has(cleanCol)) {
+    return false;
+  }
+
+  return true;
+}
+
+function scanOuterColumnReferences(
+  expr: string,
+  table?: PgTableWithColumns<any>,
+  requireTableQualifier = false
+): boolean {
+  const s = stripPgTypeCasts(expr);
+  if (!s) return false;
+  if (isSubqueryClause(s) || /^(not\s+)?exists\b/i.test(s)) {
+    return false;
+  }
+
+  const { stripped } = stripParenthesizedSubqueries(s);
+
+  // Tokenize outside single-quoted string literals
+  type Token = { type: 'quoted' | 'unquoted' | 'dot' | 'lparen' | 'other'; value: string };
+  const tokens: Token[] = [];
+  let i = 0;
+
+  while (i < stripped.length) {
+    const ch = stripped[i];
+    const next = stripped[i + 1];
+
+    // Skip whitespace
+    if (/\s/.test(ch)) {
+      i++;
+      continue;
+    }
+
+    // Skip single-quoted string literals completely
+    if (ch === "'") {
+      i++;
+      while (i < stripped.length) {
+        if (stripped[i] === "'" && stripped[i + 1] === "'") {
+          i += 2;
+          continue;
+        }
+        if (stripped[i] === "'") {
+          i++;
+          break;
+        }
+        i++;
+      }
+      tokens.push({ type: 'other', value: "''" });
+      continue;
+    }
+
+    // Double-quoted identifier
+    if (ch === '"') {
+      let ident = '';
+      i++;
+      while (i < stripped.length) {
+        if (stripped[i] === '"' && stripped[i + 1] === '"') {
+          ident += '"';
+          i += 2;
+          continue;
+        }
+        if (stripped[i] === '"') {
+          i++;
+          break;
+        }
+        ident += stripped[i];
+        i++;
+      }
+      tokens.push({ type: 'quoted', value: ident });
+      continue;
+    }
+
+    // Parameter placeholder $1, $2, ...
+    if (ch === '$' && /\d/.test(next || '')) {
+      i++;
+      while (i < stripped.length && /\d/.test(stripped[i])) i++;
+      tokens.push({ type: 'other', value: '$param' });
+      continue;
+    }
+
+    if (ch === '.') {
+      tokens.push({ type: 'dot', value: '.' });
+      i++;
+      continue;
+    }
+
+    if (ch === '(') {
+      tokens.push({ type: 'lparen', value: '(' });
+      i++;
+      continue;
+    }
+
+    // Unquoted identifier or keyword
+    if (/[a-zA-Z_]/.test(ch)) {
+      let ident = '';
+      while (i < stripped.length && /[a-zA-Z0-9_]/.test(stripped[i])) {
+        ident += stripped[i];
+        i++;
+      }
+      tokens.push({ type: 'unquoted', value: ident });
+      continue;
+    }
+
+    // Numbers or punctuation
+    i++;
+    tokens.push({ type: 'other', value: ch });
+  }
+
+  for (let idx = 0; idx < tokens.length; idx++) {
+    const tok = tokens[idx];
+    if (tok.type !== 'quoted' && tok.type !== 'unquoted') continue;
+
+    // Check for qualified identifier: tok . colTok
+    if (
+      idx + 2 < tokens.length &&
+      tokens[idx + 1].type === 'dot' &&
+      (tokens[idx + 2].type === 'quoted' || tokens[idx + 2].type === 'unquoted')
+    ) {
+      const qualTok = tok;
+      const colTok = tokens[idx + 2];
+      const afterCol = tokens[idx + 3];
+
+      // If followed by '(', it is a schema-qualified function call (e.g. pg_catalog.now()), not a column
+      if (afterCol && afterCol.type === 'lparen') {
+        idx += 2;
+        continue;
+      }
+
+      if (isValidTargetColumnToken(qualTok.value, colTok.value, table, requireTableQualifier)) {
+        return true;
+      }
+      idx += 2;
+      continue;
+    }
+
+    // Standalone identifier: if followed by '(', it is a function call or keyword construct (e.g. EXISTS(...), COALESCE(...))
+    const nextTok = tokens[idx + 1];
+    if (nextTok && nextTok.type === 'lparen') {
+      continue;
+    }
+
+    if (isValidTargetColumnToken(undefined, tok.value, table, requireTableQualifier)) {
+      return true;
+    }
+  }
+
   return false;
+}
+
+function containsColumnIdentifier(expr: string, table?: PgTableWithColumns<any>): boolean {
+  return scanOuterColumnReferences(expr, table, false);
+}
+
+function isDirectColumnReference(expr: string, table?: PgTableWithColumns<any>): boolean {
+  const s = stripPgTypeCasts(expr);
+  if (!s || isSubqueryClause(s)) return false;
+  // Must be solely a quoted or unquoted column reference (optionally table-qualified) with no spaces, parens, or operators
+  const qualifiedMatch = s.match(/^(?:"([^"]+)"|([a-zA-Z_][a-zA-Z0-9_]*))\s*\.\s*(?:"([^"]+)"|([a-zA-Z_][a-zA-Z0-9_]*))$/);
+  if (qualifiedMatch) {
+    const qual = qualifiedMatch[1] || qualifiedMatch[2];
+    const col = qualifiedMatch[3] || qualifiedMatch[4];
+    return isValidTargetColumnToken(qual, col, table, false);
+  }
+  const simpleMatch = s.match(/^(?:"([^"]+)"|([a-zA-Z_][a-zA-Z0-9_]*))$/);
+  if (simpleMatch) {
+    const col = simpleMatch[1] || simpleMatch[2];
+    return isValidTargetColumnToken(undefined, col, table, false);
+  }
+  return false;
+}
+
+function parseTopLevelSelectClauses(subquerySql: string): {
+  selectList: string;
+  fromClause?: string;
+  whereClause?: string;
+  hasSetOpOrUnsupportedTail: boolean;
+} | null {
+  const s = unwrapOuterParens(subquerySql).trim();
+  if (!/^select\b/i.test(s)) return null;
+
+  let inSingle = false;
+  let inDouble = false;
+  let depth = 0;
+
+  let fromIdx = -1;
+  let whereIdx = -1;
+  let tailIdx = -1;
+
+  const tailKeywords = ['GROUP', 'HAVING', 'ORDER', 'LIMIT', 'OFFSET', 'FETCH', 'FOR', 'UNION', 'INTERSECT', 'EXCEPT', 'WINDOW'];
+  const setOpKeywords = ['UNION', 'INTERSECT', 'EXCEPT'];
+  let hasSetOp = false;
+
+  for (let i = 6; i < s.length; i++) {
+    const ch = s[i];
+    const next = s[i + 1];
+
+    if (!inDouble && ch === "'") {
+      if (inSingle && next === "'") {
+        i++;
+        continue;
+      }
+      inSingle = !inSingle;
+      continue;
+    }
+    if (!inSingle && ch === '"') {
+      if (inDouble && next === '"') {
+        i++;
+        continue;
+      }
+      inDouble = !inDouble;
+      continue;
+    }
+    if (inSingle || inDouble) continue;
+
+    if (ch === '(') {
+      depth++;
+      continue;
+    }
+    if (ch === ')') {
+      depth--;
+      continue;
+    }
+    if (depth !== 0) continue;
+
+    const prevChar = i > 0 ? s[i - 1] : ' ';
+    if (!/[\s)]/.test(prevChar)) continue;
+
+    if (fromIdx === -1 && s.slice(i, i + 4).toUpperCase() === 'FROM' && /[\s(]/.test(s[i + 4] || ' ')) {
+      fromIdx = i;
+      i += 3;
+      continue;
+    }
+
+    if (fromIdx !== -1 && whereIdx === -1 && tailIdx === -1 && s.slice(i, i + 5).toUpperCase() === 'WHERE' && /[\s(]/.test(s[i + 5] || ' ')) {
+      whereIdx = i;
+      i += 4;
+      continue;
+    }
+
+    for (const kw of tailKeywords) {
+      if (s.slice(i, i + kw.length).toUpperCase() === kw && /[\s(]/.test(s[i + kw.length] || ' ')) {
+        if (setOpKeywords.includes(kw)) {
+          hasSetOp = true;
+        }
+        if (tailIdx === -1 && (fromIdx !== -1 || whereIdx !== -1)) {
+          tailIdx = i;
+        }
+        break;
+      }
+    }
+  }
+
+  if (fromIdx === -1) {
+    return {
+      selectList: s.slice(6).trim(),
+      hasSetOpOrUnsupportedTail: hasSetOp,
+    };
+  }
+
+  const selectList = s.slice(6, fromIdx).trim();
+  const fromEnd = whereIdx !== -1 ? whereIdx : tailIdx !== -1 ? tailIdx : s.length;
+  const fromClause = s.slice(fromIdx + 4, fromEnd).trim();
+
+  let whereClause: string | undefined;
+  if (whereIdx !== -1) {
+    const whereEnd = tailIdx !== -1 && tailIdx > whereIdx ? tailIdx : s.length;
+    whereClause = s.slice(whereIdx + 5, whereEnd).trim();
+  }
+
+  return {
+    selectList,
+    fromClause,
+    whereClause,
+    hasSetOpOrUnsupportedTail: hasSetOp,
+  };
+}
+
+function isSafeSubqueryOperand(
+  subquerySql: string,
+  params?: any[],
+  outerTable?: PgTableWithColumns<any>
+): boolean {
+  const parsed = parseTopLevelSelectClauses(subquerySql);
+  if (!parsed || parsed.hasSetOpOrUnsupportedTail) {
+    return false;
+  }
+
+  // Subquery must select from a table and must have a non-empty, safe WHERE clause
+  if (!parsed.fromClause || !parsed.whereClause) {
+    return false;
+  }
+
+  if (!parsed.selectList || isTautologicalSelectProjection(parsed.selectList, params)) {
+    return false;
+  }
+
+  const whereAssessment = assessWhereExpression(parsed.whereClause, params);
+  if (whereAssessment !== 'safe') {
+    return false;
+  }
+
+  return true;
+}
+
+function isTautologicalSelectProjection(selectList: string, params?: any[]): boolean {
+  const s = unwrapOuterParens(selectList).trim();
+  if (!s) return true;
+  if (findTopLevelBinaryOp(s) !== null) return true;
+  const resolved = resolveScalarOperand(s, params);
+  if (resolved.kind === 'constant') return true;
+  if (!containsColumnIdentifier(s)) return true;
+  return false;
+}
+
+function assessExistsSubquery(
+  subqueryBody: string,
+  params?: any[],
+  outerTable?: PgTableWithColumns<any>
+): PredicateAssessment {
+  // Correlated EXISTS requires knowing the outer target table so correlation can be verified
+  if (!outerTable || !outerTable._tableName) {
+    return 'constant_unsafe';
+  }
+
+  const parsed = parseTopLevelSelectClauses(subqueryBody);
+  if (!parsed || parsed.hasSetOpOrUnsupportedTail || !parsed.fromClause || !parsed.whereClause) {
+    return 'constant_unsafe';
+  }
+
+  // The subquery's WHERE clause must be safe on its own
+  const subWhereAssessment = assessWhereExpression(parsed.whereClause, params);
+  if (subWhereAssessment !== 'safe') {
+    return 'constant_unsafe';
+  }
+
+  // And the subquery's WHERE clause must correlate with a table-qualified column of the outer target table
+  if (!scanOuterColumnReferences(parsed.whereClause, outerTable, true)) {
+    return 'constant_unsafe';
+  }
+
+  return 'safe';
 }
 
 type ResolvedLiteral =
@@ -1054,27 +1661,52 @@ function normalizeIdentifierOrExpr(raw: string): string {
   return stripPgTypeCasts(raw).replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
-function assessAtomicPredicate(raw: string, params?: any[]): PredicateAssessment {
+function assessAtomicPredicate(
+  raw: string,
+  params?: any[],
+  table?: PgTableWithColumns<any>
+): PredicateAssessment {
   const s = unwrapOuterParens(raw).trim();
   if (!s) return 'tautology';
 
-  // Handle unary NOT (...)
+  // 1. Reject standalone scalar subqueries used directly as predicates: e.g. WHERE (SELECT 1=1), WHERE (SELECT true)
+  if (isSubqueryClause(s)) {
+    return 'constant_unsafe';
+  }
+
+  // 2. Handle EXISTS (...) before general unary NOT
+  const existsMatch = s.match(/^exists\s*\(([\s\S]*)\)$/i);
+  if (existsMatch) {
+    return assessExistsSubquery(existsMatch[1].trim(), params, table);
+  }
+
+  // 3. Handle unary NOT (...)
   const notMatch = s.match(/^not(?:\s+|\s*(?=\())([\s\S]+)$/i);
   if (notMatch) {
     const inner = notMatch[1].trim();
-    const innerResult = assessWhereExpression(inner, params);
+    const innerUnwrapped = unwrapOuterParens(inner).trim();
+    const innerExistsMatch = innerUnwrapped.match(/^exists\s*\(([\s\S]*)\)$/i);
+    if (innerExistsMatch) {
+      return assessExistsSubquery(innerExistsMatch[1].trim(), params, table);
+    }
+    const innerResult = assessWhereExpression(inner, params, table);
     if (innerResult === 'contradiction') return 'tautology';
     if (innerResult === 'tautology') return 'contradiction';
     if (innerResult === 'constant_unsafe') return 'constant_unsafe';
-    return containsColumnIdentifier(inner) ? 'safe' : 'constant_unsafe';
+    return containsColumnIdentifier(inner, table) ? 'safe' : 'constant_unsafe';
   }
 
-  // Handle IS [NOT] TRUE / FALSE / NULL / UNKNOWN
+  // 4. Handle IS [NOT] TRUE / FALSE / NULL / UNKNOWN
   const isMatch = s.match(/^([\s\S]+?)\s+IS\s+(NOT\s+)?(TRUE|FALSE|NULL|UNKNOWN)$/i);
   if (isMatch) {
     const lhs = isMatch[1].trim();
     const isNegated = Boolean(isMatch[2]);
     const rhsKw = isMatch[3].toUpperCase();
+
+    if (isSubqueryClause(lhs) || stripParenthesizedSubqueries(lhs).subqueries.length > 0) {
+      return 'constant_unsafe';
+    }
+
     const resolvedLhs = resolveScalarOperand(lhs, params);
 
     if (resolvedLhs.kind === 'constant') {
@@ -1092,10 +1724,10 @@ function assessAtomicPredicate(raw: string, params?: any[]): PredicateAssessment
       return finalTruth ? 'tautology' : 'contradiction';
     }
 
-    return containsColumnIdentifier(lhs) ? 'safe' : 'constant_unsafe';
+    return containsColumnIdentifier(lhs, table) ? 'safe' : 'constant_unsafe';
   }
 
-  // Handle [NOT] IN (...)
+  // 5. Handle [NOT] IN (...)
   const inMatch = s.match(/^([\s\S]+?)\s+(NOT\s+)?IN\s*\(([\s\S]*)\)$/i);
   if (inMatch) {
     const lhs = inMatch[1].trim();
@@ -1104,23 +1736,44 @@ function assessAtomicPredicate(raw: string, params?: any[]): PredicateAssessment
     if (!listBody) {
       return isNotIn ? 'tautology' : 'contradiction';
     }
-    if (!containsColumnIdentifier(lhs)) {
+    if (!containsColumnIdentifier(lhs, table)) {
       return 'constant_unsafe';
+    }
+    if (isSubqueryClause(listBody)) {
+      return isSafeSubqueryOperand(listBody, params, table) ? 'safe' : 'constant_unsafe';
+    }
+    const { subqueries } = stripParenthesizedSubqueries(listBody);
+    if (subqueries.length > 0) {
+      for (const sq of subqueries) {
+        if (!isSafeSubqueryOperand(sq, params, table)) {
+          return 'constant_unsafe';
+        }
+      }
     }
     return 'safe';
   }
 
-  // Handle BETWEEN
+  // 6. Handle BETWEEN
   const betweenMatch = s.match(/^([\s\S]+?)\s+(NOT\s+)?BETWEEN\s+([\s\S]+?)\s+AND\s+([\s\S]+)$/i);
   if (betweenMatch) {
     const lhs = betweenMatch[1].trim();
-    if (!containsColumnIdentifier(lhs)) {
+    const low = betweenMatch[3].trim();
+    const high = betweenMatch[4].trim();
+    if (!containsColumnIdentifier(lhs, table)) {
+      return 'constant_unsafe';
+    }
+    if (
+      isSubqueryClause(low) ||
+      isSubqueryClause(high) ||
+      stripParenthesizedSubqueries(low).subqueries.length > 0 ||
+      stripParenthesizedSubqueries(high).subqueries.length > 0
+    ) {
       return 'constant_unsafe';
     }
     return 'safe';
   }
 
-  // Handle binary comparison operators (=, !=, <>, <, <=, >, >=, LIKE, ILIKE, IS [NOT] DISTINCT FROM)
+  // 7. Handle binary comparison operators (=, !=, <>, <, <=, >, >=, LIKE, ILIKE, IS [NOT] DISTINCT FROM)
   const bin = findTopLevelBinaryOp(s);
   if (bin) {
     const { op, left, right } = bin;
@@ -1137,6 +1790,22 @@ function assessAtomicPredicate(raw: string, params?: any[]): PredicateAssessment
       if (op === '!=' || op === '<>' || op === '<' || op === '>' || op === 'IS DISTINCT FROM' || op === 'NOT LIKE' || op === 'NOT ILIKE') {
         return 'contradiction';
       }
+    }
+
+    const leftSubqueries = isSubqueryClause(left) ? [unwrapOuterParens(left)] : stripParenthesizedSubqueries(left).subqueries;
+    const rightSubqueries = isSubqueryClause(right) ? [unwrapOuterParens(right)] : stripParenthesizedSubqueries(right).subqueries;
+
+    if (leftSubqueries.length > 0 || rightSubqueries.length > 0) {
+      // At least one side must contain a genuine outer column reference outside any subquery
+      if (!containsColumnIdentifier(left, table) && !containsColumnIdentifier(right, table)) {
+        return 'constant_unsafe';
+      }
+      for (const sq of [...leftSubqueries, ...rightSubqueries]) {
+        if (!isSafeSubqueryOperand(sq, params, table)) {
+          return 'constant_unsafe';
+        }
+      }
+      return 'safe';
     }
 
     const resLeft = resolveScalarOperand(left, params);
@@ -1168,15 +1837,15 @@ function assessAtomicPredicate(raw: string, params?: any[]): PredicateAssessment
       return 'constant_unsafe';
     }
 
-    // At least one side of a binary comparison in UPDATE/DELETE WHERE must reference a column
-    if (!containsColumnIdentifier(left) && !containsColumnIdentifier(right)) {
+    // At least one side of a binary comparison in UPDATE/DELETE WHERE must reference a genuine outer column
+    if (!containsColumnIdentifier(left, table) && !containsColumnIdentifier(right, table)) {
       return 'constant_unsafe';
     }
 
     return 'safe';
   }
 
-  // Standalone scalar/literal/parameter without comparison operator
+  // 8. Standalone scalar/literal/parameter without comparison operator
   const resolvedStandalone = resolveScalarOperand(s, params);
   if (resolvedStandalone.kind === 'constant') {
     const v = resolvedStandalone.value;
@@ -1201,7 +1870,8 @@ function assessAtomicPredicate(raw: string, params?: any[]): PredicateAssessment
     return 'constant_unsafe';
   }
 
-  if (!containsColumnIdentifier(s)) {
+  // 9. Fail closed on any remaining unrecognized/complex expression unless it is a direct boolean column reference
+  if (!isDirectColumnReference(s, table)) {
     return 'constant_unsafe';
   }
 
@@ -1257,16 +1927,25 @@ function areComplementaryDisjuncts(a: string, b: string): boolean {
   return false;
 }
 
-function assessWhereExpression(rawExpr: string, params?: any[]): PredicateAssessment {
+function assessWhereExpression(
+  rawExpr: string,
+  params?: any[],
+  table?: PgTableWithColumns<any>
+): PredicateAssessment {
   const cleaned = unwrapOuterParens(rawExpr).trim();
   if (!cleaned) return 'tautology';
+
+  // Reject standalone subquery before logical splitting so SELECT ... WHERE ... AND/OR ... is not split as outer AND/OR
+  if (isSubqueryClause(cleaned)) {
+    return 'constant_unsafe';
+  }
 
   // 1. Decompose top-level OR branches
   const orBranches = splitTopLevelLogical(cleaned, 'OR');
   if (orBranches.length > 1) {
     for (const branch of orBranches) {
       if (!branch) return 'tautology';
-      const branchResult = assessWhereExpression(branch, params);
+      const branchResult = assessWhereExpression(branch, params, table);
       if (branchResult === 'tautology' || branchResult === 'constant_unsafe') {
         return 'tautology';
       }
@@ -1291,12 +1970,12 @@ function assessWhereExpression(rawExpr: string, params?: any[]): PredicateAssess
       // If any AND branch itself contains a compound OR tautology, block it
       const subOrs = splitTopLevelLogical(branch, 'OR');
       if (subOrs.length > 1) {
-        const subAssessment = assessWhereExpression(branch, params);
+        const subAssessment = assessWhereExpression(branch, params, table);
         if (subAssessment === 'tautology' || subAssessment === 'constant_unsafe') {
           return 'tautology';
         }
       }
-      const branchResult = assessWhereExpression(branch, params);
+      const branchResult = assessWhereExpression(branch, params, table);
       if (branchResult === 'safe') {
         hasSafeColumnFilter = true;
       }
@@ -1305,10 +1984,15 @@ function assessWhereExpression(rawExpr: string, params?: any[]): PredicateAssess
   }
 
   // 3. Atomic predicate
-  return assessAtomicPredicate(cleaned, params);
+  return assessAtomicPredicate(cleaned, params, table);
 }
 
-function assertSafeWhereClause(whereSql: string, operation: 'UPDATE' | 'DELETE', params?: any[]): void {
+function assertSafeWhereClause(
+  whereSql: string,
+  operation: 'UPDATE' | 'DELETE',
+  params?: any[],
+  table?: PgTableWithColumns<any>
+): void {
   if (!whereSql || !whereSql.trim()) {
     throw new Error(`ORM Safety: ${operation} query has empty .where().`);
   }
@@ -1322,8 +2006,8 @@ function assertSafeWhereClause(whereSql: string, operation: 'UPDATE' | 'DELETE',
     throw new Error(`ORM Safety: ${operation} query has malformed quotes or unbalanced parentheses in .where().`);
   }
 
-  const topOrBranches = splitTopLevelLogical(stripped, 'OR');
-  const assessment = assessWhereExpression(stripped, params);
+  const topOrBranches = isSubqueryClause(stripped) ? [stripped] : splitTopLevelLogical(stripped, 'OR');
+  const assessment = assessWhereExpression(stripped, params, table);
 
   if (assessment === 'tautology' || assessment === 'constant_unsafe') {
     if (topOrBranches.length > 1) {
@@ -1400,7 +2084,7 @@ class UpdateQueryBuilder<TTable extends PgTableWithColumns<any>, TReturn = TTabl
 
     if (this._where) {
       const whereSql = this._where.toSql(params);
-      assertSafeWhereClause(whereSql, 'UPDATE', params);
+      assertSafeWhereClause(whereSql, 'UPDATE', params, this.table);
       sqlText += ` WHERE ${whereSql}`;
     }
 
@@ -1471,7 +2155,7 @@ class DeleteQueryBuilder<TTable extends PgTableWithColumns<any>, TReturn = TTabl
 
     if (this._where) {
       const whereSql = this._where.toSql(params);
-      assertSafeWhereClause(whereSql, 'DELETE', params);
+      assertSafeWhereClause(whereSql, 'DELETE', params, this.table);
       sqlText += ` WHERE ${whereSql}`;
     }
 
