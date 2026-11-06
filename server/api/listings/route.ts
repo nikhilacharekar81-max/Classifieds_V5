@@ -187,8 +187,8 @@ export async function POST(req: NextRequest) {
       sellerId: authContext.userId, // Derived strictly from verified session
       // Moderation workflow: pending unless user is an authorized admin/moderator/super_admin
       status: authContext.isAdmin || authContext.isModerator || authContext.isSuperAdmin ? (body.status || 'approved') : 'pending',
-      isFeatured: !!body.isFeatured,
-      isBoosted: !!body.isBoosted,
+      isFeatured: (authContext.isAdmin || authContext.isModerator || authContext.isSuperAdmin) ? !!body.isFeatured : false,
+      isBoosted: (authContext.isAdmin || authContext.isModerator || authContext.isSuperAdmin) ? !!body.isBoosted : false,
     };
 
     const result = await listingService.createListing(safePayload, authContext.userId, {

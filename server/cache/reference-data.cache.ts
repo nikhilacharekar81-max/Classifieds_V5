@@ -93,7 +93,7 @@ export async function enqueueDurableInvalidation(
   }
   
   ensureOutboxRetryWorkerStarted();
-  return { id: res[0].id };
+  return { id: res[0].id, generation: res[0].generation };
 }
 
 /**
@@ -333,7 +333,7 @@ const fetchCachedCategoryHierarchyInternal = unstable_cache(
       REFERENCE_CACHE_TAGS.SUBCATEGORIES,
       REFERENCE_CACHE_TAGS.NAVIGATION,
     ],
-    revalidate: false,
+    revalidate: 3600,
   }
 );
 
@@ -344,7 +344,7 @@ const fetchCachedLocationsInternal = unstable_cache(
   ['marketplace-reference-locations-v1'],
   {
     tags: [REFERENCE_CACHE_TAGS.LOCATIONS, REFERENCE_CACHE_TAGS.NAVIGATION],
-    revalidate: false,
+    revalidate: 3600,
   }
 );
 
@@ -355,7 +355,7 @@ const fetchCachedSystemSettingsInternal = unstable_cache(
   ['marketplace-reference-system-settings-v1'],
   {
     tags: [REFERENCE_CACHE_TAGS.SETTINGS],
-    revalidate: false,
+    revalidate: 3600,
   }
 );
 
