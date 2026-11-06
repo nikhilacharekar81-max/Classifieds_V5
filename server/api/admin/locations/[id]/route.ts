@@ -18,6 +18,14 @@ export async function PUT(
     }
 
     const body = await req.json();
+    
+    if (body.name !== undefined && (typeof body.name !== 'string' || !body.name.trim())) {
+      return NextResponse.json({ error: 'Valid location name is required' }, { status: 400 });
+    }
+    if (body.type !== undefined && !['city', 'state', 'locality'].includes(body.type)) {
+      return NextResponse.json({ error: 'Invalid location type' }, { status: 400 });
+    }
+
     const updateData: any = {};
     if (body.name !== undefined) updateData.name = body.name;
     if (body.slug !== undefined) updateData.slug = body.slug;

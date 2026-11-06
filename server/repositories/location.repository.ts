@@ -1,6 +1,6 @@
 import { db, withDbRetry } from '@/src/db/index';
 import * as schema from '@/src/db/schema';
-import { eq, asc } from '@/src/db/pg-orm';
+import { eq, asc, sql } from '@/src/db/pg-orm';
 import { LocationItem } from '@/lib/types';
 import { ensureDatabaseSeeded, isDatabaseInitialized } from '@/server/seed-postgres';
 import { getCachedLocations } from '@/server/cache/reference-data.cache';
@@ -15,8 +15,8 @@ export class LocationRepository {
       geoId: row.geoId,
       code: row.code || undefined,
       parentId: row.parentId || null,
-      latitude: row.latitude || undefined,
-      longitude: row.longitude || undefined,
+      latitude: row.latitude !== null ? Number(row.latitude) : undefined,
+      longitude: row.longitude !== null ? Number(row.longitude) : undefined,
       popular: row.popular,
       listingCount: 0,
     };
@@ -29,13 +29,13 @@ export class LocationRepository {
       }
 
       let rows = await withDbRetry(() =>
-        db.select().from(schema.locations).orderBy(asc(schema.locations.orderIndex), asc(schema.locations.name))
+        db.select().from(schema.locations).orderBy(asc(schema.locations.orderIndex), asc(schema.locations.name), asc(schema.locations.id))
       );
 
       if (rows.length === 0) {
         await ensureDatabaseSeeded();
         rows = await withDbRetry(() =>
-          db.select().from(schema.locations).orderBy(asc(schema.locations.orderIndex), asc(schema.locations.name))
+          db.select().from(schema.locations).orderBy(asc(schema.locations.orderIndex), asc(schema.locations.name), asc(schema.locations.id))
         );
       }
 
@@ -52,7 +52,23 @@ export class LocationRepository {
 
   public async findAll(): Promise<LocationItem[]> {
     try {
-      return await getCachedLocations();
+      const locations = await getCachedLocations();
+      
+      // Fetch listing counts in a single query
+      const counts = await db
+        .select({
+          city: schema.listings.city,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(schema.listings)
+        .groupBy(schema.listings.city);
+        
+      const countMap = new Map(counts.map(c => [c.city?.toLowerCase(), c.count]));
+
+      return locations.map(loc => ({
+        ...loc,
+        listingCount: countMap.get(loc.name.toLowerCase()) || 0
+      }));
     } catch (error) {
       console.error('LocationRepository.findAll error:', error);
       throw new Error('Failed to find locations', { cause: error });
@@ -103,8 +119,8 @@ export class LocationRepository {
           code: data.code || null,
           geoId: data.geoId,
           parentId: data.parentId || null,
-          latitude: data.latitude || null,
-          longitude: data.longitude || null,
+          latitude: data.latitude !== undefined && data.latitude !== null ? Number(data.latitude) : null,
+          longitude: data.longitude !== undefined && data.longitude !== null ? Number(data.longitude) : null,
           popular: data.popular ?? false,
           orderIndex: data.orderIndex || 0,
         })

@@ -71,14 +71,17 @@ export async function renderSsrPage(
   origin = 'http://localhost:3000'
 ): Promise<SsrRenderResult> {
   return runWithRequestCache(async () => {
-    const [baseCategories, locations, settings, allCmsPages] = await Promise.all([
+    const [baseCategories, locations, settings] = await Promise.all([
       getCachedCategoryHierarchy(),
       getCachedLocations(),
       getCachedSystemSettings(),
-      cmsRepository.findAllPages(),
     ]);
 
-    const publishedCmsPages = allCmsPages.filter((p) => p.status === 'published' || p.isActive);
+    let publishedCmsPages: any[] = [];
+    if (urlPath === '/' || urlPath.startsWith('/page/')) {
+        const allCmsPages = await cmsRepository.findAllPages();
+        publishedCmsPages = allCmsPages.filter((p) => p.status === 'published' || p.isActive);
+    }
     const cmsSlugs = publishedCmsPages.map((p) => p.slug.toLowerCase());
     const parsedRoute = parseChillyPath(urlPath, locations, baseCategories, cmsSlugs);
     const siteName = settings?.siteName || 'Chillyads';

@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { useAppOptional } from '@/context/AppContextInstance';
 import { dispatchPublicToast } from '@/components/common/ChunkErrorRecovery';
-import { X, Cookie, Lock, BarChart2, Radio, Sliders, Info } from 'lucide-react';
+import { X, Cookie, Lock, BarChart2, Radio, Sliders } from 'lucide-react';
 
 export interface CmpConsentModalProps {
   isOpen?: boolean;
@@ -25,9 +25,9 @@ function getInitialCmpPreferences() {
   }
   return {
     essential: true,
-    analytics: true,
-    advertising: true,
-    functional: true,
+    analytics: false,
+    advertising: false,
+    functional: false,
   };
 }
 
@@ -105,12 +105,12 @@ export const CmpConsentModal: React.FC<CmpConsentModalProps> = ({ isOpen, onClos
                 <h2 className="text-base font-bold text-slate-900 dark:text-white">
                   Privacy Settings &amp; Cookie Preferences
                 </h2>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 uppercase">
-                  Privacy Controls
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700 uppercase">
+                  Basic Consent
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                Manage your data privacy, ad personalization, and analytics choices
+                Manage your data privacy and tracking preferences
               </p>
             </div>
           </div>
@@ -162,21 +162,8 @@ export const CmpConsentModal: React.FC<CmpConsentModalProps> = ({ isOpen, onClos
           {activeTab === 'overview' && (
             <div className="space-y-3 leading-relaxed">
               <p>
-                We use cookies and Google Certified Consent Management technology (IAB TCF v2.2
-                framework) to ensure our classified marketplace remains safe, fast, and transparent.
+                We use cookies to ensure our classified marketplace remains safe, fast, and functional.
               </p>
-
-              <div className="p-3.5 bg-blue-50 dark:bg-blue-950/30 rounded-xl border border-blue-200 dark:border-blue-800/60 flex items-start gap-3">
-                <Info className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
-                <div className="text-[11px] text-blue-900 dark:text-blue-200 space-y-1">
-                  <p className="font-bold">Google Certified Publisher Guarantee</p>
-                  <p>
-                    For visitors in the EU/EEA, UK, and US, you can customize or revoke your
-                    advertising consent at any time. Changes take effect immediately across all
-                    third-party ad networks including Google AdSense and DoubleClick DART cookies.
-                  </p>
-                </div>
-              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                 <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800">
@@ -196,8 +183,7 @@ export const CmpConsentModal: React.FC<CmpConsentModalProps> = ({ isOpen, onClos
                     <span>Personalized Ads</span>
                   </div>
                   <p className="text-[11px] text-slate-500">
-                    Controls tailored classified recommendations and Google AdSense partner
-                    networks.
+                    Controls ad personalization and third-party advertising cookies.
                   </p>
                 </div>
               </div>
@@ -302,8 +288,8 @@ export const CmpConsentModal: React.FC<CmpConsentModalProps> = ({ isOpen, onClos
           {activeTab === 'vendors' && (
             <div className="space-y-3">
               <p className="text-[11px] text-slate-500">
-                Chillyads integrates with IAB TCF v2.2 certified vendor partners. Below are primary
-                verified ad infrastructure providers:
+                Chillyads partners with various advertising providers. Below are primary
+                ad infrastructure providers:
               </p>
 
               <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
@@ -313,12 +299,9 @@ export const CmpConsentModal: React.FC<CmpConsentModalProps> = ({ isOpen, onClos
                       Google Advertising Products
                     </span>
                     <span className="text-[10px] text-slate-400">
-                      Vendor ID: 752 • AdSense, DoubleClick DART, Google Tag Manager
+                      AdSense, DoubleClick DART, Google Tag Manager
                     </span>
                   </div>
-                  <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 text-[10px] font-semibold rounded">
-                    Certified CMP
-                  </span>
                 </div>
 
                 <div className="p-3 bg-white dark:bg-slate-900 flex items-center justify-between">
@@ -327,12 +310,9 @@ export const CmpConsentModal: React.FC<CmpConsentModalProps> = ({ isOpen, onClos
                       Amazon Advertising Systems
                     </span>
                     <span className="text-[10px] text-slate-400">
-                      Vendor ID: 128 • Contextual Sponsored Listings
+                      Contextual Sponsored Listings
                     </span>
                   </div>
-                  <span className="px-2 py-0.5 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 text-[10px] font-semibold rounded">
-                    TCF v2.2 Registered
-                  </span>
                 </div>
 
                 <div className="p-3 bg-slate-50 dark:bg-slate-800/40 flex items-center justify-between">
@@ -341,12 +321,9 @@ export const CmpConsentModal: React.FC<CmpConsentModalProps> = ({ isOpen, onClos
                       Index Exchange &amp; Criteo
                     </span>
                     <span className="text-[10px] text-slate-400">
-                      Vendor ID: 10 • Programmatic Header Bidding
+                      Programmatic Header Bidding
                     </span>
                   </div>
-                  <span className="px-2 py-0.5 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 text-[10px] font-semibold rounded">
-                    TCF v2.2 Registered
-                  </span>
                 </div>
               </div>
             </div>

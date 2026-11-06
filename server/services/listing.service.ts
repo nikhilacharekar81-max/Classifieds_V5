@@ -442,11 +442,17 @@ export class ListingService {
     const durationDays = settings.listingDurationDays || 30;
     const expiresAt = new Date(Date.now() + durationDays * 24 * 3600 * 1000);
 
-    // Validate city
-    const allLocations = await locationRepository.findAll();
-    const cityExists = allLocations.some(loc => loc.name.toLowerCase() === data.location?.city?.toLowerCase());
-    if (!cityExists) {
-        throw new Error('INVALID_CITY:The provided city is not supported');
+    // Validate city (if provided)
+    if (data.location?.city) {
+      const allLocations = await locationRepository.findAll();
+      const cityLoc = allLocations.find(loc => 
+        loc.type === 'city' && 
+        (loc.name.toLowerCase() === data.location!.city!.toLowerCase() || 
+         loc.slug === data.location!.city!.toLowerCase())
+      );
+      if (!cityLoc) {
+          throw new Error('INVALID_CITY:The provided city is not supported');
+      }
     }
 
     // Enforce Quota and Fees (Integrity check) with row-level locking to prevent parallel bypass
@@ -768,7 +774,8 @@ export class ListingService {
         err.message?.startsWith('CURRENCY_MISMATCH:') ||
         err.message?.startsWith('AMOUNT_MISMATCH:') ||
         err.message?.startsWith('ORDER_ALREADY_USED:') ||
-        err.message?.startsWith('PAYMENT_NOT_CAPTURED:')
+        err.message?.startsWith('PAYMENT_NOT_CAPTURED:') ||
+        err.message?.startsWith('INVALID_CITY:')
       ) {
         return { success: false, error: err.message.split(':')[1] || err.message, status: 400 };
       }

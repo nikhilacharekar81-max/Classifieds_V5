@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
+import crypto from 'node:crypto';
 import { adminService } from '@/server/services/admin.service';
 import { locationRepository } from '@/server/repositories/location.repository';
 import { getAuthenticatedUser } from '@/lib/auth/session';
@@ -40,7 +41,7 @@ export async function POST(req: NextRequest) {
         name: name.trim(),
         slug: slug || name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-'),
         code: code || null,
-        geoId: geoId || `g${Date.now() % 1000000}`, // Improved geoId generation
+        geoId: geoId || `g${crypto.randomUUID().slice(0, 8)}`,
         parentId: parentId || null,
         latitude: latitude !== undefined && latitude !== null ? Number(latitude) : undefined,
         longitude: longitude !== undefined && longitude !== null ? Number(longitude) : undefined,
