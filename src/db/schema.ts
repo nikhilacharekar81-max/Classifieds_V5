@@ -447,7 +447,7 @@ export const cacheInvalidationOutbox = pgTable(
   'cache_invalidation_outbox',
   {
     id: varchar('id', { length: 64 }).primaryKey(),
-    tag: varchar('tag', { length: 128 }).notNull(),
+    tag: varchar('tag', { length: 128 }).notNull().unique(),
     status: varchar('status', { length: 32 }).notNull().default('pending'),
     attempts: integer('attempts').notNull().default(0),
     lastError: text('last_error'),

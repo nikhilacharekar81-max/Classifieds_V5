@@ -69,8 +69,8 @@ export async function enqueueDurableInvalidation(
   const id = `outbox_${tag}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const executor = tx ?? db;
 
-  const performInsert = async (): Promise<{ id: string; attempts: number }[]> => {
-    const inserted = await executor
+  const performUpsert = async (): Promise<{ id: string; attempts: number }[]> => {
+    const updated = await executor
       .insert(cacheInvalidationOutbox)
       .values({
         id,
@@ -81,19 +81,42 @@ export async function enqueueDurableInvalidation(
         nextRetryAt: now,
         completedAt: null,
       })
+      .onConflictDoUpdate({
+        target: cacheInvalidationOutbox.tag,
+        set: {
+          attempts: sql`"cache_invalidation_outbox"."attempts" + 1`,
+          status: 'pending',
+          nextRetryAt: now,
+          lastError: null,
+          completedAt: null,
+        },
+      })
       .returning({
         id: cacheInvalidationOutbox.id,
         attempts: cacheInvalidationOutbox.attempts,
       });
 
-    return inserted.length > 0 ? inserted : [{ id, attempts: 1 }];
+    if (updated.length > 0) {
+      return updated;
+    }
+
+    const existing = await executor
+      .select({
+        id: cacheInvalidationOutbox.id,
+        attempts: cacheInvalidationOutbox.attempts,
+      })
+      .from(cacheInvalidationOutbox)
+      .where(eq(cacheInvalidationOutbox.tag, tag))
+      .limit(1);
+
+    return existing.length > 0 ? existing : [{ id, attempts: 1 }];
   };
 
   let res: { id: string; attempts: number }[];
   if (tx) {
-    res = await performInsert();
+    res = await performUpsert();
   } else {
-    res = await withDbRetry(performInsert);
+    res = await withDbRetry(performUpsert);
   }
 
   ensureOutboxRetryWorkerStarted();
@@ -129,6 +152,15 @@ export async function recordDurableInvalidation(
               attempts: 1,
               lastError: errMessage || 'Failed to revalidate cache tag',
               nextRetryAt: new Date(Date.now() + 30000),
+            })
+            .onConflictDoUpdate({
+              target: cacheInvalidationOutbox.tag,
+              set: {
+                status: 'pending',
+                attempts: sql`"cache_invalidation_outbox"."attempts" + 1`,
+                lastError: errMessage || 'Failed to revalidate cache tag',
+                nextRetryAt: new Date(Date.now() + 30000),
+              },
             });
         }
         return;
