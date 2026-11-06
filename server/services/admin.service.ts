@@ -151,6 +151,7 @@ export class AdminService {
       ...fieldData,
       id,
     });
+    await invalidateCategoryReferenceCache();
     await this.recordAudit(
       'ATTRIBUTE_CREATED', 
       'Attributes', 
@@ -171,6 +172,7 @@ export class AdminService {
   ): Promise<CustomFieldDefinition | null> {
     const updated = await categoryRepository.updateCustomField(id, fieldData);
     if (updated) {
+      await invalidateCategoryReferenceCache();
       await this.recordAudit(
         'ATTRIBUTE_UPDATED',
         'Attributes',
@@ -192,17 +194,20 @@ export class AdminService {
     const fields = await categoryRepository.findAllCustomFields();
     const field = fields.find((f) => f.id === id);
     const success = await categoryRepository.deleteCustomField(id);
-    if (success && field) {
-      await this.recordAudit(
-        'ATTRIBUTE_DELETED',
-        'Attributes',
-        id,
-        field ? field.label : id,
-        `Deleted attribute "${field ? field.label : id}"`,
-        actor?.id,
-        actor?.name,
-        actor?.ipAddress
-      );
+    if (success) {
+      await invalidateCategoryReferenceCache();
+      if (field) {
+        await this.recordAudit(
+          'ATTRIBUTE_DELETED',
+          'Attributes',
+          id,
+          field.label,
+          `Deleted attribute "${field.label}"`,
+          actor?.id,
+          actor?.name,
+          actor?.ipAddress
+        );
+      }
     }
     return success;
   }
