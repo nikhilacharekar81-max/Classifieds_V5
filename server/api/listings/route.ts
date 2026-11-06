@@ -47,14 +47,20 @@ export async function GET(req: NextRequest) {
   const offset = rawOffset !== null && !isNaN(Number(rawOffset)) ? Math.max(Number(rawOffset) || 0, 0) : 0;
 
   const authContext = await getAuthenticatedUser(req);
-  const isPrivileged = Boolean(authContext?.isAdmin || authContext?.isModerator || authContext?.isSuperAdmin);
+  const isActualAdmin = Boolean(
+    authContext?.isSuperAdmin ||
+    authContext?.adminRole === 'admin' ||
+    authContext?.adminRole === 'super_admin'
+  );
+  const isModerator = Boolean(
+    authContext?.isModerator ||
+    authContext?.adminRole === 'moderator'
+  );
   const isOwner = Boolean(authContext?.userId && sellerId && sellerId === authContext.userId);
 
-  // Security Gate: Privileged roles and listing owners querying their own ads can view non-approved statuses
+  // Security Gate: Only actual administrators, moderators, and listing owners querying their own ads can view non-approved statuses
   let effectiveStatus: string | undefined = 'approved';
-  if (isPrivileged) {
-    effectiveStatus = requestedStatus || 'all';
-  } else if (isOwner) {
+  if (isActualAdmin || isModerator || isOwner) {
     effectiveStatus = requestedStatus || 'all';
   } else {
     effectiveStatus = 'approved';
@@ -87,7 +93,7 @@ export async function GET(req: NextRequest) {
       offset,
     }),
     includeCategories ? getCategoriesWithLiveCounts(city) : Promise.resolve(undefined),
-    sellerId && (isOwner || isPrivileged) ? listingRepository.getSellerStatusCounts(sellerId) : Promise.resolve(undefined),
+    sellerId && (isOwner || isActualAdmin || isModerator) ? listingRepository.getSellerStatusCounts(sellerId) : Promise.resolve(undefined),
   ]);
 
   const noCacheHeaders = {
@@ -96,13 +102,14 @@ export async function GET(req: NextRequest) {
     Expires: '0',
   };
 
-  // Strip internal fields for public DTO responses unless requested by owner or privileged admin
-  if (!isPrivileged && !isOwner) {
+  // Strip administrator-only/internal fields unless requested by the listing owner or an actual administrator (admin / super_admin)
+  if (!isActualAdmin && !isOwner) {
     return NextResponse.json(
       {
         items: result.items.map((item) => toPublicListingDTO(item)),
         total: result.total,
         ...(categories ? { categories } : {}),
+        ...(statusCounts ? { statusCounts } : {}),
       },
       { headers: noCacheHeaders }
     );

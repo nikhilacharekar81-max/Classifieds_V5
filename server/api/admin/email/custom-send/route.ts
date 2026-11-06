@@ -25,17 +25,30 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const result = await emailService.sendEmail(body);
 
-    if (result && result.status !== 'failed') {
-      await adminRepository.createAuditLog({
-        adminId: authContext.userId,
-        adminName: authContext.user.name,
-        action: 'EMAIL_CUSTOM_SENT',
-        module: 'Email',
-        targetId: result.id,
-        targetSummary: result.toEmail,
-        details: `Custom email sent to ${result.toEmail} with subject "${result.subject}" (status: ${result.status})`,
-        ipAddress: authContext.ipAddress,
-      });
+    if (result) {
+      if (result.status === 'delivered') {
+        await adminRepository.createAuditLog({
+          adminId: authContext.userId,
+          adminName: authContext.user.name,
+          action: 'EMAIL_CUSTOM_SENT',
+          module: 'Email',
+          targetId: result.id,
+          targetSummary: result.toEmail,
+          details: `Custom email sent to ${result.toEmail} with subject "${result.subject}" (status: ${result.status})`,
+          ipAddress: authContext.ipAddress,
+        });
+      } else {
+        await adminRepository.createAuditLog({
+          adminId: authContext.userId,
+          adminName: authContext.user.name,
+          action: 'EMAIL_CUSTOM_FAILED',
+          module: 'Email',
+          targetId: result.id,
+          targetSummary: result.toEmail,
+          details: `Custom email to ${result.toEmail} with subject "${result.subject}" was not delivered (status: ${result.status})`,
+          ipAddress: authContext.ipAddress,
+        });
+      }
     }
 
     return NextResponse.json(result);

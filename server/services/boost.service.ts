@@ -428,6 +428,127 @@ export class BoostService {
   }
 
   /**
+   * Independently verifies that a payment was actually captured/completed by the payment provider
+   * by checking recorded, signature-verified provider webhook events in payment_webhook_events.
+   * A client-supplied HMAC signature alone is never treated as proof of capture.
+   */
+  public async verifyCapturedPaymentEvent(
+    params: {
+      orderId: string;
+      paymentId: string;
+      paymentGateway?: string;
+      expectedAmount: number;
+      expectedCurrency: string;
+    },
+    txOrDb?: any
+  ): Promise<{ verified: boolean; reason?: string }> {
+    const schema = await import('@/src/db/schema');
+    const { eq } = await import('@/src/db/pg-orm');
+    const queryDb = txOrDb || db;
+
+    const events = await queryDb
+      .select()
+      .from(schema.paymentWebhookEvents)
+      .where(eq(schema.paymentWebhookEvents.orderId, params.orderId));
+
+    if (!events || events.length === 0) {
+      return {
+        verified: false,
+        reason: 'Payment capture has not been confirmed by the payment provider',
+      };
+    }
+
+    const expectedGw = params.paymentGateway?.trim().toLowerCase();
+    const expectedCurr = params.expectedCurrency.trim().toUpperCase();
+
+    for (const ev of events) {
+      const evGw = String(ev.gateway || '').trim().toLowerCase();
+      if (expectedGw && evGw && evGw !== expectedGw) {
+        continue;
+      }
+
+      const payload: any = ev.payload || {};
+      const eventType = String(
+        payload.eventType || payload.event || payload.type || ''
+      ).trim();
+
+      if (eventType !== 'payment.captured' && eventType !== 'checkout.session.completed') {
+        continue;
+      }
+
+      const entityStatus = String(
+        payload?.payload?.payment?.entity?.status ??
+        payload?.data?.object?.payment_status ??
+        payload?.status ??
+        ''
+      )
+        .trim()
+        .toLowerCase();
+
+      if (
+        entityStatus &&
+        entityStatus !== 'captured' &&
+        entityStatus !== 'paid' &&
+        entityStatus !== 'succeeded' &&
+        entityStatus !== 'completed'
+      ) {
+        continue;
+      }
+
+      const recordedPaymentId = String(
+        payload.paymentId ??
+        payload?.payload?.payment?.entity?.id ??
+        payload?.data?.object?.payment_intent ??
+        payload?.data?.object?.id ??
+        ''
+      ).trim();
+
+      if (!recordedPaymentId || recordedPaymentId !== params.paymentId.trim()) {
+        continue;
+      }
+
+      const recordedOrderId = String(
+        payload.orderId ??
+        payload?.payload?.payment?.entity?.order_id ??
+        payload?.data?.object?.client_reference_id ??
+        ev.orderId ??
+        ''
+      ).trim();
+
+      if (recordedOrderId !== params.orderId.trim()) {
+        continue;
+      }
+
+      const { amount: verifiedAmount, currency: verifiedCurrency } =
+        this.parseProviderAmountAndCurrency(
+          ev.gateway,
+          payload,
+          typeof payload.amount === 'number' ? payload.amount : undefined,
+          typeof payload.currency === 'string' ? payload.currency : undefined
+        );
+
+      if (verifiedAmount === undefined || verifiedCurrency === undefined) {
+        continue;
+      }
+
+      if (Math.abs(verifiedAmount - Number(params.expectedAmount)) >= 0.01) {
+        continue;
+      }
+
+      if (verifiedCurrency.toUpperCase() !== expectedCurr) {
+        continue;
+      }
+
+      return { verified: true };
+    }
+
+    return {
+      verified: false,
+      reason: 'No matching captured payment confirmation found for this order and payment ID',
+    };
+  }
+
+  /**
    * Durable, atomically idempotent webhook handler backed by PostgreSQL.
    * Uses database-enforced ON CONFLICT DO NOTHING and row-level locking inside activateBoostInTransaction.
    */
@@ -459,7 +580,80 @@ export class BoostService {
     if (eventType === 'payment.captured' || eventType === 'checkout.session.completed') {
       const order = await boostRepository.findOrderById(orderId);
       if (!order) {
-        return { success: false, message: `Order ${orderId} not found`, status: 404 };
+        const schema = await import('@/src/db/schema');
+        const { eq } = await import('@/src/db/pg-orm');
+        const postingOrderRows = await db
+          .select()
+          .from(schema.postingOrders)
+          .where(eq(schema.postingOrders.orderId, orderId))
+          .limit(1);
+
+        const postingOrder = postingOrderRows[0];
+        if (!postingOrder) {
+          return { success: false, message: `Order ${orderId} not found`, status: 404 };
+        }
+
+        const { amount: verifiedAmount, currency: verifiedCurrency } = this.parseProviderAmountAndCurrency(
+          paymentGateway,
+          payload,
+          amount,
+          currency
+        );
+
+        if (verifiedAmount === undefined || verifiedCurrency === undefined) {
+          return {
+            success: false,
+            message: 'Missing or unverifiable payment amount or currency in provider payload',
+            status: 400,
+          };
+        }
+
+        const expectedTotal = Number(postingOrder.amount);
+        if (Math.abs(verifiedAmount - expectedTotal) >= 0.01) {
+          return {
+            success: false,
+            message: `Payment amount mismatch: expected ${expectedTotal.toFixed(2)}, got ${verifiedAmount.toFixed(2)}`,
+            status: 400,
+          };
+        }
+
+        if (verifiedCurrency.toUpperCase() !== postingOrder.currency.toUpperCase()) {
+          return {
+            success: false,
+            message: `Payment currency mismatch: expected ${postingOrder.currency}, got ${verifiedCurrency}`,
+            status: 400,
+          };
+        }
+
+        const newlyRecorded = await paymentRepository.recordWebhookEvent(
+          eventId,
+          paymentGateway.trim(),
+          orderId,
+          {
+            ...(payload || {}),
+            eventType,
+            orderId,
+            paymentId,
+            amount: verifiedAmount,
+            currency: verifiedCurrency,
+          }
+        );
+
+        if (!newlyRecorded) {
+          return {
+            success: true,
+            duplicate: true,
+            message: `Webhook event ${eventId} already processed (idempotent skipped)`,
+            status: 200,
+          };
+        }
+
+        return {
+          success: true,
+          duplicate: false,
+          message: 'Posting fee payment capture recorded via webhook',
+          status: 200,
+        };
       }
 
       const { amount: verifiedAmount, currency: verifiedCurrency } = this.parseProviderAmountAndCurrency(

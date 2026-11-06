@@ -513,6 +513,9 @@ export class ListingService {
           if (postingOrder.purpose !== 'posting_fee') {
             throw new Error('INVALID_ORDER_PURPOSE:Order purpose must be posting_fee');
           }
+          if (postingOrder.categoryId !== cleanCategoryId) {
+            throw new Error('CATEGORY_MISMATCH:Posting order category does not match submitted listing category');
+          }
           if (postingOrder.currency !== 'INR') {
             throw new Error('CURRENCY_MISMATCH:Only INR currency is accepted for posting fee');
           }
@@ -531,6 +534,21 @@ export class ListingService {
           });
           if (!isSignatureValid) {
             throw new Error('PAYMENT_SIGNATURE_INVALID');
+          }
+
+          // Independent payment-provider capture verification (valid signature alone is not proof of capture)
+          const captureVerification = await boostService.verifyCapturedPaymentEvent(
+            {
+              orderId,
+              paymentId,
+              paymentGateway,
+              expectedAmount: postingFee,
+              expectedCurrency: 'INR',
+            },
+            tx
+          );
+          if (!captureVerification.verified) {
+            throw new Error(`PAYMENT_NOT_CAPTURED:${captureVerification.reason || 'Payment capture could not be confirmed with payment provider'}`);
           }
 
           // Verify paymentId has not already been used
@@ -641,9 +659,11 @@ export class ListingService {
         err.message?.startsWith('INVALID_POSTING_ORDER:') ||
         err.message?.startsWith('UNAUTHORIZED_ORDER:') ||
         err.message?.startsWith('INVALID_ORDER_PURPOSE:') ||
+        err.message?.startsWith('CATEGORY_MISMATCH:') ||
         err.message?.startsWith('CURRENCY_MISMATCH:') ||
         err.message?.startsWith('AMOUNT_MISMATCH:') ||
-        err.message?.startsWith('ORDER_ALREADY_USED:')
+        err.message?.startsWith('ORDER_ALREADY_USED:') ||
+        err.message?.startsWith('PAYMENT_NOT_CAPTURED:')
       ) {
         return { success: false, error: err.message.split(':')[1] || err.message, status: 400 };
       }
@@ -750,12 +770,29 @@ export class ListingService {
       };
     }
 
-    // Expiry date protection: ordinary sellers cannot modify expiresAt directly.
-    if (!isPrivileged && updatedData.expiresAt !== undefined) {
+    // Administrator-only field protection: moderators and non-admins must not control featured status, boosted status, or featured expiry
+    const isOwner = Boolean(authenticatedUserId && existing.sellerId === authenticatedUserId);
+    if (!isAdmin) {
+      const hasUnauthorizedAdminFieldChange =
+        (updatedData.isFeatured !== undefined && (!isOwner || Boolean(updatedData.isFeatured) !== Boolean(existing.isFeatured))) ||
+        (updatedData.isBoosted !== undefined && (!isOwner || Boolean(updatedData.isBoosted) !== Boolean(existing.isBoosted))) ||
+        (updatedData.featuredUntil !== undefined && (!isOwner || String(updatedData.featuredUntil || '') !== String(existing.featuredUntil || '')));
+
+      if (hasUnauthorizedAdminFieldChange) {
+        return {
+          success: false,
+          error: 'Forbidden: Administrator permission required to modify featured status, boosted status, or featured expiry',
+          status: 403,
+        };
+      }
+    }
+
+    // Expiry date protection: only actual administrators can modify expiresAt directly.
+    if (!isAdmin && updatedData.expiresAt !== undefined) {
       return {
         success: false,
-        error: 'Forbidden: Ordinary sellers cannot modify the ad expiration date directly. Use the renew flow.',
-        status: 400,
+        error: 'Forbidden: Only administrators can modify the ad expiration date directly. Use the renew flow.',
+        status: isModerator ? 403 : 400,
       };
     }
 
@@ -925,10 +962,14 @@ export class ListingService {
       }
     }
 
-    // Privileged fields (Admin / Moderator)
+    // Moderation fields (Admin / Moderator)
     if (isPrivileged) {
       if (updatedData.status !== undefined) safeFields.status = updatedData.status;
       if (updatedData.rejectionReason !== undefined) safeFields.rejectionReason = updatedData.rejectionReason;
+    }
+
+    // Administrator-only fields (strictly restricted to admin / super_admin)
+    if (isAdmin) {
       if (updatedData.isFeatured !== undefined) safeFields.isFeatured = updatedData.isFeatured;
       if (updatedData.isBoosted !== undefined) safeFields.isBoosted = updatedData.isBoosted;
 

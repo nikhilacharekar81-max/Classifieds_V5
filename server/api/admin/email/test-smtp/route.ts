@@ -30,6 +30,17 @@ export async function POST(req: NextRequest) {
         details: `SMTP connection test succeeded (${result.latencyMs}ms): ${result.message}`,
         ipAddress: authContext.ipAddress,
       });
+    } else {
+      await adminRepository.createAuditLog({
+        adminId: authContext.userId,
+        adminName: authContext.user.name,
+        action: 'SMTP_TEST_FAILED',
+        module: 'Email',
+        targetId: 'smtp_config',
+        targetSummary: 'SMTP Connection Test',
+        details: `SMTP connection test failed (${result.latencyMs}ms): ${result.message}`,
+        ipAddress: authContext.ipAddress,
+      });
     }
 
     return NextResponse.json(result);

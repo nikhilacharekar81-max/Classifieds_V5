@@ -23,19 +23,31 @@ export async function GET(
 
   const authContext = await getAuthenticatedUser(req);
   const isOwner = Boolean(authContext?.userId && authContext.userId === listing.sellerId);
-  const isPrivileged = Boolean(authContext?.isAdmin || authContext?.isModerator || authContext?.isSuperAdmin);
+  const isActualAdmin = Boolean(
+    authContext?.isSuperAdmin ||
+    authContext?.adminRole === 'admin' ||
+    authContext?.adminRole === 'super_admin'
+  );
+  const isModerator = Boolean(
+    authContext?.isModerator ||
+    authContext?.adminRole === 'moderator'
+  );
 
-  // Expiration Check: If listing is expired, only owner or admin can view it
+  // Expiration Check: If listing is expired, only owner or actual admin can view it
   const isExpired = listing.expiresAt && new Date(listing.expiresAt) <= new Date();
 
-  if (listing.status !== 'approved' || isExpired) {
-    if (!isOwner && !isPrivileged) {
+  if (isExpired) {
+    if (!isOwner && !isActualAdmin) {
+      return NextResponse.json({ error: 'Listing not found or expired' }, { status: 404, headers: noCacheHeaders });
+    }
+  } else if (listing.status !== 'approved') {
+    if (!isOwner && !isActualAdmin && !isModerator) {
       return NextResponse.json({ error: 'Listing not found or expired' }, { status: 404, headers: noCacheHeaders });
     }
   }
 
-  // Strip internal fields for public responses unless caller is owner or privileged admin
-  if (!isOwner && !isPrivileged) {
+  // Strip internal/administrator-only fields unless caller is owner or actual administrator (admin / super_admin)
+  if (!isOwner && !isActualAdmin) {
     return NextResponse.json(toPublicListingDTO(listing), { headers: noCacheHeaders });
   }
 
@@ -54,7 +66,7 @@ export async function PUT(
     }
 
     const isActualAdmin = Boolean(authContext.isSuperAdmin || authContext.adminRole === 'admin' || authContext.adminRole === 'super_admin');
-    const isModerator = Boolean(authContext.isModerator || isActualAdmin);
+    const isModerator = Boolean(authContext.isModerator || authContext.adminRole === 'moderator' || isActualAdmin);
 
     const body = await req.json();
     const result = await listingService.updateListing(id, body, authContext.userId, isActualAdmin, isModerator);

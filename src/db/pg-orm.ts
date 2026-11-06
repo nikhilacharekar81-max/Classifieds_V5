@@ -650,18 +650,121 @@ class InsertQueryBuilder<TTable extends PgTableWithColumns<any>, TReturn = TTabl
   }
 }
 
+function stripSqlComments(sqlStr: string): string {
+  let out = '';
+  let inSingle = false;
+  let inDouble = false;
+  let i = 0;
+  while (i < sqlStr.length) {
+    const ch = sqlStr[i];
+    const next = sqlStr[i + 1];
+
+    if (!inDouble && ch === "'") {
+      out += ch;
+      if (inSingle && next === "'") {
+        out += next;
+        i += 2;
+        continue;
+      }
+      inSingle = !inSingle;
+      i++;
+      continue;
+    }
+
+    if (!inSingle && ch === '"') {
+      out += ch;
+      if (inDouble && next === '"') {
+        out += next;
+        i += 2;
+        continue;
+      }
+      inDouble = !inDouble;
+      i++;
+      continue;
+    }
+
+    if (!inSingle && !inDouble) {
+      if (ch === '-' && next === '-') {
+        i += 2;
+        while (i < sqlStr.length && sqlStr[i] !== '\n') i++;
+        out += ' ';
+        continue;
+      }
+      if (ch === '/' && next === '*') {
+        i += 2;
+        while (i < sqlStr.length && !(sqlStr[i] === '*' && sqlStr[i + 1] === '/')) i++;
+        i += 2;
+        out += ' ';
+        continue;
+      }
+    }
+
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
+function hasBalancedQuotesAndParens(str: string): boolean {
+  let inSingle = false;
+  let inDouble = false;
+  let depth = 0;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    const next = str[i + 1];
+    if (!inDouble && ch === "'") {
+      if (inSingle && next === "'") {
+        i++;
+        continue;
+      }
+      inSingle = !inSingle;
+    } else if (!inSingle && ch === '"') {
+      if (inDouble && next === '"') {
+        i++;
+        continue;
+      }
+      inDouble = !inDouble;
+    } else if (!inSingle && !inDouble) {
+      if (ch === '(') depth++;
+      else if (ch === ')') {
+        depth--;
+        if (depth < 0) return false;
+      }
+    }
+  }
+  return !inSingle && !inDouble && depth === 0;
+}
+
 function unwrapOuterParens(str: string): string {
   let s = str.trim();
   while (s.startsWith('(') && s.endsWith(')')) {
     let depth = 0;
+    let inSingle = false;
+    let inDouble = false;
     let matchedOuter = true;
     for (let i = 0; i < s.length - 1; i++) {
-      if (s[i] === '(') depth++;
-      else if (s[i] === ')') {
-        depth--;
-        if (depth === 0) {
-          matchedOuter = false;
-          break;
+      const ch = s[i];
+      const next = s[i + 1];
+      if (!inDouble && ch === "'") {
+        if (inSingle && next === "'") {
+          i++;
+          continue;
+        }
+        inSingle = !inSingle;
+      } else if (!inSingle && ch === '"') {
+        if (inDouble && next === '"') {
+          i++;
+          continue;
+        }
+        inDouble = !inDouble;
+      } else if (!inSingle && !inDouble) {
+        if (ch === '(') depth++;
+        else if (ch === ')') {
+          depth--;
+          if (depth === 0) {
+            matchedOuter = false;
+            break;
+          }
         }
       }
     }
@@ -674,95 +777,563 @@ function unwrapOuterParens(str: string): string {
   return s;
 }
 
-function isTautologicalExpr(raw: string): boolean {
-  const unwrapped = unwrapOuterParens(raw).trim().toLowerCase();
-  const withoutSpaces = unwrapped.replace(/\s+/g, '');
-  if (!withoutSpaces) return false;
+function splitTopLevelLogical(expr: string, keyword: 'OR' | 'AND'): string[] {
+  const s = unwrapOuterParens(expr);
+  const parts: string[] = [];
+  let inSingle = false;
+  let inDouble = false;
+  let depth = 0;
+  let lastIdx = 0;
+  const kwLen = keyword.length;
 
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    const next = s[i + 1];
+
+    if (!inDouble && ch === "'") {
+      if (inSingle && next === "'") {
+        i++;
+        continue;
+      }
+      inSingle = !inSingle;
+      continue;
+    }
+    if (!inSingle && ch === '"') {
+      if (inDouble && next === '"') {
+        i++;
+        continue;
+      }
+      inDouble = !inDouble;
+      continue;
+    }
+    if (inSingle || inDouble) continue;
+
+    if (ch === '(') {
+      depth++;
+      continue;
+    }
+    if (ch === ')') {
+      depth--;
+      continue;
+    }
+
+    if (depth === 0 && s.slice(i, i + kwLen).toUpperCase() === keyword) {
+      const prevChar = i > 0 ? s[i - 1] : ' ';
+      const nextChar = i + kwLen < s.length ? s[i + kwLen] : ' ';
+      const isBoundaryBefore = /[\s)]/.test(prevChar);
+      const isBoundaryAfter = /[\s(]/.test(nextChar);
+      if (isBoundaryBefore && isBoundaryAfter) {
+        parts.push(s.slice(lastIdx, i).trim());
+        lastIdx = i + kwLen;
+        i += kwLen - 1;
+      }
+    }
+  }
+
+  parts.push(s.slice(lastIdx).trim());
+  return parts;
+}
+
+function stripPgTypeCasts(operand: string): string {
+  return unwrapOuterParens(operand)
+    .replace(/::[a-zA-Z_][a-zA-Z0-9_]*(\s*\([^)]*\))?(\[\])?/g, '')
+    .trim();
+}
+
+const SQL_RESERVED_NON_COLUMN_WORDS = new Set([
+  'true',
+  'false',
+  'null',
+  'unknown',
+  'not',
+  'and',
+  'or',
+  'is',
+  'in',
+  'like',
+  'ilike',
+  'similar',
+  'to',
+  'between',
+  'distinct',
+  'from',
+  'any',
+  'some',
+  'all',
+  'exists',
+  'case',
+  'when',
+  'then',
+  'else',
+  'end',
+  'cast',
+  'coalesce',
+  'nullif',
+  'greatest',
+  'least',
+  'now',
+  'current_timestamp',
+  'current_date',
+  'current_time',
+  'interval',
+  'extract',
+  'epoch',
+  'lower',
+  'upper',
+  'trim',
+  'btrim',
+  'ltrim',
+  'rtrim',
+  'length',
+  'char_length',
+  'count',
+  'sum',
+  'min',
+  'max',
+  'avg',
+  'abs',
+  'round',
+  'floor',
+  'ceil',
+  'ceiling',
+]);
+
+function containsColumnIdentifier(expr: string): boolean {
+  const s = stripPgTypeCasts(expr);
+  if (!s) return false;
+
+  // Double-quoted identifier (e.g., "id" or "users"."id") with non-empty column name
+  const doubleQuotedMatches = s.match(/"([^"]+)"/g);
+  if (doubleQuotedMatches && doubleQuotedMatches.some((m) => m.replace(/"/g, '').trim().length > 0)) {
+    return true;
+  }
+
+  // Remove single-quoted literals and double-quoted identifiers before scanning for unquoted column identifiers
+  const withoutStrings = s
+    .replace(/'(?:''|[^'])*'/g, ' ')
+    .replace(/"(?:\"\"|[^"])*"/g, ' ')
+    .replace(/\$\d+/g, ' ');
+
+  const tokens = withoutStrings.match(/\b[a-zA-Z_][a-zA-Z0-9_.]*\b/g) || [];
+  for (const rawTok of tokens) {
+    const parts = rawTok.toLowerCase().split('.');
+    for (const part of parts) {
+      if (part && !SQL_RESERVED_NON_COLUMN_WORDS.has(part)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+type ResolvedLiteral =
+  | { kind: 'constant'; value: string | number | boolean | null }
+  | { kind: 'dynamic' };
+
+function resolveScalarOperand(rawOperand: string, params?: any[]): ResolvedLiteral {
+  const s = stripPgTypeCasts(rawOperand);
+  if (!s) return { kind: 'constant', value: null };
+
+  const paramMatch = s.match(/^\$(\d+)$/);
+  if (paramMatch && params) {
+    const idx = Number(paramMatch[1]) - 1;
+    if (idx >= 0 && idx < params.length) {
+      const val = params[idx];
+      if (val === null || val === undefined) return { kind: 'constant', value: null };
+      if (typeof val === 'boolean' || typeof val === 'number' || typeof val === 'string') {
+        return { kind: 'constant', value: val };
+      }
+      return { kind: 'constant', value: String(val) };
+    }
+  }
+
+  const lower = s.toLowerCase();
+  if (lower === 'true') return { kind: 'constant', value: true };
+  if (lower === 'false') return { kind: 'constant', value: false };
+  if (lower === 'null') return { kind: 'constant', value: null };
+
+  if (/^[+-]?\d+(\.\d+)?$/.test(s)) {
+    return { kind: 'constant', value: Number(s) };
+  }
+
+  if (s.startsWith("'") && s.endsWith("'") && s.length >= 2) {
+    const inner = s.slice(1, -1);
+    if (!inner.includes("'") || /^(?:''|[^'])*$/.test(inner)) {
+      return { kind: 'constant', value: inner.replace(/''/g, "'") };
+    }
+  }
+
+  return { kind: 'dynamic' };
+}
+
+type PredicateAssessment = 'safe' | 'tautology' | 'contradiction' | 'constant_unsafe';
+
+function findTopLevelBinaryOp(
+  s: string
+): { op: string; left: string; right: string } | null {
+  let inSingle = false;
+  let inDouble = false;
+  let depth = 0;
+
+  // Check multi-word comparison operators first at depth 0
+  const multiWordOps = [
+    'IS NOT DISTINCT FROM',
+    'IS DISTINCT FROM',
+    'NOT ILIKE',
+    'NOT LIKE',
+    'ILIKE',
+    'LIKE',
+  ];
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    const next = s[i + 1];
+    if (!inDouble && ch === "'") {
+      if (inSingle && next === "'") {
+        i++;
+        continue;
+      }
+      inSingle = !inSingle;
+      continue;
+    }
+    if (!inSingle && ch === '"') {
+      if (inDouble && next === '"') {
+        i++;
+        continue;
+      }
+      inDouble = !inDouble;
+      continue;
+    }
+    if (inSingle || inDouble) continue;
+    if (ch === '(') {
+      depth++;
+      continue;
+    }
+    if (ch === ')') {
+      depth--;
+      continue;
+    }
+    if (depth !== 0) continue;
+
+    for (const mwOp of multiWordOps) {
+      if (s.slice(i, i + mwOp.length).toUpperCase() === mwOp) {
+        const prev = i > 0 ? s[i - 1] : ' ';
+        const after = i + mwOp.length < s.length ? s[i + mwOp.length] : ' ';
+        if (/[\s)]/.test(prev) && /[\s(]/.test(after)) {
+          return {
+            op: mwOp,
+            left: s.slice(0, i).trim(),
+            right: s.slice(i + mwOp.length).trim(),
+          };
+        }
+      }
+    }
+
+    const twoChar = s.slice(i, i + 2);
+    if (twoChar === '!=' || twoChar === '<>' || twoChar === '<=' || twoChar === '>=' || twoChar === '~*') {
+      return {
+        op: twoChar,
+        left: s.slice(0, i).trim(),
+        right: s.slice(i + 2).trim(),
+      };
+    }
+
+    if (ch === '=' || ch === '<' || ch === '>' || ch === '~') {
+      return {
+        op: ch,
+        left: s.slice(0, i).trim(),
+        right: s.slice(i + 1).trim(),
+      };
+    }
+  }
+
+  return null;
+}
+
+function normalizeIdentifierOrExpr(raw: string): string {
+  return stripPgTypeCasts(raw).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function assessAtomicPredicate(raw: string, params?: any[]): PredicateAssessment {
+  const s = unwrapOuterParens(raw).trim();
+  if (!s) return 'tautology';
+
+  // Handle unary NOT (...)
+  const notMatch = s.match(/^not(?:\s+|\s*(?=\())([\s\S]+)$/i);
+  if (notMatch) {
+    const inner = notMatch[1].trim();
+    const innerResult = assessWhereExpression(inner, params);
+    if (innerResult === 'contradiction') return 'tautology';
+    if (innerResult === 'tautology') return 'contradiction';
+    if (innerResult === 'constant_unsafe') return 'constant_unsafe';
+    return containsColumnIdentifier(inner) ? 'safe' : 'constant_unsafe';
+  }
+
+  // Handle IS [NOT] TRUE / FALSE / NULL / UNKNOWN
+  const isMatch = s.match(/^([\s\S]+?)\s+IS\s+(NOT\s+)?(TRUE|FALSE|NULL|UNKNOWN)$/i);
+  if (isMatch) {
+    const lhs = isMatch[1].trim();
+    const isNegated = Boolean(isMatch[2]);
+    const rhsKw = isMatch[3].toUpperCase();
+    const resolvedLhs = resolveScalarOperand(lhs, params);
+
+    if (resolvedLhs.kind === 'constant') {
+      const v = resolvedLhs.value;
+      const isNullVal = v === null;
+      const isTrueVal = v === true || v === 1 || v === '1' || (typeof v === 'string' && v.toLowerCase() === 'true');
+      const isFalseVal = v === false || v === 0 || v === '0' || (typeof v === 'string' && v.toLowerCase() === 'false');
+
+      let matches = false;
+      if (rhsKw === 'NULL' || rhsKw === 'UNKNOWN') matches = isNullVal;
+      else if (rhsKw === 'TRUE') matches = isTrueVal;
+      else if (rhsKw === 'FALSE') matches = isFalseVal;
+
+      const finalTruth = isNegated ? !matches : matches;
+      return finalTruth ? 'tautology' : 'contradiction';
+    }
+
+    return containsColumnIdentifier(lhs) ? 'safe' : 'constant_unsafe';
+  }
+
+  // Handle [NOT] IN (...)
+  const inMatch = s.match(/^([\s\S]+?)\s+(NOT\s+)?IN\s*\(([\s\S]*)\)$/i);
+  if (inMatch) {
+    const lhs = inMatch[1].trim();
+    const isNotIn = Boolean(inMatch[2]);
+    const listBody = inMatch[3].trim();
+    if (!listBody) {
+      return isNotIn ? 'tautology' : 'contradiction';
+    }
+    if (!containsColumnIdentifier(lhs)) {
+      return 'constant_unsafe';
+    }
+    return 'safe';
+  }
+
+  // Handle BETWEEN
+  const betweenMatch = s.match(/^([\s\S]+?)\s+(NOT\s+)?BETWEEN\s+([\s\S]+?)\s+AND\s+([\s\S]+)$/i);
+  if (betweenMatch) {
+    const lhs = betweenMatch[1].trim();
+    if (!containsColumnIdentifier(lhs)) {
+      return 'constant_unsafe';
+    }
+    return 'safe';
+  }
+
+  // Handle binary comparison operators (=, !=, <>, <, <=, >, >=, LIKE, ILIKE, IS [NOT] DISTINCT FROM)
+  const bin = findTopLevelBinaryOp(s);
+  if (bin) {
+    const { op, left, right } = bin;
+    if (!left || !right) return 'constant_unsafe';
+
+    const normLeft = normalizeIdentifierOrExpr(left);
+    const normRight = normalizeIdentifierOrExpr(right);
+
+    // Identical left and right expressions (e.g., "id" = "id", 1 = 1, $1 = $1, 'a' = 'a')
+    if (normLeft && normLeft === normRight) {
+      if (op === '=' || op === '<=' || op === '>=' || op === 'IS NOT DISTINCT FROM' || op === 'LIKE' || op === 'ILIKE') {
+        return 'tautology';
+      }
+      if (op === '!=' || op === '<>' || op === '<' || op === '>' || op === 'IS DISTINCT FROM' || op === 'NOT LIKE' || op === 'NOT ILIKE') {
+        return 'contradiction';
+      }
+    }
+
+    const resLeft = resolveScalarOperand(left, params);
+    const resRight = resolveScalarOperand(right, params);
+
+    // Wildcard LIKE / ILIKE '%'
+    if ((op === 'LIKE' || op === 'ILIKE') && resRight.kind === 'constant' && typeof resRight.value === 'string') {
+      if (/^%+$/.test(resRight.value)) {
+        return 'tautology';
+      }
+    }
+
+    // Both operands resolve to constants (literals or bound $N parameters with no column references)
+    if (resLeft.kind === 'constant' && resRight.kind === 'constant') {
+      const lv = resLeft.value;
+      const rv = resRight.value;
+      if (op === '=' || op === 'IS NOT DISTINCT FROM') {
+        return String(lv) === String(rv) ? 'tautology' : 'contradiction';
+      }
+      if (op === '!=' || op === '<>' || op === 'IS DISTINCT FROM') {
+        return String(lv) !== String(rv) ? 'tautology' : 'contradiction';
+      }
+      if (typeof lv === 'number' && typeof rv === 'number') {
+        if (op === '<') return lv < rv ? 'tautology' : 'contradiction';
+        if (op === '<=') return lv <= rv ? 'tautology' : 'contradiction';
+        if (op === '>') return lv > rv ? 'tautology' : 'contradiction';
+        if (op === '>=') return lv >= rv ? 'tautology' : 'contradiction';
+      }
+      return 'constant_unsafe';
+    }
+
+    // At least one side of a binary comparison in UPDATE/DELETE WHERE must reference a column
+    if (!containsColumnIdentifier(left) && !containsColumnIdentifier(right)) {
+      return 'constant_unsafe';
+    }
+
+    return 'safe';
+  }
+
+  // Standalone scalar/literal/parameter without comparison operator
+  const resolvedStandalone = resolveScalarOperand(s, params);
+  if (resolvedStandalone.kind === 'constant') {
+    const v = resolvedStandalone.value;
+    if (
+      v === true ||
+      v === 1 ||
+      v === '1' ||
+      (typeof v === 'number' && v !== 0) ||
+      (typeof v === 'string' && ['true', 't', 'yes', 'on', '1'].includes(v.toLowerCase()))
+    ) {
+      return 'tautology';
+    }
+    if (
+      v === false ||
+      v === 0 ||
+      v === '0' ||
+      v === null ||
+      (typeof v === 'string' && ['false', 'f', 'no', 'off', '0', ''].includes(v.toLowerCase()))
+    ) {
+      return 'contradiction';
+    }
+    return 'constant_unsafe';
+  }
+
+  if (!containsColumnIdentifier(s)) {
+    return 'constant_unsafe';
+  }
+
+  return 'safe';
+}
+
+function areComplementaryDisjuncts(a: string, b: string): boolean {
+  const ua = unwrapOuterParens(a).trim();
+  const ub = unwrapOuterParens(b).trim();
+
+  // X OR NOT X
+  const notA = ua.match(/^not(?:\s+|\s*(?=\())([\s\S]+)$/i);
+  if (notA && normalizeIdentifierOrExpr(notA[1]) === normalizeIdentifierOrExpr(ub)) {
+    return true;
+  }
+  const notB = ub.match(/^not(?:\s+|\s*(?=\())([\s\S]+)$/i);
+  if (notB && normalizeIdentifierOrExpr(notB[1]) === normalizeIdentifierOrExpr(ua)) {
+    return true;
+  }
+
+  // X IS NULL OR X IS NOT NULL
+  const nullA = ua.match(/^([\s\S]+?)\s+IS\s+(NOT\s+)?NULL$/i);
+  const nullB = ub.match(/^([\s\S]+?)\s+IS\s+(NOT\s+)?NULL$/i);
   if (
-    withoutSpaces === '1=1' ||
-    withoutSpaces === '0=0' ||
-    withoutSpaces === 'true' ||
-    withoutSpaces === '1' ||
-    withoutSpaces === "''=''" ||
-    withoutSpaces === '""=""' ||
-    withoutSpaces === 'true=true' ||
-    withoutSpaces === 'false=false'
+    nullA &&
+    nullB &&
+    Boolean(nullA[2]) !== Boolean(nullB[2]) &&
+    normalizeIdentifierOrExpr(nullA[1]) === normalizeIdentifierOrExpr(nullB[1])
   ) {
     return true;
   }
 
-  // Equality comparison: left === right
-  const eqIdx = unwrapped.indexOf('=');
-  if (
-    eqIdx !== -1 &&
-    unwrapped.indexOf('=', eqIdx + 1) === -1 &&
-    !unwrapped.includes('!=') &&
-    !unwrapped.includes('<>') &&
-    !unwrapped.includes('<=') &&
-    !unwrapped.includes('>=')
-  ) {
-    const left = unwrapped.slice(0, eqIdx).trim();
-    const right = unwrapped.slice(eqIdx + 1).trim();
-    if (left && right && left === right) {
-      return true;
+  // X = Y OR X <> Y / X != Y
+  const binA = findTopLevelBinaryOp(ua);
+  const binB = findTopLevelBinaryOp(ub);
+  if (binA && binB) {
+    const sameOperands =
+      (normalizeIdentifierOrExpr(binA.left) === normalizeIdentifierOrExpr(binB.left) &&
+        normalizeIdentifierOrExpr(binA.right) === normalizeIdentifierOrExpr(binB.right)) ||
+      (normalizeIdentifierOrExpr(binA.left) === normalizeIdentifierOrExpr(binB.right) &&
+        normalizeIdentifierOrExpr(binA.right) === normalizeIdentifierOrExpr(binB.left));
+    if (sameOperands) {
+      const isEqA = binA.op === '=';
+      const isNeqA = binA.op === '!=' || binA.op === '<>';
+      const isEqB = binB.op === '=';
+      const isNeqB = binB.op === '!=' || binB.op === '<>';
+      if ((isEqA && isNeqB) || (isNeqA && isEqB)) {
+        return true;
+      }
     }
   }
 
   return false;
 }
 
-function hasCompoundOrTautology(whereSql: string): boolean {
-  // Regex detection for OR tautology variants including parenthesized tautologies
-  const orPatterns = [
-    /\bor\s*\(+\s*1\s*=\s*1\s*\)+/i,
-    /\bor\s*\(+\s*0\s*=\s*0\s*\)+/i,
-    /\bor\s*\(+\s*true\s*\)+/i,
-    /\bor\s*\(+\s*'([^']*)'\s*=\s*'\1'\s*\)+/i,
-    /\bor\s*\(+\s*"([^"]*)"\s*=\s*"\1"\s*\)+/i,
-    /\b\(+\s*1\s*=\s*1\s*\)+\s*or\b/i,
-    /\b\(+\s*0\s*=\s*0\s*\)+\s*or\b/i,
-    /\b\(+\s*true\s*\)+\s*or\b/i,
-    /\b\(+\s*'([^']*)'\s*=\s*'\1'\s*\)+\s*or\b/i,
-    /\bor\s+1\s*=\s*1(\b|\s|\)|$)/i,
-    /\bor\s+0\s*=\s*0(\b|\s|\)|$)/i,
-    /\bor\s+true(\b|\s|\)|$)/i,
-    /\bor\s+'([^']*)'\s*=\s*'\1'(\b|\s|\)|$)/i,
-    /\bor\s+"([^"]*)"\s*=\s*"\1"(\b|\s|\)|$)/i,
-  ];
+function assessWhereExpression(rawExpr: string, params?: any[]): PredicateAssessment {
+  const cleaned = unwrapOuterParens(rawExpr).trim();
+  if (!cleaned) return 'tautology';
 
-  for (const pat of orPatterns) {
-    if (pat.test(whereSql)) {
-      return true;
+  // 1. Decompose top-level OR branches
+  const orBranches = splitTopLevelLogical(cleaned, 'OR');
+  if (orBranches.length > 1) {
+    for (const branch of orBranches) {
+      if (!branch) return 'tautology';
+      const branchResult = assessWhereExpression(branch, params);
+      if (branchResult === 'tautology' || branchResult === 'constant_unsafe') {
+        return 'tautology';
+      }
     }
+    // Check complementary disjuncts (e.g., col = $1 OR col <> $1, col IS NULL OR col IS NOT NULL)
+    for (let i = 0; i < orBranches.length; i++) {
+      for (let j = i + 1; j < orBranches.length; j++) {
+        if (areComplementaryDisjuncts(orBranches[i], orBranches[j])) {
+          return 'tautology';
+        }
+      }
+    }
+    return 'safe';
   }
 
-  // Tokenize around OR to catch any nested parenthesized expression that unwraps to a tautology
-  const orAfterRegex = /\bor\s+(\(+[^\)]+\)+|[^)]+?)(?=\s+or\b|\s+and\b|\)|$)/gi;
-  let match;
-  while ((match = orAfterRegex.exec(whereSql)) !== null) {
-    const candidate = match[1]?.trim();
-    if (candidate && isTautologicalExpr(candidate)) {
-      return true;
+  // 2. Decompose top-level AND branches
+  const andBranches = splitTopLevelLogical(cleaned, 'AND');
+  if (andBranches.length > 1) {
+    let hasSafeColumnFilter = false;
+    for (const branch of andBranches) {
+      if (!branch) return 'tautology';
+      // If any AND branch itself contains a compound OR tautology, block it
+      const subOrs = splitTopLevelLogical(branch, 'OR');
+      if (subOrs.length > 1) {
+        const subAssessment = assessWhereExpression(branch, params);
+        if (subAssessment === 'tautology' || subAssessment === 'constant_unsafe') {
+          return 'tautology';
+        }
+      }
+      const branchResult = assessWhereExpression(branch, params);
+      if (branchResult === 'safe') {
+        hasSafeColumnFilter = true;
+      }
     }
+    return hasSafeColumnFilter ? 'safe' : 'tautology';
   }
 
-  return false;
+  // 3. Atomic predicate
+  return assessAtomicPredicate(cleaned, params);
 }
 
-function assertSafeWhereClause(whereSql: string, operation: 'UPDATE' | 'DELETE'): void {
+function assertSafeWhereClause(whereSql: string, operation: 'UPDATE' | 'DELETE', params?: any[]): void {
   if (!whereSql || !whereSql.trim()) {
-    throw new Error(`ORM Safety: ${operation} query has empty .where(). Use .where(sql\`1=1\`) if intentional.`);
+    throw new Error(`ORM Safety: ${operation} query has empty .where().`);
   }
 
-  // Direct and parenthesized tautologies: 1=1, (1=1), ((1=1)), ( 'a' = 'a' ), (true), etc.
-  if (isTautologicalExpr(whereSql)) {
-    throw new Error(`ORM Safety: ${operation} query has unrestricted .where(). Use .where(sql\`1=1\`) if intentional.`);
+  const stripped = stripSqlComments(whereSql).trim();
+  if (!stripped) {
+    throw new Error(`ORM Safety: ${operation} query has empty .where().`);
   }
 
-  // Compound unrestricted expressions: e.g. "id = 'x' OR (1=1)", "id = 'x' OR true", etc.
-  if (hasCompoundOrTautology(whereSql)) {
-    throw new Error(`ORM Safety: ${operation} query has unrestricted compound .where() containing OR tautology. Execution blocked.`);
+  if (!hasBalancedQuotesAndParens(stripped)) {
+    throw new Error(`ORM Safety: ${operation} query has malformed quotes or unbalanced parentheses in .where().`);
+  }
+
+  const topOrBranches = splitTopLevelLogical(stripped, 'OR');
+  const assessment = assessWhereExpression(stripped, params);
+
+  if (assessment === 'tautology' || assessment === 'constant_unsafe') {
+    if (topOrBranches.length > 1) {
+      throw new Error(
+        `ORM Safety: ${operation} query has unrestricted compound .where() containing OR tautology. Execution blocked.`
+      );
+    }
+    throw new Error(
+      `ORM Safety: ${operation} query has unrestricted or tautological .where(). Execution blocked.`
+    );
   }
 }
 
@@ -829,7 +1400,7 @@ class UpdateQueryBuilder<TTable extends PgTableWithColumns<any>, TReturn = TTabl
 
     if (this._where) {
       const whereSql = this._where.toSql(params);
-      assertSafeWhereClause(whereSql, 'UPDATE');
+      assertSafeWhereClause(whereSql, 'UPDATE', params);
       sqlText += ` WHERE ${whereSql}`;
     }
 
@@ -900,7 +1471,7 @@ class DeleteQueryBuilder<TTable extends PgTableWithColumns<any>, TReturn = TTabl
 
     if (this._where) {
       const whereSql = this._where.toSql(params);
-      assertSafeWhereClause(whereSql, 'DELETE');
+      assertSafeWhereClause(whereSql, 'DELETE', params);
       sqlText += ` WHERE ${whereSql}`;
     }
 
