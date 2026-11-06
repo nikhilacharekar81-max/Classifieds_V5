@@ -157,7 +157,7 @@ export const PublicListingDetailPage: React.FC<PublicListingDetailPageProps> = (
         >
           <meta itemProp="name" content={listing.title} />
           <meta itemProp="description" content={listing.description} />
-          <meta itemProp="image" content={listing.images[0]} />
+          <meta itemProp="image" content={listing.images[0] || '/default-listing-image.png'} />
           <div
             itemProp="offers"
             itemScope
@@ -176,7 +176,7 @@ export const PublicListingDetailPage: React.FC<PublicListingDetailPageProps> = (
                   : 'https://schema.org/InStock'
               }
             />
-            <meta itemProp="itemCondition" content="https://schema.org/UsedCondition" />
+            <meta itemProp="itemCondition" content={listing.customAttributes?.condition === 'new' ? "https://schema.org/NewCondition" : "https://schema.org/UsedCondition"} />
           </div>
 
           {/* Left Column (7 cols): Images & Full Specs */}

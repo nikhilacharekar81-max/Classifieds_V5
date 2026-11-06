@@ -15,16 +15,24 @@ const BoostAdModal = dynamic(() =>
 export const PublicListingShareButton: React.FC = () => {
   const [copiedLink, setCopiedLink] = useState(false);
 
-  const handleShare = () => {
+  const handleShare = async () => {
     if (typeof window !== 'undefined' && navigator.clipboard) {
-      navigator.clipboard.writeText(window.location.href);
-      setCopiedLink(true);
-      dispatchPublicToast({
-        title: 'Link Copied',
-        message: 'Classified ad webpage URL copied to your clipboard.',
-        type: 'success',
-      });
-      setTimeout(() => setCopiedLink(false), 3000);
+      try {
+        await navigator.clipboard.writeText(window.location.href);
+        setCopiedLink(true);
+        dispatchPublicToast({
+          title: 'Link Copied',
+          message: 'Classified ad webpage URL copied to your clipboard.',
+          type: 'success',
+        });
+        setTimeout(() => setCopiedLink(false), 3000);
+      } catch (err) {
+        dispatchPublicToast({
+          title: 'Share Failed',
+          message: 'Could not copy link to clipboard.',
+          type: 'error',
+        });
+      }
     }
   };
 
@@ -72,10 +80,19 @@ export const PublicListingOfferIsland: React.FC<{ listing: Listing }> = ({ listi
         if (data.phone) {
           setRevealedPhone(data.phone);
           setShowPhone(true);
+        } else {
+           throw new Error('No phone found');
         }
+      } else {
+        throw new Error('Failed to retrieve phone number');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to reveal seller phone:', err);
+      dispatchPublicToast({
+        title: 'Phone Reveal Failed',
+        message: err?.message || 'Could not retrieve phone number.',
+        type: 'error',
+      });
     } finally {
       setIsRevealingPhone(false);
     }

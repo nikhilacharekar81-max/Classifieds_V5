@@ -14,6 +14,7 @@ import { listingRepository } from './server/repositories/listing.repository.ts';
 import { buildChillyUrl, serializeJsonLd } from './lib/utils/seoAndUrlHelper.ts';
 import { renderSsrPage } from './src/entry-server.tsx';
 import { runWithRequestCache } from './src/shims/next-cache.ts';
+import compression from 'compression';
 
 // Route Modules
 import * as bootstrapRoute from './server/api/bootstrap/route.ts';
@@ -43,6 +44,8 @@ import * as boostVerifyPaymentRoute from './server/api/boost/verify-payment/rout
 import * as boostWebhookRoute from './server/api/boost/webhook/route.ts';
 import * as boostAnalyticsRoute from './server/api/boost/analytics/route.ts';
 import * as boostCleanupExpiredRoute from './server/api/boost/cleanup-expired/route.ts';
+import * as adminAttributesRoute from './server/api/admin/attributes/route.ts';
+import * as adminAttributeByIdRoute from './server/api/admin/attributes/[id]/route.ts';
 import * as adminMetricsRoute from './server/api/admin/metrics/route.ts';
 import * as adminCategoriesRoute from './server/api/admin/categories/route.ts';
 import * as adminCategoryByIdRoute from './server/api/admin/categories/[id]/route.ts';
@@ -98,6 +101,7 @@ async function startServer() {
   await initializePostgreSQL();
 
   const app = express();
+  app.use(compression()); // Added compression
   app.set('trust proxy', 1);
   const PORT = Number(process.env.PORT) || 3000;
 
@@ -151,6 +155,8 @@ async function startServer() {
 
   // Admin Console Routes with granular RBAC
   app.all('/api/admin/metrics', adminGuard('canManageSettings'), createExpressRouteHandler(adminMetricsRoute));
+  app.all('/api/admin/attributes/:id', adminGuard('canManageCategories'), createExpressRouteHandler(adminAttributeByIdRoute));
+  app.all('/api/admin/attributes', adminGuard('canManageCategories'), createExpressRouteHandler(adminAttributesRoute));
   app.all('/api/admin/categories/:id', adminGuard('canManageCategories'), createExpressRouteHandler(adminCategoryByIdRoute));
   app.all('/api/admin/categories', adminGuard('canManageCategories'), createExpressRouteHandler(adminCategoriesRoute));
   app.all('/api/admin/locations/:id', adminGuard('canManageSettings'), createExpressRouteHandler(adminLocationByIdRoute));
@@ -240,7 +246,7 @@ async function startServer() {
       const [categories, locations, listingsRes] = await Promise.all([
         categoryRepository.findAll(),
         locationRepository.findAll(),
-        listingRepository.findMarketplaceListings({ status: 'approved', limit: 500 }),
+        listingRepository.findMarketplaceListings({ status: 'approved', limit: 5000 }),
       ]);
 
       const todayIso = new Date().toISOString().split('T')[0];

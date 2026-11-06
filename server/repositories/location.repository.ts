@@ -29,13 +29,13 @@ export class LocationRepository {
       }
 
       let rows = await withDbRetry(() =>
-        db.select().from(schema.locations).orderBy(asc(schema.locations.orderIndex))
+        db.select().from(schema.locations).orderBy(asc(schema.locations.orderIndex), asc(schema.locations.name))
       );
 
       if (rows.length === 0) {
         await ensureDatabaseSeeded();
         rows = await withDbRetry(() =>
-          db.select().from(schema.locations).orderBy(asc(schema.locations.orderIndex))
+          db.select().from(schema.locations).orderBy(asc(schema.locations.orderIndex), asc(schema.locations.name))
         );
       }
 

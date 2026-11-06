@@ -438,10 +438,16 @@ export class ListingService {
     // Collision-resistant ID
     const id = `lst_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     
-    // Fetch settings for duration and quota
     const settings = await getCachedSystemSettings();
     const durationDays = settings.listingDurationDays || 30;
     const expiresAt = new Date(Date.now() + durationDays * 24 * 3600 * 1000);
+
+    // Validate city
+    const allLocations = await locationRepository.findAll();
+    const cityExists = allLocations.some(loc => loc.name.toLowerCase() === data.location?.city?.toLowerCase());
+    if (!cityExists) {
+        throw new Error('INVALID_CITY:The provided city is not supported');
+    }
 
     // Enforce Quota and Fees (Integrity check) with row-level locking to prevent parallel bypass
     const { db } = await import('@/src/db/index');

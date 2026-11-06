@@ -8,12 +8,12 @@ export default defineConfig(() => {
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
-        'next/navigation': path.resolve(__dirname, './src/shims/next-navigation.ts'),
-        'next/link': path.resolve(__dirname, './src/shims/next-link.tsx'),
-        'next/dynamic': path.resolve(__dirname, './src/shims/next-dynamic.tsx'),
-        'next/server': path.resolve(__dirname, './src/shims/next-server.ts'),
-        'next/cache': path.resolve(__dirname, './src/shims/next-cache.ts'),
+        '@': path.resolve(import.meta.dirname, '.'),
+        'next/navigation': path.resolve(import.meta.dirname, './src/shims/next-navigation.ts'),
+        'next/link': path.resolve(import.meta.dirname, './src/shims/next-link.tsx'),
+        'next/dynamic': path.resolve(import.meta.dirname, './src/shims/next-dynamic.tsx'),
+        'next/server': path.resolve(import.meta.dirname, './src/shims/next-server.ts'),
+        'next/cache': path.resolve(import.meta.dirname, './src/shims/next-cache.ts'),
       },
     },
     optimizeDeps: {

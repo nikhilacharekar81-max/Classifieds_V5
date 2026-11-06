@@ -25,22 +25,27 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    if (!body.name) {
-      return NextResponse.json({ error: 'Location name is required' }, { status: 400 });
+    const { name, type, slug, code, geoId, parentId, latitude, longitude, popular, orderIndex } = body;
+    if (typeof name !== 'string' || !name.trim()) {
+      return NextResponse.json({ error: 'Valid location name is required' }, { status: 400 });
+    }
+    const locationType = type || 'city';
+    if (!['city', 'state', 'locality'].includes(locationType)) {
+      return NextResponse.json({ error: 'Invalid location type' }, { status: 400 });
     }
 
     const created = await adminService.addLocation(
       {
-        type: body.type || 'city',
-        name: body.name,
-        slug: body.slug || body.name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-'),
-        code: body.code || null,
-        geoId: body.geoId || `g${Math.floor(100 + Math.random() * 900)}`,
-        parentId: body.parentId || null,
-        latitude: body.latitude ? Number(body.latitude) : undefined,
-        longitude: body.longitude ? Number(body.longitude) : undefined,
-        popular: body.popular ?? false,
-        orderIndex: body.orderIndex || 0,
+        type: locationType,
+        name: name.trim(),
+        slug: slug || name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-'),
+        code: code || null,
+        geoId: geoId || `g${Date.now() % 1000000}`, // Improved geoId generation
+        parentId: parentId || null,
+        latitude: latitude !== undefined && latitude !== null ? Number(latitude) : undefined,
+        longitude: longitude !== undefined && longitude !== null ? Number(longitude) : undefined,
+        popular: popular ?? false,
+        orderIndex: orderIndex || 0,
       },
       { id: authContext.userId, name: authContext.user.name, ipAddress: authContext.ipAddress }
     );
