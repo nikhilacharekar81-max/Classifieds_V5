@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { adminService } from '@/server/services/admin.service';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import { hasPermission } from '@/lib/auth/roles';
+import { slugify } from '@/lib/utils/seoAndUrlHelper';
 
 export async function PUT(
   req: NextRequest,
@@ -17,25 +18,29 @@ export async function PUT(
       return NextResponse.json({ error: 'Forbidden: Insufficient role permissions' }, { status: 403 });
     }
 
-    const body = await req.json();
+    const { name, type, slug, code, parentId, popular, latitude, longitude, orderIndex } = body;
+
+    const lat = latitude !== undefined && latitude !== null ? Number(latitude) : undefined;
+    const lon = longitude !== undefined && longitude !== null ? Number(longitude) : undefined;
     
-    if (body.name !== undefined && (typeof body.name !== 'string' || !body.name.trim())) {
-      return NextResponse.json({ error: 'Valid location name is required' }, { status: 400 });
+    if (lat !== undefined && (isNaN(lat) || !isFinite(lat) || lat < -90 || lat > 90)) {
+        return NextResponse.json({ error: 'Invalid latitude' }, { status: 400 });
     }
-    if (body.type !== undefined && !['city', 'state', 'locality'].includes(body.type)) {
-      return NextResponse.json({ error: 'Invalid location type' }, { status: 400 });
+    if (lon !== undefined && (isNaN(lon) || !isFinite(lon) || lon < -180 || lon > 180)) {
+        return NextResponse.json({ error: 'Invalid longitude' }, { status: 400 });
     }
 
     const updateData: any = {};
-    if (body.name !== undefined) updateData.name = body.name;
-    if (body.slug !== undefined) updateData.slug = body.slug;
-    if (body.type !== undefined) updateData.type = body.type;
-    if (body.parentId !== undefined) updateData.parentId = body.parentId;
-    if (body.code !== undefined) updateData.code = body.code;
-    if (body.popular !== undefined) updateData.popular = body.popular;
-    if (body.latitude !== undefined) updateData.latitude = body.latitude;
-    if (body.longitude !== undefined) updateData.longitude = body.longitude;
-    if (body.orderIndex !== undefined) updateData.orderIndex = body.orderIndex;
+    if (name !== undefined) updateData.name = name.trim();
+    if (slug !== undefined) updateData.slug = slugify(slug);
+    else if (name !== undefined) updateData.slug = slugify(name);
+    if (type !== undefined) updateData.type = type;
+    if (parentId !== undefined) updateData.parentId = parentId;
+    if (code !== undefined) updateData.code = code;
+    if (popular !== undefined) updateData.popular = popular;
+    if (lat !== undefined) updateData.latitude = lat;
+    if (lon !== undefined) updateData.longitude = lon;
+    if (orderIndex !== undefined) updateData.orderIndex = orderIndex;
 
     const updated = await adminService.updateLocation(
       id, 

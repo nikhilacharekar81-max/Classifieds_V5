@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import crypto from 'node:crypto';
+import { slugify } from '@/lib/utils/seoAndUrlHelper';
 import { adminService } from '@/server/services/admin.service';
 import { locationRepository } from '@/server/repositories/location.repository';
 import { getAuthenticatedUser } from '@/lib/auth/session';
@@ -35,16 +36,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid location type' }, { status: 400 });
     }
 
+    const lat = latitude !== undefined && latitude !== null ? Number(latitude) : undefined;
+    const lon = longitude !== undefined && longitude !== null ? Number(longitude) : undefined;
+    
+    if (lat !== undefined && (isNaN(lat) || !isFinite(lat) || lat < -90 || lat > 90)) {
+        return NextResponse.json({ error: 'Invalid latitude' }, { status: 400 });
+    }
+    if (lon !== undefined && (isNaN(lon) || !isFinite(lon) || lon < -180 || lon > 180)) {
+        return NextResponse.json({ error: 'Invalid longitude' }, { status: 400 });
+    }
+
     const created = await adminService.addLocation(
       {
         type: locationType,
         name: name.trim(),
-        slug: slug || name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-'),
+        slug: slugify(slug || name),
         code: code || null,
-        geoId: geoId || `g${crypto.randomUUID().slice(0, 8)}`,
+        geoId: geoId || `g${crypto.randomUUID().replace(/-/g, '').slice(0, 31)}`,
         parentId: parentId || null,
-        latitude: latitude !== undefined && latitude !== null ? Number(latitude) : undefined,
-        longitude: longitude !== undefined && longitude !== null ? Number(longitude) : undefined,
+        latitude: lat,
+        longitude: lon,
         popular: popular ?? false,
         orderIndex: orderIndex || 0,
       },
