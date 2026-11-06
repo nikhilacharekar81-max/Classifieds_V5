@@ -132,7 +132,7 @@ export function getCleanSeoTitleSlug(title: string): string {
  * Returns exact primary key listing ID to guarantee 100% resolution accuracy for URLs, share links, sitemaps, and emails
  */
 export function getShortListingId(id: string): string {
-  return id ? id.trim() : '';
+  return id || '';
 }
 
 /**
