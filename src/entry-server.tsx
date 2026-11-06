@@ -83,8 +83,7 @@ export async function renderSsrPage(
     const parsedRoute = parseChillyPath(urlPath, locations, baseCategories, cmsSlugs);
     const siteName = settings?.siteName || 'Chillyads';
     const cleanOrigin = origin.replace(/\/$/, '');
-    const queryString = new URLSearchParams(queryObj).toString();
-    const canonicalUrl = `${cleanOrigin}${urlPath === '/' ? '' : urlPath}${queryString ? `?${queryString}` : ''}`;
+    const canonicalUrl = `${cleanOrigin}${urlPath === '/' ? '' : urlPath}`;
 
     const effectiveCityForCounts =
       (parsedRoute.routeType === 'search' ? queryObj.city : parsedRoute.city) ||
@@ -387,12 +386,13 @@ export async function renderSsrPage(
       schemaData = [itemSchema, breadcrumbSchema];
     }
 
+    const hasQueryFilter = Object.keys(queryObj).length > 0;
     const shouldNoIndex =
       parsedRoute.routeType === 'admin' ||
       parsedRoute.routeType === 'user-panel' ||
       parsedRoute.routeType === 'post' ||
       parsedRoute.routeType === 'search' ||
-      Boolean(queryObj.q || queryObj.search);
+      hasQueryFilter;
 
     const robotsContent = shouldNoIndex
       ? 'noindex, nofollow'

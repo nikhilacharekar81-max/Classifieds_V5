@@ -98,9 +98,7 @@ async function startServer() {
   await initializePostgreSQL();
 
   const app = express();
-  if (process.env.TRUST_PROXY) {
-    app.set('trust proxy', process.env.TRUST_PROXY === 'true' ? true : process.env.TRUST_PROXY);
-  }
+  app.set('trust proxy', 1);
   const PORT = Number(process.env.PORT) || 3000;
 
   // Per-request AsyncLocalStorage cache context
@@ -238,45 +236,63 @@ async function startServer() {
   // SEO sitemap.xml backed by PostgreSQL
   app.get('/sitemap.xml', async (req, res) => {
     try {
-      const baseUrl = (process.env.APP_URL || `${req.protocol}://${req.get('host') || 'localhost:3000'}`).replace(
-        /\/$/,
-        ''
-      );
+      const baseUrl = (process.env.APP_URL || 'https://www.chillyads.in').replace(/\/$/, '');
       const [categories, locations, listingsRes] = await Promise.all([
         categoryRepository.findAll(),
         locationRepository.findAll(),
-        listingRepository.findMarketplaceListings({ status: 'approved', limit: 200 }),
+        listingRepository.findMarketplaceListings({ status: 'approved', limit: 500 }),
       ]);
 
-      const urls: string[] = [`${baseUrl}/`, `${baseUrl}/post`, `${baseUrl}/search`];
-      const topCities = locations.filter((l) => l.type === 'city' && l.popular).slice(0, 10);
+      const todayIso = new Date().toISOString().split('T')[0];
+      const urlEntries: Array<{ url: string; lastmod: string }> = [
+        { url: `${baseUrl}/`, lastmod: todayIso },
+      ];
+
+      const topCities = locations.filter((l) => l.type === 'city' && l.popular).slice(0, 20);
       const mainCategories = categories.filter((c) => !c.parentId && c.isActive);
 
       for (const city of topCities) {
-        urls.push(`${baseUrl}${buildChillyUrl({ city: city.name, categories })}`);
+        urlEntries.push({
+          url: `${baseUrl}${buildChillyUrl({ city: city.name, categories })}`,
+          lastmod: todayIso,
+        });
         for (const cat of mainCategories) {
-          urls.push(`${baseUrl}${buildChillyUrl({ city: city.name, categoryId: cat.id, categories })}`);
+          urlEntries.push({
+            url: `${baseUrl}${buildChillyUrl({ city: city.name, categoryId: cat.id, categories })}`,
+            lastmod: todayIso,
+          });
         }
       }
 
       for (const item of listingsRes.items) {
-        urls.push(
-          `${baseUrl}${buildChillyUrl({
+        const itemLastmod = item.createdAt ? new Date(item.createdAt).toISOString().split('T')[0] : todayIso;
+        urlEntries.push({
+          url: `${baseUrl}${buildChillyUrl({
             city: item.location.city,
             categoryId: item.categoryId,
             subcategoryId: item.subcategoryId,
             listing: item,
             categories,
-          })}`
-        );
+          })}`,
+          lastmod: itemLastmod,
+        });
       }
+
+      const xmlEscaped = (str: string) =>
+        str
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&apos;');
 
       const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${urls
+${urlEntries
   .map(
-    (u) => `  <url>
-    <loc>${u.replace(/&/g, '&amp;')}</loc>
+    (e) => `  <url>
+    <loc>${xmlEscaped(e.url)}</loc>
+    <lastmod>${e.lastmod}</lastmod>
     <changefreq>daily</changefreq>
   </url>`
   )
@@ -366,6 +382,16 @@ ${urls
       console.error('[SSR Error]:', err);
       next(err);
     }
+  });
+
+  // Global Express Error Middleware
+  app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error('[Express Global Error]:', err);
+    if (res.headersSent) return _next(err);
+    const statusCode = typeof err.status === 'number' ? err.status : 500;
+    res.status(statusCode).json({
+      error: isDevelopment ? err.message || 'Internal Server Error' : 'Internal Server Error',
+    });
   });
 
   app.listen(PORT, '0.0.0.0', () => {

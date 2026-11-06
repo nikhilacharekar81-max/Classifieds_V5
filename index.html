@@ -19,10 +19,10 @@
       "@context": "https://schema.org",
       "@type": "Organization",
       "name": "Chillyads Marketplace",
-      "url": "https://www.chillyads.com",
-      "logo": "https://www.chillyads.com/logo.png",
-      "publishingPrinciples": "https://www.chillyads.com/editorial-guidelines",
-      "correctionsPolicy": "https://www.chillyads.com/corrections-policy",
+      "url": "https://www.chillyads.in",
+      "logo": "https://www.chillyads.in/logo.png",
+      "publishingPrinciples": "https://www.chillyads.in/editorial-guidelines",
+      "correctionsPolicy": "https://www.chillyads.in/corrections-policy",
       "knowsAbout": [
         "Classified Advertisements",
         "Used Vehicles & Automobiles",
@@ -33,53 +33,11 @@
       ],
       "contactPoint": {
         "@type": "ContactPoint",
-        "email": "support@chillyads.com",
+        "email": "support@chillyads.in",
         "contactType": "customer support",
         "availableLanguage": ["en", "hi"]
       }
     }
-    </script>
-
-    <!-- IAB TCF v2.2 & US Privacy (CPRA) JavaScript Stubs for Tag Managers & AdSense -->
-    <script>
-      (function() {
-        window.__tcfapi = window.__tcfapi || function(command, version, callback) {
-          var consentData = {
-            tcString: 'CP1234567890_TCFv2',
-            gdprApplies: true,
-            purpose: { consents: { 1: true, 2: true, 3: true, 4: true } },
-            vendor: { consents: { 1: true, 752: true } }
-          };
-          try {
-            var savedConsent = localStorage.getItem('chilly_cmp_consent');
-            if (savedConsent) {
-              consentData = JSON.parse(savedConsent);
-            }
-          } catch (err) {}
-          if (command === 'ping') {
-            if (callback) callback({ gdprApplies: true, cmpLoaded: true, cmpStatus: 'loaded' }, true);
-          } else if (command === 'addEventListener' || command === 'getTCData') {
-            if (callback) callback(consentData, true);
-          } else if (command === 'displayConsentUi' || command === 'renew') {
-            window.dispatchEvent(new CustomEvent('open_cmp_modal'));
-            if (callback) callback(true, true);
-          }
-        };
-
-        window.Cookiebot = window.Cookiebot || {
-          renew: function() {
-            window.dispatchEvent(new CustomEvent('open_cmp_modal'));
-          }
-        };
-
-        window.__usprivacy = window.__usprivacy || function(command, version, callback) {
-          var usPriv = '1YNN';
-          try {
-            usPriv = localStorage.getItem('us_privacy') || '1YNN';
-          } catch (err) {}
-          if (callback) callback({ usPrivacy: usPriv }, true);
-        };
-      })();
     </script>
   </head>
   <body class="bg-slate-50 text-slate-900 antialiased selection:bg-indigo-600 selection:text-white">

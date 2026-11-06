@@ -268,8 +268,8 @@ export async function processPendingInvalidations(): Promise<void> {
       const wasStaleProcessing = entry.status === 'processing';
       const claimToken = `lease_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
-      const lockResult = await withDbRetry(() =>
-        db
+      const lockResult: any = await withDbRetry(async () =>
+        await db
           .update(cacheInvalidationOutbox)
           .set({
             status: 'processing',

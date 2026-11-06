@@ -36,14 +36,14 @@ export async function POST(req: NextRequest) {
         slug: body.slug || body.name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-'),
         icon: body.icon || 'Package',
         parentId: body.parentId || null,
-        orderIndex: body.order || 0,
+        orderIndex: body.order || body.orderIndex || 0,
+        order: body.order || body.orderIndex || 0,
         isActive: body.isActive ?? true,
         seoTitle: body.seoTitle || null,
         seoDescription: body.seoDescription || null,
         isPaid: body.isPaid ?? false,
         postingFee: body.postingFee !== undefined && body.postingFee !== null ? Number(body.postingFee) : 0,
         freeListingsQuota: body.freeListingsQuota ?? 3,
-        listingCount: 0,
       },
       { id: authContext.userId, name: authContext.user.name, ipAddress: authContext.ipAddress }
     );

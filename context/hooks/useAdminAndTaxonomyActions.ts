@@ -384,38 +384,94 @@ export function useAdminAndTaxonomyActions({
   };
 
   const addCustomField = (field: Omit<CustomFieldDefinition, 'id'>) => {
-    const id = 'cf_' + field.name + '_' + Math.random().toString(36).substring(2, 6);
-    const newField: CustomFieldDefinition = { ...field, id };
-    setCustomFields((prev) => [...prev, newField]);
-    recordAuditLog(
-      'ADD_CUSTOM_ATTRIBUTE',
-      'Marketplace / Attributes',
-      id,
-      field.label,
-      `Bound dynamic field to category ${field.categoryId}`
-    );
-    addToast({ type: 'success', title: 'Custom Field Added', message: field.label });
+    void (async () => {
+      try {
+        const res = await fetch('/api/admin/attributes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(field),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(data?.error || 'Failed to create custom field');
+        }
+        const createdField: CustomFieldDefinition = data && data.id ? data : { ...field, id: 'cf_' + Math.random().toString(36).substring(2, 6) };
+        setCustomFields((prev) => [...prev, createdField]);
+        recordAuditLog(
+          'ADD_CUSTOM_ATTRIBUTE',
+          'Marketplace / Attributes',
+          createdField.id,
+          createdField.label,
+          `Bound dynamic field to category ${createdField.categoryId}`
+        );
+        addToast({ type: 'success', title: 'Custom Field Added', message: createdField.label });
+      } catch (err: any) {
+        addToast({
+          type: 'error',
+          title: 'Attribute Creation Failed',
+          message: err?.message || 'Database operation failed.',
+        });
+      }
+    })();
   };
 
   const updateCustomField = (field: CustomFieldDefinition) => {
-    setCustomFields((prev) => prev.map((f) => (f.id === field.id ? field : f)));
-    recordAuditLog(
-      'UPDATE_CUSTOM_ATTRIBUTE',
-      'Marketplace / Attributes',
-      field.id,
-      field.label,
-      'Updated dynamic attribute specification'
-    );
-    addToast({ type: 'success', title: 'Attribute Updated', message: field.label });
+    void (async () => {
+      try {
+        const res = await fetch(`/api/admin/attributes/${field.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(field),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(data?.error || 'Failed to update custom field');
+        }
+        const updatedField: CustomFieldDefinition = data && data.id ? data : field;
+        setCustomFields((prev) => prev.map((f) => (f.id === field.id ? updatedField : f)));
+        recordAuditLog(
+          'UPDATE_CUSTOM_ATTRIBUTE',
+          'Marketplace / Attributes',
+          field.id,
+          updatedField.label,
+          'Updated dynamic attribute specification'
+        );
+        addToast({ type: 'success', title: 'Attribute Updated', message: updatedField.label });
+      } catch (err: any) {
+        addToast({
+          type: 'error',
+          title: 'Attribute Update Failed',
+          message: err?.message || 'Database operation failed.',
+        });
+      }
+    })();
   };
 
   const deleteCustomField = (id: string) => {
     const field = customFields.find((f) => f.id === id);
-    setCustomFields((prev) => prev.filter((f) => f.id !== id));
-    if (field) {
-      recordAuditLog('DELETE_CUSTOM_ATTRIBUTE', 'Marketplace / Attributes', id, field.label, 'Removed custom field');
-    }
-    addToast({ type: 'warning', title: 'Attribute Deleted', message: '' });
+
+    void (async () => {
+      try {
+        const res = await fetch(`/api/admin/attributes/${id}`, {
+          method: 'DELETE',
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(data?.error || 'Failed to delete custom field');
+        }
+        setCustomFields((prev) => prev.filter((f) => f.id !== id));
+        if (field) {
+          recordAuditLog('DELETE_CUSTOM_ATTRIBUTE', 'Marketplace / Attributes', id, field.label, 'Removed custom field');
+        }
+        addToast({ type: 'warning', title: 'Attribute Deleted', message: field?.label || '' });
+      } catch (err: any) {
+        addToast({
+          type: 'error',
+          title: 'Attribute Deletion Failed',
+          message: err?.message || 'Database operation failed.',
+        });
+      }
+    })();
   };
 
   const addLocation = (locData: Omit<LocationItem, 'id' | 'listingCount'>) => {

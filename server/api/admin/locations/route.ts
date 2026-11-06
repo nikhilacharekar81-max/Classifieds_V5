@@ -41,7 +41,6 @@ export async function POST(req: NextRequest) {
         longitude: body.longitude ? Number(body.longitude) : undefined,
         popular: body.popular ?? false,
         orderIndex: body.orderIndex || 0,
-        listingCount: 0,
       },
       { id: authContext.userId, name: authContext.user.name, ipAddress: authContext.ipAddress }
     );

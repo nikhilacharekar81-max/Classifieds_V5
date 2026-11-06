@@ -9,7 +9,7 @@ export function slugify(text: string): string {
     .toLowerCase()
     .trim()
     .replace(/&/g, 'and')
-    .replace(/[^\w\s-]/g, '')
+    .replace(/[^\p{L}\p{N}\s-]/gu, '')
     .replace(/[\s_-]+/g, '-')
     .replace(/^-+|-+$/g, '');
 }
@@ -65,7 +65,6 @@ export function getCityGeoId(citySlug: string): string {
   if (CITY_GEO_IDS[clean]) {
     return CITY_GEO_IDS[clean];
   }
-  // Deterministic fallback starting from g100+ for unlisted cities
   let hash = 0;
   for (let i = 0; i < clean.length; i++) {
     hash = (hash << 5) - hash + clean.charCodeAt(i);
@@ -120,45 +119,34 @@ export function formatLocationSeoText(text: string, locationLabel: string): stri
  */
 export function getCleanSeoTitleSlug(title: string): string {
   if (!title) return 'ad';
-  // Remove parenthesized content like (99% BH), (O)
   let text = title.replace(/\([^)]*\)/g, ' ');
-  // Clean punctuation and extraneous technical storage/color tags if present
   text = text.replace(/(\b\d+gb\b|\b\d+tb\b|\b99% bh\b|\b100% bh\b)/gi, ' ');
-  // Clean common brand prefix if immediately followed by common flagship model (e.g. "Apple iPhone" -> "iphone")
   text = text.replace(/^apple\s+iphone/i, 'iphone');
-  // Remove excess spaces and convert to slug
   const fullSlug = slugify(text);
   const parts = fullSlug.split('-').filter(Boolean);
-  // Keep first 3-4 clean keywords (e.g. "iphone-14-pro")
-  const shortSlug = parts.slice(0, 3).join('-');
+  const shortSlug = parts.slice(0, 4).join('-');
   return shortSlug || fullSlug || 'ad';
 }
 
 /**
- * Extracts compact listing ID (e.g. "lst_2041" from "lst_seeded_cat_mobiles_2041")
+ * Returns exact primary key listing ID to guarantee 100% resolution accuracy for URLs, share links, sitemaps, and emails
  */
 export function getShortListingId(id: string): string {
-  if (!id) return '';
-  const digitsMatch = id.match(/(\d+)$/);
-  if (digitsMatch) {
-    return `lst_${digitsMatch[1]}`;
-  }
-  return id;
+  return id ? id.trim() : '';
 }
 
 /**
- * Helper to robustly find a listing by full or short ID
+ * Helper to robustly find a listing by exact or normalized ID
  */
 export function findListingById(listings: Listing[], targetId: string): Listing | undefined {
   if (!targetId) return undefined;
   const cleanTarget = targetId.trim();
-  const digitsMatch = cleanTarget.match(/(\d+)$/);
-  const targetDigits = digitsMatch ? digitsMatch[1] : null;
+  const lowerTarget = cleanTarget.toLowerCase();
 
   return listings.find((l) => {
     if (l.id === cleanTarget) return true;
+    if (l.id.toLowerCase() === lowerTarget) return true;
     if (l.id.replace(/^lst_/, '') === cleanTarget.replace(/^lst_/, '')) return true;
-    if (targetDigits && (l.id.endsWith(`_${targetDigits}`) || l.id === `lst_${targetDigits}`)) return true;
     return false;
   });
 }
@@ -179,7 +167,6 @@ export function stripChillySuffixes(part: string): {
   let categoryCode: string | undefined;
   let itemId: string | undefined;
 
-  // Extract -iid-{id} or -item-{id}
   const itemMatch = part.match(/(?:-iid-|-item-)(.+)$/i);
   if (itemMatch) {
     itemId = itemMatch[1];
@@ -194,14 +181,12 @@ export function stripChillySuffixes(part: string): {
     }
   }
 
-  // Extract _g{number}
   const geoMatch = cleanSlug.match(/_g(\d+)$/i);
   if (geoMatch) {
     geoId = `g${geoMatch[1]}`;
     cleanSlug = cleanSlug.replace(/_g\d+$/i, '');
   }
 
-  // Extract _c{number}
   const catMatch = cleanSlug.match(/_c(\d+)$/i);
   if (catMatch) {
     categoryCode = `c${catMatch[1]}`;
@@ -213,12 +198,12 @@ export function stripChillySuffixes(part: string): {
 
 export interface ParsedRoute {
   routeType: 'home' | 'city' | 'category' | 'listing' | 'post' | 'search' | 'admin' | 'user-panel' | 'cms' | 'not-found';
-  city: string; // e.g. "Mumbai", "New Delhi", "All India"
-  citySlug: string; // e.g. "mumbai", "new-delhi", "all-india"
-  geoId: string; // e.g. "g4058997"
-  categoryId: string; // e.g. "cat_vehicles" or "all"
+  city: string;
+  citySlug: string;
+  geoId: string;
+  categoryId: string;
   categorySlug?: string;
-  subcategoryId: string; // e.g. "sub_cars" or "all"
+  subcategoryId: string;
   subcategorySlug?: string;
   listingId: string | null;
   cmsSlug?: string;
@@ -227,47 +212,48 @@ export interface ParsedRoute {
 }
 
 /**
- * Unslugify city name by matching against locations dataset
+ * Unslugify city name by matching against locations dataset with strict validation
  */
 export function unslugifyCity(
   inputSlug: string,
   locations: LocationItem[] = []
-): { cityName: string; citySlug: string; geoId: string } {
+): { cityName: string; citySlug: string; geoId: string; isValid: boolean } {
   const { cleanSlug, geoId: extractedGeoId } = stripChillySuffixes(inputSlug);
+  const decodedSlug = decodeURIComponent(cleanSlug || '').trim();
 
-  if (!cleanSlug || cleanSlug === 'all-india' || cleanSlug === 'all-cities' || cleanSlug === 'india' || cleanSlug === 'all') {
+  if (!decodedSlug || decodedSlug === 'all-india' || decodedSlug === 'all-cities' || decodedSlug === 'india' || decodedSlug === 'all') {
     return {
       cityName: 'All India',
       citySlug: 'all-india',
       geoId: extractedGeoId || 'g0',
+      isValid: true,
     };
   }
 
-  const normalized = cleanSlug.toLowerCase().replace(/-/g, ' ');
+  const normalized = decodedSlug.toLowerCase().replace(/-/g, ' ');
   const cityObj = locations.find(
     (l) =>
       (l.type === 'city' || l.type === 'state') &&
-      (slugify(l.name) === cleanSlug || l.name.toLowerCase() === normalized)
+      (l.slug === decodedSlug ||
+        slugify(l.name) === decodedSlug ||
+        l.name.toLowerCase() === normalized ||
+        l.name.toLowerCase() === decodedSlug)
   );
 
   if (cityObj) {
     return {
       cityName: cityObj.name,
-      citySlug: slugify(cityObj.name),
+      citySlug: cityObj.slug || slugify(cityObj.name),
       geoId: extractedGeoId || getCityGeoId(cityObj.name),
+      isValid: true,
     };
   }
 
-  // Capitalize words as fallback
-  const fallbackName = normalized
-    .split(' ')
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ');
-
   return {
-    cityName: fallbackName,
-    citySlug: cleanSlug,
-    geoId: extractedGeoId || getCityGeoId(cleanSlug),
+    cityName: '',
+    citySlug: '',
+    geoId: '',
+    isValid: false,
   };
 }
 
@@ -484,7 +470,8 @@ export function parseChillyPath(
     if (parts.length !== 3 || !parts[2] || !isKnownCitySlug(parts[0])) {
       return notFoundRoute();
     }
-    const { cityName, citySlug, geoId } = unslugifyCity(parts[0], locations);
+    const { cityName, citySlug, geoId, isValid } = unslugifyCity(parts[0], locations);
+    if (!isValid) return notFoundRoute();
     const rawIdPart = parts[2];
     const listingId = extractListingIdFromSegment(rawIdPart) || rawIdPart.split('-')[0];
     if (!listingId) {
@@ -507,7 +494,8 @@ export function parseChillyPath(
     if (!isKnownCitySlug(parts[0])) {
       return notFoundRoute();
     }
-    const { cityName, citySlug, geoId } = unslugifyCity(parts[0], locations);
+    const { cityName, citySlug, geoId, isValid } = unslugifyCity(parts[0], locations);
+    if (!isValid) return notFoundRoute();
     const mainCatInfo = parts.length >= 3 ? unslugifyCategory(parts[1], categories) : { categoryId: 'all', subcategoryId: 'all' };
     if (parts.length >= 3 && mainCatInfo.categoryId === 'all' && mainCatInfo.subcategoryId === 'all') {
       return notFoundRoute();
@@ -536,7 +524,8 @@ export function parseChillyPath(
   const firstPartIsCity = isKnownCitySlug(parts[0]);
 
   if (firstPartIsCity) {
-    const { cityName, citySlug, geoId } = unslugifyCity(parts[0], locations);
+    const { cityName, citySlug, geoId, isValid } = unslugifyCity(parts[0], locations);
+    if (!isValid) return notFoundRoute();
 
     if (parts.length === 1) {
       return {

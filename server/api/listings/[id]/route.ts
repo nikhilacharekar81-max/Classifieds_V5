@@ -46,6 +46,12 @@ export async function GET(
     }
   }
 
+  // Increment ordinary view count in PostgreSQL for eligible public buyer page views (non-blocking)
+  const isPublicBuyer = !isOwner && !isActualAdmin && !isModerator;
+  if (isPublicBuyer && !isExpired && listing.status === 'approved') {
+    listingService.incrementViews(listing.id).catch(console.warn);
+  }
+
   // Strip internal/administrator-only fields unless caller is owner or actual administrator (admin / super_admin)
   if (!isOwner && !isActualAdmin) {
     return NextResponse.json(toPublicListingDTO(listing), { headers: noCacheHeaders });

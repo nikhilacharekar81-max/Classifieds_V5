@@ -353,6 +353,10 @@ export const PostAdPage: React.FC = () => {
     const isAdminActor = currentUser.role === 'admin' || currentUser.role === 'super_admin';
 
     let createdOrderId: string | undefined = undefined;
+    let postingFeePaymentId: string | undefined = undefined;
+    let postingFeeSignature: string | undefined = undefined;
+    let selectedPaymentGateway: string | undefined = undefined;
+
     if (mandatoryPostingFee > 0 && !isAdminActor) {
       if (!paymentGatewayConfigured) {
         addToast({
@@ -384,6 +388,31 @@ export const PostAdPage: React.FC = () => {
           return;
         }
         createdOrderId = orderData.orderId;
+
+        // Execute payment checkout for the order
+        const gwName = paymentMethod === 'upi' ? 'UPI' : paymentMethod === 'card' ? 'Razorpay' : 'Netbanking';
+        const payRes = await fetch('/api/listings/pay-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            orderId: createdOrderId,
+            paymentGateway: gwName,
+          }),
+        });
+        const payData = await payRes.json();
+        if (!payRes.ok || !payData.paymentId || !payData.signature) {
+          addToast({
+            title: 'Payment Checkout Failed',
+            message: payData.error || 'Payment checkout could not be verified.',
+            type: 'error',
+          });
+          return;
+        }
+
+        postingFeePaymentId = payData.paymentId;
+        postingFeeSignature = payData.signature;
+        selectedPaymentGateway = payData.paymentGateway || gwName;
       } catch (err: any) {
         addToast({
           title: 'Checkout Error',
@@ -412,6 +441,9 @@ export const PostAdPage: React.FC = () => {
       featuredUntil: undefined,
       isBoosted: false,
       postingFeeOrderId: createdOrderId,
+      postingFeePaymentId,
+      postingFeeSignature,
+      paymentGateway: selectedPaymentGateway,
       location: {
         city: postForm.city,
         state: postForm.state,

@@ -255,6 +255,17 @@ export class ListingRepository {
     total: number;
   }> {
     try {
+      // 0. Update date-expired listings in PostgreSQL so status='expired'
+      if (options.sellerId) {
+        await db.execute(
+          sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${options.sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW()`
+        ).catch(() => {});
+      } else {
+        await db.execute(
+          sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE status IN ('approved', 'pending') AND expires_at <= NOW()`
+        ).catch(() => {});
+      }
+
       const conditions: any[] = [];
 
       // Status & Expiration filtering: Public marketplace shows ONLY non-expired approved listings
@@ -656,6 +667,10 @@ export class ListingRepository {
       activeQuotaCount: 0,
     };
     try {
+      await db.execute(
+        sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW()`
+      ).catch(() => {});
+
       const [rows, activeQuotaRes] = await Promise.all([
         withDbRetry(() =>
           db
@@ -730,6 +745,11 @@ export class ListingRepository {
       console.error('ListingRepository.bulkRenew error:', error);
       throw new Error('Bulk renewal failed in PostgreSQL', { cause: error });
     }
+  }
+
+  public async renewListing(id: string, days = 30): Promise<boolean> {
+    const res = await this.bulkRenew([id], days);
+    return res.renewedCount > 0;
   }
 
   public async createWithDuplicateCheck(data: {

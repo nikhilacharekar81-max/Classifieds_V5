@@ -56,29 +56,11 @@ export const CmpConsentModal: React.FC<CmpConsentModalProps> = ({ isOpen, onClos
 
   const handleSavePreferences = (customPreferences = preferences) => {
     const consentPayload = {
-      tcString: 'CP' + Date.now() + '_TCFv2_IAB_Compliant',
-      cmpId: 752,
-      cmpVersion: '2.2.0',
-      gdprApplies: true,
       timestamp: new Date().toISOString(),
       categories: customPreferences,
-      purpose: {
-        consents: {
-          1: customPreferences.essential,
-          2: customPreferences.analytics,
-          3: customPreferences.advertising,
-          4: customPreferences.functional,
-        },
-      },
     };
 
     localStorage.setItem('chilly_cmp_consent', JSON.stringify(consentPayload));
-
-    if (!customPreferences.advertising) {
-      localStorage.setItem('us_privacy', '1YYY');
-    } else {
-      localStorage.setItem('us_privacy', '1YNN');
-    }
 
     window.dispatchEvent(new CustomEvent('cmp_consent_updated', { detail: consentPayload }));
 
@@ -86,7 +68,7 @@ export const CmpConsentModal: React.FC<CmpConsentModalProps> = ({ isOpen, onClos
       type: 'success',
       title: 'Privacy Preferences Saved',
       message:
-        'Your cookie consent choices have been updated across all ad partners and analytics tags.',
+        'Your cookie and privacy choices have been updated.',
     });
 
     closeCmpModal();
@@ -124,11 +106,11 @@ export const CmpConsentModal: React.FC<CmpConsentModalProps> = ({ isOpen, onClos
                   Privacy Settings &amp; Cookie Preferences
                 </h2>
                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 uppercase">
-                  IAB TCF v2.2 Certified
+                  Privacy Controls
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                Manage your data privacy, Google AdSense personalization, and analytics choices
+                Manage your data privacy, ad personalization, and analytics choices
               </p>
             </div>
           </div>

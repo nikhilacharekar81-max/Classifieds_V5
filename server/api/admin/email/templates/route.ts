@@ -32,7 +32,7 @@ export async function PUT(req: NextRequest) {
     const updated = await emailService.updateTemplate(id, data, {
       id: authContext.user.id,
       name: authContext.user.name,
-      ipAddress: req.ip || 'unknown'
+      ipAddress: authContext.ipAddress || req.headers.get('x-forwarded-for') || 'unknown'
     });
     return NextResponse.json(updated);
   } catch (error: any) {

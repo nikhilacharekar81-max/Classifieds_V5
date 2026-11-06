@@ -41,6 +41,8 @@ export async function POST(req: NextRequest) {
         seoTitle: body.seoTitle || undefined,
         seoDescription: body.seoDescription || undefined,
         isActive: body.isActive ?? true,
+        category: body.category || 'General',
+        status: body.status || 'published',
       },
       { id: authContext.userId, name: authContext.user.name, ipAddress: authContext.ipAddress }
     );

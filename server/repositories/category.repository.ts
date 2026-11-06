@@ -372,6 +372,59 @@ export class CategoryRepository {
       throw new Error('Failed to create custom field', { cause: error });
     }
   }
+
+  public async updateCustomField(
+    id: string,
+    data: Partial<{
+      name: string;
+      label: string;
+      type: string;
+      options?: string[];
+      unit?: string;
+      required?: boolean;
+      filterable?: boolean;
+      orderIndex?: number;
+    }>
+  ): Promise<CustomFieldDefinition | null> {
+    try {
+      const updated = await db
+        .update(schema.categoryCustomFields)
+        .set(data as any)
+        .where(eq(schema.categoryCustomFields.id, id))
+        .returning();
+
+      if (!updated[0]) return null;
+      const r = updated[0];
+      return {
+        id: r.id,
+        categoryId: r.categoryId,
+        name: r.name,
+        label: r.label,
+        type: r.type as any,
+        options: (r.options as string[]) || undefined,
+        unit: r.unit || undefined,
+        required: r.required,
+        filterable: r.filterable,
+        orderIndex: r.orderIndex,
+      };
+    } catch (error) {
+      console.error(`CategoryRepository.updateCustomField error for ${id}:`, error);
+      throw new Error(`Failed to update custom field ${id}`, { cause: error });
+    }
+  }
+
+  public async deleteCustomField(id: string): Promise<boolean> {
+    try {
+      const res = await db
+        .delete(schema.categoryCustomFields)
+        .where(eq(schema.categoryCustomFields.id, id))
+        .returning({ id: schema.categoryCustomFields.id });
+      return res.length > 0;
+    } catch (error) {
+      console.error(`CategoryRepository.deleteCustomField error for ${id}:`, error);
+      throw new Error(`Failed to delete custom field ${id}`, { cause: error });
+    }
+  }
 }
 
 export const categoryRepository = new CategoryRepository();

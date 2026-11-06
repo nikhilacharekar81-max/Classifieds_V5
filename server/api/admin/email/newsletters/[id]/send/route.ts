@@ -16,7 +16,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const result = await emailService.sendNewsletterCampaign(id, {
       id: authContext.user.id,
       name: authContext.user.name,
-      ipAddress: req.ip || 'unknown'
+      ipAddress: authContext.ipAddress || req.headers.get('x-forwarded-for') || 'unknown'
     });
     return NextResponse.json(result);
   } catch (error: any) {

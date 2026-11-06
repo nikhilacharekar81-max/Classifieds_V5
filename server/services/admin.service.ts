@@ -164,6 +164,49 @@ export class AdminService {
     return field;
   }
 
+  public async updateCustomField(
+    id: string,
+    fieldData: Partial<CustomFieldDefinition>,
+    actor?: { id?: string; name?: string; ipAddress?: string }
+  ): Promise<CustomFieldDefinition | null> {
+    const updated = await categoryRepository.updateCustomField(id, fieldData);
+    if (updated) {
+      await this.recordAudit(
+        'ATTRIBUTE_UPDATED',
+        'Attributes',
+        id,
+        updated.label,
+        `Updated attribute "${updated.label}"`,
+        actor?.id,
+        actor?.name,
+        actor?.ipAddress
+      );
+    }
+    return updated;
+  }
+
+  public async deleteCustomField(
+    id: string,
+    actor?: { id?: string; name?: string; ipAddress?: string }
+  ): Promise<boolean> {
+    const fields = await categoryRepository.findAllCustomFields();
+    const field = fields.find((f) => f.id === id);
+    const success = await categoryRepository.deleteCustomField(id);
+    if (success && field) {
+      await this.recordAudit(
+        'ATTRIBUTE_DELETED',
+        'Attributes',
+        id,
+        field ? field.label : id,
+        `Deleted attribute "${field ? field.label : id}"`,
+        actor?.id,
+        actor?.name,
+        actor?.ipAddress
+      );
+    }
+    return success;
+  }
+
   // Locations
   public async getLocations(): Promise<LocationItem[]> {
     return await locationRepository.findAll();
@@ -287,7 +330,7 @@ export class AdminService {
     }
 
     if (newSettings.listingDurationDays !== undefined) {
-      const raw = newSettings.listingDurationDays;
+      const raw: any = newSettings.listingDurationDays;
       const val = Number(raw);
       if (
         raw === null ||
@@ -303,7 +346,7 @@ export class AdminService {
     }
 
     if (newSettings.extraListingFee !== undefined) {
-      const raw = newSettings.extraListingFee;
+      const raw: any = newSettings.extraListingFee;
       const val = Number(raw);
       if (
         raw === null ||
@@ -320,7 +363,7 @@ export class AdminService {
     }
 
     if (newSettings.freeListingsLimit !== undefined) {
-      const raw = newSettings.freeListingsLimit;
+      const raw: any = newSettings.freeListingsLimit;
       const val = Number(raw);
       if (
         raw === null ||
@@ -336,7 +379,7 @@ export class AdminService {
     }
 
     if (newSettings.maxPhotosPerListing !== undefined) {
-      const raw = newSettings.maxPhotosPerListing;
+      const raw: any = newSettings.maxPhotosPerListing;
       const val = Number(raw);
       if (
         raw === null ||
