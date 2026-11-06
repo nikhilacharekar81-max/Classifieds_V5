@@ -135,7 +135,7 @@ export class ListingRepository {
       },
       images: (row.images as string[]) || [],
       customAttributes: (row.customAttributes as Record<string, any>) || {},
-      status: (row.status === 'approved' || row.status === 'pending') && row.expiresAt && row.expiresAt <= new Date()
+      status: row.status === 'approved' && row.expiresAt && row.expiresAt <= new Date()
         ? ('expired' as const)
         : (row.status as any),
       rejectionReason: row.rejectionReason || undefined,
@@ -757,8 +757,36 @@ export class ListingRepository {
     isFeatured?: boolean;
     featuredUntil?: Date;
     isBoosted?: boolean;
+    paymentRecord?: {
+      amount: number;
+      paymentGateway: string;
+      paymentId: string;
+    };
   }): Promise<Listing> {
     return await db.transaction(async (tx) => {
+      // 1. If extra posting fee payment is required, insert listing_payments record inside the transaction
+      if (data.paymentRecord) {
+        // Idempotency check inside transaction
+        const existingPayment = await tx
+          .select({ id: schema.listingPayments.id })
+          .from(schema.listingPayments)
+          .where(eq(schema.listingPayments.paymentId, data.paymentRecord.paymentId))
+          .limit(1);
+
+        if (existingPayment.length > 0) {
+          throw new Error('PAYMENT_ALREADY_USED');
+        }
+
+        await tx.insert(schema.listingPayments).values({
+          id: `lp_${crypto.randomUUID()}`,
+          userId: data.sellerId,
+          amount: String(data.paymentRecord.amount),
+          paymentGateway: data.paymentRecord.paymentGateway,
+          paymentId: data.paymentRecord.paymentId,
+          status: 'completed',
+        });
+      }
+
       await tx.execute(
         sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${data.sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW()`
       );

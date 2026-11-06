@@ -294,7 +294,7 @@ export class UserRepository {
           gstNumber: data.gstNumber || null,
           verifiedBusiness: data.verifiedBusiness ?? false,
           adminRole: data.adminRole || null,
-          emailVerified: (data as any).emailVerified ?? true,
+          emailVerified: Boolean((data as any).emailVerified),
         })
         .returning();
 

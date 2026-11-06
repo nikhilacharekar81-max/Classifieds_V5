@@ -169,6 +169,15 @@ function normalizeCityKey(city?: string): string {
 }
 
 export function AppClientRouter(props: AppClientRouterProps = {}) {
+  const { initialServerData } = props;
+  return (
+    <AppProvider initialServerData={initialServerData}>
+      <AppClientRouterInner {...props} />
+    </AppProvider>
+  );
+}
+
+function AppClientRouterInner(props: AppClientRouterProps = {}) {
   const {
     initialPath,
     initialQuery,

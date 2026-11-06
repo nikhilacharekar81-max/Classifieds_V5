@@ -5,6 +5,9 @@ import { listingRepository } from '../server/repositories/listing.repository.ts'
 import { POST as bulkActionPost } from '../server/api/listings/bulk-action/route.ts';
 import { PUT as listingIdPut } from '../server/api/listings/[id]/route.ts';
 import { GET as listingsGet } from '../server/api/listings/route.ts';
+import { POST as impersonatePost } from '../server/api/admin/impersonate/route.ts';
+import { PUT as userPut } from '../server/api/admin/users/[id]/route.ts';
+import { POST as unsubPost } from '../server/api/auth/unsubscribe/route.ts';
 
 // Helper to create a NextRequest shim with session token
 function makeReq(url: string, method: string, body?: any, sessionToken?: string) {
@@ -541,4 +544,113 @@ test('Fix 2: Pagination of seller listings via API limit and offset beyond 200 i
     await pool.query('DELETE FROM users WHERE id = $1', [sellerId]);
   }
 });
+
+test('ORM Safety: Compound tautology expressions in UPDATE/DELETE are strictly rejected', async () => {
+  const { db } = await import('../src/db/index.ts');
+  const schema = await import('../src/db/schema.ts');
+  const { sql } = await import('../src/db/pg-orm.ts');
+
+  // Direct tautologies
+  await assert.rejects(
+    async () => {
+      await db.delete(schema.users).where(sql`1 = 1`);
+    },
+    /ORM Safety: DELETE query has unrestricted \.where\(\)/
+  );
+
+  // Compound unrestricted expressions: id = 'some-id' OR 1 = 1
+  await assert.rejects(
+    async () => {
+      await db.delete(schema.users).where(sql`id = 'some-id' OR 1 = 1`);
+    },
+    /ORM Safety: DELETE query has unrestricted compound \.where\(\)/
+  );
+
+  // Compound unrestricted in UPDATE
+  await assert.rejects(
+    async () => {
+      await db.update(schema.users).set({ status: 'active' }).where(sql`id = 'x' OR true`);
+    },
+    /ORM Safety: UPDATE query has unrestricted compound \.where\(\)/
+  );
+});
+
+test('Authorization: Support agents cannot impersonate and cannot alter restricted user fields', async () => {
+  const supportId = `usr_sup_${Date.now()}`;
+  const targetId = `usr_tgt_${Date.now()}`;
+  const supportToken = `tok_sup_${Date.now()}`;
+
+  await pool.query(`
+    INSERT INTO users (id, name, email, type, status, admin_role, email_verified) VALUES
+      ($1, 'Support Agent', '${supportId}@example.com', 'user', 'active', 'support_agent', TRUE),
+      ($2, 'Target User', '${targetId}@example.com', 'user', 'active', NULL, TRUE)
+  `, [supportId, targetId]);
+
+  await pool.query(`
+    INSERT INTO user_sessions (id, user_id, expires_at) VALUES ($1, $2, NOW() + INTERVAL '1 day')
+  `, [supportToken, supportId]);
+
+  try {
+    const { getAuthenticatedUser } = await import('../lib/auth/session.ts');
+
+    // 1. Support agent attempting to impersonate must return 403 Forbidden
+    const impReq = makeReq('http://localhost:3000/api/admin/impersonate', 'POST', {
+      action: 'start',
+      userId: targetId,
+    }, supportToken);
+    (impReq as any).auth = await getAuthenticatedUser(impReq);
+    const impRes = await impersonatePost(impReq);
+    assert.equal(impRes.status, 403, 'Support agent must not be able to initiate impersonation');
+
+    // 2. Support agent attempting to alter kycStatus must return 403 Forbidden
+    const kycReq = makeReq(`http://localhost:3000/api/admin/users/${targetId}`, 'PUT', {
+      kycStatus: 'verified',
+    }, supportToken);
+    (kycReq as any).auth = await getAuthenticatedUser(kycReq);
+    const kycRes = await userPut(kycReq, { params: Promise.resolve({ id: targetId }) });
+    assert.equal(kycRes.status, 403, 'Support agent must not be able to alter kycStatus');
+
+    // 3. Support agent attempting to alter account status must return 403 Forbidden
+    const statusReq = makeReq(`http://localhost:3000/api/admin/users/${targetId}`, 'PUT', {
+      status: 'banned',
+    }, supportToken);
+    (statusReq as any).auth = await getAuthenticatedUser(statusReq);
+    const statusRes = await userPut(statusReq, { params: Promise.resolve({ id: targetId }) });
+    assert.equal(statusRes.status, 403, 'Support agent must not be able to alter user status');
+  } finally {
+    await pool.query('DELETE FROM user_sessions WHERE user_id IN ($1, $2)', [supportId, targetId]);
+    await pool.query('DELETE FROM users WHERE id IN ($1, $2)', [supportId, targetId]);
+  }
+});
+
+test('Unsubscribe POST: Authenticated user can unsubscribe their own account', async () => {
+  const unsubId = `usr_unsub_${Date.now()}`;
+  const unsubEmail = `${unsubId}@example.com`;
+  const unsubToken = `tok_unsub_${Date.now()}`;
+
+  await pool.query(`
+    INSERT INTO users (id, name, email, type, status, email_subscribed, email_verified) VALUES
+      ($1, 'Unsub User', $2, 'user', 'active', TRUE, TRUE)
+  `, [unsubId, unsubEmail]);
+
+  await pool.query(`
+    INSERT INTO user_sessions (id, user_id, expires_at) VALUES ($1, $2, NOW() + INTERVAL '1 day')
+  `, [unsubToken, unsubId]);
+
+  try {
+    const req = makeReq('http://localhost:3000/api/auth/unsubscribe', 'POST', {
+      email: unsubEmail,
+    }, unsubToken);
+
+    const res = await unsubPost(req);
+    assert.equal(res.status, 200);
+
+    const check = await pool.query('SELECT email_subscribed FROM users WHERE id = $1', [unsubId]);
+    assert.equal(check.rows[0].email_subscribed, false);
+  } finally {
+    await pool.query('DELETE FROM user_sessions WHERE user_id = $1', [unsubId]);
+    await pool.query('DELETE FROM users WHERE id = $1', [unsubId]);
+  }
+});
+
 

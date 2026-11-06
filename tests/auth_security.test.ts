@@ -94,7 +94,7 @@ test('Account Enumeration & Rate Limiting — Identical 401 response and throttl
     { 'x-forwarded-for': rateLimitIp }
   );
   const repeatRes = await loginHandler(repeatReq);
-  assert.equal(repeatRes.status, 401, 'Repeated failed login attempts should return 401 without blocking IP access');
+  assert.equal(repeatRes.status, 429, 'Repeated failed login attempts should return 429 when rate limit is reached');
 });
 
 test('Password Reset & Token Flow — Invalidation and Session Deletion', async () => {
@@ -103,6 +103,7 @@ test('Password Reset & Token Flow — Invalidation and Session Deletion', async 
     name: 'Reset User',
     email: resetEmail,
     password: 'oldpassword',
+    phone: '9876543210',
   });
   const signupRes = await signupHandler(signupReq);
   assert.equal(signupRes.status, 201);
@@ -138,6 +139,9 @@ test('Password Reset & Token Flow — Invalidation and Session Deletion', async 
   const reuseRes = await resetPasswordHandler(resetReq);
   assert.equal(reuseRes.status, 400, 'Token cannot be reused after successful password reset');
 
+  // Verify account so login can succeed (login requires emailVerified: true)
+  await userRepository.update(user.id, { emailVerified: true });
+
   // Verify login with new password works
   const newLoginReq = createMockRequest('http://localhost:3000/api/auth/login', {
     email: resetEmail,
@@ -153,10 +157,15 @@ test('Email Verification & Logout All Sessions', async () => {
     name: 'Verify User',
     email: email,
     password: 'mypassword',
+    phone: '9876543210',
   });
   const signupRes = await signupHandler(signupReq);
   assert.equal(signupRes.status, 201);
   const user = (await signupRes.json()).user;
+
+  // CRITICAL CHECK: Newly registered user must be unverified initially
+  const rawDbUser = await userRepository.findById(user.id);
+  assert.equal(rawDbUser?.emailVerified, false, 'User must remain unverified upon signup before confirmation');
 
   // Create verification token
   const rawToken = crypto.randomBytes(32).toString('hex');

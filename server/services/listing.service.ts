@@ -462,85 +462,119 @@ export class ListingService {
     
     // Priority: Category quota -> System default. Use ?? to treat 0 as free.
     const quotaLimit = existingCategory.freeListingsQuota ?? settings.freeListingsLimit ?? 3;
-    const postingFee = existingCategory.postingFee ?? parentCategoryFee ?? settings.extraListingFee ?? 0;
-
-    if (activeCount >= quotaLimit && !actorMeta?.isAdminAction) {
-      const paymentId = (data as any).postingFeePaymentId;
-      const paymentGateway = (data as any).paymentGateway || 'Simulated';
-
-      if (!paymentId) {
-        return { 
-          success: false, 
-          error: `Listing quota exceeded. You have ${activeCount} active ads. A posting fee of ₹${postingFee} is required for additional listings.`,
-          status: 402 // Payment Required
-        };
-      }
-
-      // 1. Verify payment hasn't been used before (idempotency)
-      const existingPayment = await db
-        .select()
-        .from(schema.listingPayments)
-        .where(eq(schema.listingPayments.paymentId, paymentId))
-        .limit(1);
-
-      if (existingPayment.length > 0) {
-        return { success: false, error: 'This payment has already been used for another listing.', status: 409 };
-      }
-
-      // 2. Record the payment (atomic with listing creation is handled by the caller or we can do it here)
-      // Since createListing doesn't wrap everything in a transaction yet, we'll do a simple check.
-      // Ideally, the whole thing should be a transaction.
-      await db.insert(schema.listingPayments).values({
-        id: `lp_${crypto.randomUUID()}`,
-        userId: sellerId,
-        amount: String(postingFee),
-        paymentGateway,
-        paymentId: paymentId,
-        status: 'completed',
-      });
-
-      // Audit the paid post
-      await adminRepository.createAuditLog({
-        adminId: sellerId,
-        adminName: actorMeta?.name || data.sellerName || 'Authenticated User',
-        action: 'LISTING_PAID_POST',
-        module: 'Commerce',
-        targetId: id,
-        targetSummary: data.title,
-        details: `User paid ₹${postingFee} for extra listing beyond quota. Payment ID: ${paymentId}`,
-        ipAddress: actorMeta?.ipAddress || 'unknown',
-      });
-    }
+    const rawPostingFee = existingCategory.postingFee ?? parentCategoryFee ?? settings.extraListingFee ?? 0;
+    const postingFee = Math.max(0, Number(rawPostingFee) || 0);
 
     const paidCfg = settings.paidFeatures as any;
     const featuredDurationDays = paidCfg?.featuredAdDurationDays || 30;
     const featuredUntil = data.isFeatured ? new Date(Date.now() + featuredDurationDays * 24 * 3600 * 1000) : null;
 
+    let paymentRecordToPersist: { amount: number; paymentGateway: string; paymentId: string } | undefined = undefined;
+
+    // Check payment gateway verification outside if a fee is required
+    const requiresPayment = !actorMeta?.isAdminAction && postingFee > 0;
+
+    if (requiresPayment) {
+      const paymentId = (data as any).postingFeePaymentId;
+      const paymentGateway = (data as any).paymentGateway?.trim() || '';
+      const orderId = (data as any).postingFeeOrderId?.trim() || '';
+      const signature = (data as any).postingFeeSignature?.trim() || '';
+
+      const { boostService } = await import('@/server/services/boost.service');
+      const isGatewayConfigured = boostService.isGatewayConfigured(paymentGateway);
+
+      // Rule 2: No fake success. If payment gateway is not configured and a non-zero fee is required, fail closed.
+      if (!isGatewayConfigured) {
+        return {
+          success: false,
+          error: `Payment gateway is not configured for paid posting fee (₹${postingFee}). Cannot accept unverified payment.`,
+          status: 503,
+        };
+      }
+
+      if (!paymentId) {
+        return {
+          success: false,
+          error: `A posting fee of ₹${postingFee} is required. Please complete payment first.`,
+          status: 402, // Payment Required
+        };
+      }
+
+      // Verify payment with payment gateway
+      const isVerified = boostService.verifyPaymentSignature({
+        orderId,
+        paymentId,
+        signature,
+      });
+
+      if (!isVerified) {
+        return {
+          success: false,
+          error: 'Payment verification failed: Invalid payment signature from payment provider.',
+          status: 400,
+        };
+      }
+
+      paymentRecordToPersist = {
+        amount: postingFee,
+        paymentGateway,
+        paymentId,
+      };
+    }
+
     try {
-    // Perform duplicate title check and stale ad expiration in the same transaction
-    const created = await listingRepository.createWithDuplicateCheck({
-      id,
-      sellerId,
-      sellerName: actorMeta?.name || data.sellerName || 'Authenticated User',
-      sellerPhone: data.sellerPhone || '',
-      categoryId: cleanCategoryId,
-      subcategoryId: cleanSubcategoryId || undefined,
-      title: data.title,
-      description: data.description,
-      price: priceNum,
-      state: data.location?.state || 'Maharashtra',
-      city: data.location?.city || 'Mumbai',
-      locality: data.location?.locality || 'Locality',
-      latitude: data.location?.latitude,
-      longitude: data.location?.longitude,
-      images: validImages,
-      customAttributes: data.customAttributes || {},
-      status: data.status || 'pending',
-      expiresAt,
-      isFeatured: data.isFeatured ?? false,
-      featuredUntil: featuredUntil || undefined,
-      isBoosted: data.isFeatured ?? false, // Sync boost with featured for now as per UI
-    });
+      // Execute quota count verification, seller row lock, payment insertion and listing insertion in ONE single database transaction
+      const created = await db.transaction(async (tx) => {
+        // 1. Seller row-level FOR UPDATE lock INSIDE the transaction
+        await tx.execute(sql`SELECT id FROM users WHERE id = ${sellerId} FOR UPDATE`);
+
+        // 2. Authoritative active listing count inside the transaction lock
+        const activeCountRes = await tx
+          .select({ count: sql<number>`count(*)::int` })
+          .from(schema.listings)
+          .where(
+            and(
+              eq(schema.listings.sellerId, sellerId),
+              inArray(schema.listings.status, ['approved', 'pending']),
+              sql`${schema.listings.expiresAt} >= NOW()`
+            )
+          );
+        const activeCount = Number(activeCountRes[0]?.count || 0);
+
+        // Enforce quota: if active count >= quotaLimit and fee > 0, ensure payment is provided
+        if (activeCount >= quotaLimit && !actorMeta?.isAdminAction) {
+          if (postingFee > 0 && !paymentRecordToPersist) {
+            throw new Error(`QUOTA_EXCEEDED_FEE_REQUIRED:₹${postingFee}`);
+          }
+          // If postingFee === 0, quota is exhausted but category is zero-fee: allow free post without requiring payment ID!
+        }
+
+        // 3. Atomically insert payment record (if required) and create listing with duplicate check
+        return await listingRepository.createWithDuplicateCheck({
+          id,
+          sellerId,
+          sellerName: actorMeta?.name || data.sellerName || 'Authenticated User',
+          sellerPhone: data.sellerPhone || '',
+          categoryId: cleanCategoryId,
+          subcategoryId: cleanSubcategoryId || undefined,
+          title: data.title,
+          description: data.description,
+          price: priceNum,
+          state: data.location?.state || 'Maharashtra',
+          city: data.location?.city || 'Mumbai',
+          locality: data.location?.locality || 'Locality',
+          latitude: data.location?.latitude,
+          longitude: data.location?.longitude,
+          images: validImages,
+          customAttributes: data.customAttributes || {},
+          status: data.status || 'pending',
+          expiresAt,
+          isFeatured: data.isFeatured ?? false,
+          featuredUntil: featuredUntil || undefined,
+          isBoosted: data.isFeatured ?? false,
+          paymentRecord: paymentRecordToPersist,
+        });
+      });
 
       // 1. Immediately trigger listing count invalidation right after successful database insert
       try {
@@ -559,7 +593,9 @@ export class ListingService {
             module: 'Marketplace',
             targetId: id,
             targetSummary: created.title,
-            details: `Created listing in ${created.location.city}`,
+            details: paymentRecordToPersist
+              ? `Created listing in ${created.location.city} with paid fee ₹${paymentRecordToPersist.amount} (Payment ID: ${paymentRecordToPersist.paymentId})`
+              : `Created listing in ${created.location.city}`,
             ipAddress: actorMeta?.ipAddress || 'unknown',
           });
         } catch (auditErr) {
@@ -572,6 +608,17 @@ export class ListingService {
       console.error('ListingService.createListing error:', err);
       if (err.message === 'DUPLICATE_TITLE') {
         return { success: false, error: DUPLICATE_TITLE_ERROR_MESSAGE, status: 409 };
+      }
+      if (err.message === 'PAYMENT_ALREADY_USED') {
+        return { success: false, error: 'This payment has already been used for another listing.', status: 409 };
+      }
+      if (err.message?.startsWith('QUOTA_EXCEEDED_FEE_REQUIRED:')) {
+        const feeStr = err.message.split(':')[1] || '';
+        return {
+          success: false,
+          error: `Listing quota exceeded. A posting fee of ${feeStr} is required for additional listings.`,
+          status: 402,
+        };
       }
       return { success: false, error: err.message || 'Failed to save listing', status: 500 };
     }
@@ -624,7 +671,13 @@ export class ListingService {
     }
 
     // Expiry date protection: ordinary sellers cannot modify expiresAt directly.
-    // If sent by an ordinary seller during ordinary edits, we safely ignore it rather than erroring or shortening expiry.
+    if (!isPrivileged && updatedData.expiresAt !== undefined) {
+      return {
+        success: false,
+        error: 'Forbidden: Ordinary sellers cannot modify the ad expiration date directly. Use the renew flow.',
+        status: 400,
+      };
+    }
 
     const targetTitle = updatedData.title !== undefined ? updatedData.title : existing.title;
     const sellerId = existing.sellerId;

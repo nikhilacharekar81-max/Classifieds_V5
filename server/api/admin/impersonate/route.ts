@@ -22,10 +22,10 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Target userId is required' }, { status: 400 });
       }
 
-      const isSuperAdmin = Boolean(authContext.isSuperAdmin || authContext.user?.adminRole === 'super_admin');
-      const isAdmin = Boolean(authContext.isAdmin || authContext.user?.adminRole === 'admin');
+      const role = authContext.adminRole || authContext.user?.adminRole;
+      const isActualAdmin = role === 'admin' || role === 'super_admin';
 
-      if (!isSuperAdmin && !isAdmin) {
+      if (!isActualAdmin) {
         return NextResponse.json({ error: 'Forbidden: Only administrators can initiate impersonation sessions' }, { status: 403 });
       }
 

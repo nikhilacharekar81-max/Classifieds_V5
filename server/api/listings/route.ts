@@ -190,6 +190,8 @@ export async function POST(req: NextRequest) {
       isFeatured: (authContext.isAdmin || authContext.isModerator || authContext.isSuperAdmin) ? !!body.isFeatured : false,
       isBoosted: (authContext.isAdmin || authContext.isModerator || authContext.isSuperAdmin) ? !!body.isBoosted : false,
       postingFeePaymentId: body.postingFeePaymentId,
+      postingFeeOrderId: body.postingFeeOrderId,
+      postingFeeSignature: body.postingFeeSignature,
       paymentGateway: body.paymentGateway,
     };
 

@@ -21,20 +21,22 @@ export async function PUT(
     }
 
     const isSelf = authContext.userId === id;
-    const isSuperAdmin = Boolean(authContext.isSuperAdmin);
-    const isAdmin = Boolean(authContext.isAdmin || isSuperAdmin);
-    const isModerator = Boolean(authContext.isModerator);
-    const isStaff = isAdmin || isModerator;
+    const role = authContext.adminRole || authContext.user?.adminRole;
+    const isSuperAdmin = Boolean(authContext.isSuperAdmin || role === 'super_admin');
+    const isActualAdmin = isSuperAdmin || role === 'admin';
+    const isModerator = Boolean(authContext.isModerator || role === 'moderator');
+    const hasUserMgmt = Boolean(authContext.isAdmin); // canAccessAdmin
+    const isStaff = isActualAdmin || isModerator || hasUserMgmt;
 
     if (!isSelf && !isStaff) {
       return NextResponse.json({ error: 'Forbidden: You can only edit your own account' }, { status: 403 });
     }
 
-    // Role Hierarchy: Moderators cannot edit Admin or Super Admin accounts
+    // Role Hierarchy: Non-admins cannot edit Admin or Super Admin accounts
     const targetRow = await userRepository.findByEmail(targetUser.email);
-    if (!isSelf && !isAdmin && isModerator && targetRow?.adminRole) {
+    if (!isSelf && !isActualAdmin && targetRow?.adminRole) {
       return NextResponse.json(
-        { error: 'Forbidden: Moderators cannot modify administrator accounts' },
+        { error: 'Forbidden: Staff cannot modify administrator accounts' },
         { status: 403 }
       );
     }
@@ -53,7 +55,7 @@ export async function PUT(
     // Email change integrity check
     if (body.email !== undefined) {
       // Moderators cannot change another user's email
-      if (!isSelf && !isAdmin) {
+      if (!isSelf && !isActualAdmin) {
         return NextResponse.json(
           { error: "Forbidden: Only administrators can modify another user's email address" },
           { status: 403 }
@@ -125,9 +127,9 @@ export async function PUT(
     }
 
     // Field-level role permissions:
-    // KYC status is administrator-only; moderators must not modify KYC status
+    // KYC status is administrator-only; support agents / moderators must not modify KYC status
     if (body.kycStatus !== undefined) {
-      if (!isAdmin) {
+      if (!isActualAdmin) {
         return NextResponse.json(
           { error: 'Forbidden: Only administrators can modify KYC verification status' },
           { status: 403 }
@@ -136,9 +138,9 @@ export async function PUT(
       allowedFields.kycStatus = body.kycStatus;
     }
 
-    // Status and account type are administrator-only fields (moderators cannot alter them)
+    // Status and account type are administrator-only fields (support agents / moderators cannot alter them)
     if (body.status !== undefined) {
-      if (!isAdmin) {
+      if (!isActualAdmin) {
         return NextResponse.json(
           { error: 'Forbidden: Only administrators can modify user account status' },
           { status: 403 }
@@ -148,7 +150,7 @@ export async function PUT(
     }
 
     if (body.type !== undefined) {
-      if (!isAdmin) {
+      if (!isActualAdmin) {
         return NextResponse.json(
           { error: 'Forbidden: Only administrators can modify user account type' },
           { status: 403 }

@@ -194,6 +194,10 @@ export class EmailService {
 
     const baseUrl = process.env.APP_URL || 'http://localhost:3000';
     
+    let deliveredCount = 0;
+    let failedCount = 0;
+    let notConfiguredCount = 0;
+
     for (const user of recipients) {
       const unsubToken = await userRepository.generateUnsubscribeToken(user.id);
       const unsubUrl = `${baseUrl.replace(/\/$/, '')}/api/auth/unsubscribe?token=${unsubToken}`;
@@ -210,7 +214,7 @@ export class EmailService {
         .replace(/\{\{user_name\}\}/g, () => safeName)
         .replace(/\{\{city\}\}/g, () => safeCity);
 
-      await this.sendEmail({
+      const logResult = await this.sendEmail({
         toEmail: user.email,
         toName: user.name,
         subject: personalizedSubject,
@@ -219,25 +223,47 @@ export class EmailService {
         isMarketing: true,
         relatedUserId: user.id,
       });
+
+      if (logResult.status === 'delivered') {
+        deliveredCount++;
+      } else if (logResult.status === 'not_configured') {
+        notConfiguredCount++;
+      } else {
+        failedCount++;
+      }
     }
 
-    await emailRepository.updateCampaignStatus(campaignId, 'sent', count);
+    // Honest status reporting:
+    // If SMTP was not configured, the campaign cannot be marked 'sent' (no fake success).
+    // If all deliveries failed or SMTP wasn't configured, mark as 'failed'.
+    // If at least one delivered, mark as 'sent' with actual deliveredCount.
+    const finalStatus =
+      deliveredCount > 0 ? 'sent' : count === 0 ? 'sent' : 'failed';
+
+    await emailRepository.updateCampaignStatus(campaignId, finalStatus, deliveredCount);
 
     await adminRepository.createAuditLog({
       adminId: actor?.id || 'system',
       adminName: actor?.name || 'System',
-      action: 'CAMPAIGN_SENT',
+      action: finalStatus === 'sent' ? 'CAMPAIGN_SENT' : 'CAMPAIGN_FAILED',
       module: 'Email',
       targetId: campaignId,
       targetSummary: campaign.subject,
-      details: `Broadcast sent to ${count} users`,
+      details: notConfiguredCount > 0
+        ? `Broadcast halted: SMTP not configured for ${notConfiguredCount} recipients`
+        : `Broadcast completed: ${deliveredCount} delivered, ${failedCount} failed out of ${count} recipients`,
       ipAddress: actor?.ipAddress || 'unknown',
     });
 
+    const isSuccess = finalStatus === 'sent';
+    const message = notConfiguredCount > 0
+      ? `SMTP is not configured. 0/${count} emails were delivered.`
+      : `Newsletter "${campaign.subject}" processed: ${deliveredCount} delivered, ${failedCount} failed.`;
+
     return {
-      success: true,
-      recipientCount: count,
-      message: `Newsletter "${campaign.subject}" processed for ${count} recipients.`,
+      success: isSuccess,
+      recipientCount: deliveredCount,
+      message,
     };
   }
 

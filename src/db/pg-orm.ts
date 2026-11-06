@@ -636,6 +636,33 @@ class InsertQueryBuilder<TTable extends PgTableWithColumns<any>, TReturn = TTabl
   }
 }
 
+function assertSafeWhereClause(whereSql: string, operation: 'UPDATE' | 'DELETE'): void {
+  if (!whereSql || !whereSql.trim()) {
+    throw new Error(`ORM Safety: ${operation} query has empty .where(). Use .where(sql\`1=1\`) if intentional.`);
+  }
+
+  const normalized = whereSql.trim().replace(/\s+/g, ' ').toLowerCase();
+  const withoutSpaces = normalized.replace(/\s+/g, '');
+
+  // Direct tautologies: 1=1, true, 0=0
+  if (
+    withoutSpaces === '1=1' ||
+    withoutSpaces === 'true' ||
+    withoutSpaces === '0=0' ||
+    withoutSpaces === "''=''" ||
+    withoutSpaces === '""=""'
+  ) {
+    throw new Error(`ORM Safety: ${operation} query has unrestricted .where(). Use .where(sql\`1=1\`) if intentional.`);
+  }
+
+  // Compound unrestricted expressions: e.g. "or 1=1", "or true", "or 'a'='a'", "or 0=0"
+  // anywhere inside the WHERE clause
+  const tautologyPattern = /\bor\s+(1\s*=\s*1|0\s*=\s*0|true|'[^']*'\s*=\s*'[^']*'|"[^"]*"\s*=\s*"[^"]*")(\s|\)|$)/i;
+  if (tautologyPattern.test(whereSql)) {
+    throw new Error(`ORM Safety: ${operation} query has unrestricted compound .where() containing OR tautology. Execution blocked.`);
+  }
+}
+
 class UpdateQueryBuilder<TTable extends PgTableWithColumns<any>, TReturn = TTable['$inferSelect']>
   implements PromiseLike<TReturn[]>
 {
@@ -699,10 +726,7 @@ class UpdateQueryBuilder<TTable extends PgTableWithColumns<any>, TReturn = TTabl
 
     if (this._where) {
       const whereSql = this._where.toSql(params);
-      const normalizedWhere = whereSql ? whereSql.replace(/\s+/g, '').toLowerCase() : '';
-      if (!whereSql || normalizedWhere === '1=1' || normalizedWhere === 'true') {
-        throw new Error(`ORM Safety: UPDATE query has unrestricted .where(). Use .where(sql\`1=1\`) if intentional.`);
-      }
+      assertSafeWhereClause(whereSql, 'UPDATE');
       sqlText += ` WHERE ${whereSql}`;
     }
 
@@ -773,10 +797,7 @@ class DeleteQueryBuilder<TTable extends PgTableWithColumns<any>, TReturn = TTabl
 
     if (this._where) {
       const whereSql = this._where.toSql(params);
-      const normalizedWhere = whereSql ? whereSql.replace(/\s+/g, '').toLowerCase() : '';
-      if (!whereSql || normalizedWhere === '1=1' || normalizedWhere === 'true') {
-        throw new Error(`ORM Safety: DELETE query has unrestricted .where(). Use .where(sql\`1=1\`) if intentional.`);
-      }
+      assertSafeWhereClause(whereSql, 'DELETE');
       sqlText += ` WHERE ${whereSql}`;
     }
 

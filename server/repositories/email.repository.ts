@@ -215,6 +215,7 @@ export class EmailRepository {
         .where(eq(schema.newsletterCampaigns.id, campaignId));
     } catch (error) {
       console.error('EmailRepository.updateCampaignStatus error:', error);
+      throw error;
     }
   }
 

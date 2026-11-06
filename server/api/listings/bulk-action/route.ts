@@ -25,18 +25,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const isPrivileged = Boolean(authContext.isAdmin || authContext.isModerator || authContext.isSuperAdmin);
+    const role = authContext.adminRole || authContext.user?.adminRole;
+    const isSuperAdmin = Boolean(authContext.isSuperAdmin || role === 'super_admin');
+    const isActualAdmin = isSuperAdmin || role === 'admin';
+    const canModerate = Boolean(authContext.isModerator || isActualAdmin);
 
     const isApproving = action === 'approve' || data?.status === 'approved';
     const isRejecting = action === 'reject' || data?.status === 'rejected';
 
-    // Admin/Moderator permissions required for approving or rejecting listings
-    if ((isApproving || isRejecting) && !isPrivileged) {
+    // Moderator or Admin permission required for approving or rejecting listings
+    if ((isApproving || isRejecting) && !canModerate) {
       return NextResponse.json({ error: 'Forbidden: Moderator or Admin permission required' }, { status: 403 });
     }
 
+    // Deletion: only actual administrators can delete listings they don't own.
+    // Ordinary users, support agents, finance, marketing etc. can only delete listings they own.
+    const canBypassOwnershipForAction = action === 'delete' ? isActualAdmin : canModerate;
+
     // Ownership verification for non-privileged user bulk operations
-    if (!isPrivileged) {
+    if (!canBypassOwnershipForAction) {
       for (const id of ids) {
         const item = await listingRepository.findById(id);
         if (!item || item.sellerId !== authContext.userId) {
@@ -73,7 +80,7 @@ export async function POST(req: NextRequest) {
         }
 
         // Ownership verification for non-privileged users
-        if (!isPrivileged && item.sellerId !== authContext.userId) {
+        if (!canModerate && item.sellerId !== authContext.userId) {
           return NextResponse.json(
             { error: `Unauthorized: You do not own listing ${id}` },
             { status: 403 }
@@ -121,7 +128,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const renewalDays = !isPrivileged
+      const renewalDays = !canModerate
         ? 30
         : typeof data?.days === 'number' && Number.isFinite(data.days) && data.days > 0
         ? Math.floor(data.days)

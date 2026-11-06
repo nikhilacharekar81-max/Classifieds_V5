@@ -37,7 +37,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const authContext = req.auth;
+    const { getAuthenticatedUser } = await import('@/lib/auth/session');
+    const authContext = req.auth || (await getAuthenticatedUser(req));
     if (!authContext) {
       return NextResponse.json({ error: 'Authentication required to unsubscribe via UI.' }, { status: 401 });
     }
@@ -55,8 +56,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Authorization: User can unsubscribe themselves, or an admin/moderator can unsubscribe anyone
-    const isOwner = authContext.user.id === user.id;
-    const isPrivileged = authContext.role.canManageUsers || authContext.role.canModerateListings;
+    const isOwner = authContext.userId === user.id || authContext.user?.id === user.id;
+    const isPrivileged = Boolean(authContext.isAdmin || authContext.isModerator || authContext.isSuperAdmin);
 
     if (!isOwner && !isPrivileged) {
       return NextResponse.json({ error: 'Forbidden: You can only unsubscribe your own account.' }, { status: 403 });
