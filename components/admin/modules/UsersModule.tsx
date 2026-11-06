@@ -51,19 +51,69 @@ export const UsersModule: React.FC<UsersModuleProps> = ({ initialTab = 'all' }) 
     isOpen: false,
   });
 
-  // Pagination
+  // Pagination & Server-Side State (#17)
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize] = useState(10);
+  const [serverUsers, setServerUsers] = useState<UserAccount[] | null>(null);
+  const [serverTotal, setServerTotal] = useState<number | null>(null);
+  const [serverCounts, setServerCounts] = useState<{
+    all: number;
+    users: number;
+    businesses: number;
+    verification: number;
+    banned: number;
+  } | null>(null);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+
+  const fetchAdminUsers = React.useCallback(
+    async (page = currentPage, tab = activeTab, search = searchTerm) => {
+      setIsLoadingUsers(true);
+      try {
+        const params = new URLSearchParams();
+        params.set('paginated', '1');
+        params.set('filter', tab);
+        if (search.trim()) {
+          params.set('search', search.trim());
+        }
+        params.set('limit', String(pageSize));
+        params.set('offset', String(Math.max(0, (page - 1) * pageSize)));
+
+        const res = await fetch(`/api/admin/users?${params.toString()}`, {
+          credentials: 'include',
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.users)) {
+            setServerUsers(data.users);
+            setServerTotal(typeof data.total === 'number' ? data.total : data.users.length);
+            if (data.counts) {
+              setServerCounts(data.counts);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch paginated admin users:', err);
+      } finally {
+        setIsLoadingUsers(false);
+      }
+    },
+    [currentPage, activeTab, searchTerm, pageSize]
+  );
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchAdminUsers(currentPage, activeTab, searchTerm);
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [currentPage, activeTab, searchTerm, fetchAdminUsers]);
 
   const filteredUsers = useMemo(() => {
     return users.filter((u) => {
-      // Tab filter
       if (activeTab === 'users' && u.type !== 'user') return false;
       if (activeTab === 'businesses' && u.type !== 'business') return false;
       if (activeTab === 'verification' && u.kycStatus !== 'pending') return false;
       if (activeTab === 'banned' && u.status !== 'banned') return false;
 
-      // Search
       if (searchTerm.trim()) {
         const q = searchTerm.toLowerCase();
         const matchName = u.name.toLowerCase().includes(q);
@@ -77,16 +127,39 @@ export const UsersModule: React.FC<UsersModuleProps> = ({ initialTab = 'all' }) 
     });
   }, [users, activeTab, searchTerm]);
 
-  const totalPages = Math.ceil(filteredUsers.length / pageSize) || 1;
+  const totalMatchingUsers = serverTotal !== null ? serverTotal : filteredUsers.length;
+  const totalPages = Math.max(1, Math.ceil(totalMatchingUsers / pageSize));
   const paginatedUsers = useMemo(() => {
+    if (serverUsers !== null) return serverUsers;
     const start = (currentPage - 1) * pageSize;
     return filteredUsers.slice(start, start + pageSize);
-  }, [filteredUsers, currentPage, pageSize]);
+  }, [serverUsers, filteredUsers, currentPage, pageSize]);
 
-  // CSV Export
-  const exportUsersCSV = () => {
+  // CSV Export (fetches full filtered set up to 200 rows from server when available)
+  const exportUsersCSV = async () => {
+    let exportRowsSource = serverUsers !== null ? serverUsers : filteredUsers;
+    try {
+      const params = new URLSearchParams();
+      params.set('paginated', '1');
+      params.set('filter', activeTab);
+      if (searchTerm.trim()) {
+        params.set('search', searchTerm.trim());
+      }
+      params.set('limit', '200');
+      params.set('offset', '0');
+      const res = await fetch(`/api/admin/users?${params.toString()}`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.users)) {
+          exportRowsSource = data.users;
+        }
+      }
+    } catch {
+      // Fall back to currently loaded rows
+    }
+
     const headers = ['ID', 'Name', 'Email', 'Phone', 'Type', 'Status', 'KYC', 'City', 'Listings', 'Joined Date', 'Last IP'];
-    const rows = filteredUsers.map((u) => [
+    const rows = exportRowsSource.map((u) => [
       u.id,
       u.name,
       u.email,
@@ -112,7 +185,7 @@ export const UsersModule: React.FC<UsersModuleProps> = ({ initialTab = 'all' }) 
     addToast({
       type: 'success',
       title: 'Users Export Generated',
-      message: `Exported ${filteredUsers.length} users to CSV.`,
+      message: `Exported ${exportRowsSource.length} users to CSV.`,
     });
   };
 
@@ -161,16 +234,28 @@ export const UsersModule: React.FC<UsersModuleProps> = ({ initialTab = 'all' }) 
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm space-y-3">
         <div className="flex flex-wrap items-center gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
           {[
-            { id: 'all', label: 'All Users', count: users.length },
-            { id: 'users', label: 'Regular Users', count: users.filter((u) => u.type === 'user').length },
-            { id: 'businesses', label: 'Dealers & Businesses', count: users.filter((u) => u.type === 'business').length },
+            { id: 'all', label: 'All Users', count: serverCounts ? serverCounts.all : users.length },
+            {
+              id: 'users',
+              label: 'Regular Users',
+              count: serverCounts ? serverCounts.users : users.filter((u) => u.type === 'user').length,
+            },
+            {
+              id: 'businesses',
+              label: 'Dealers & Businesses',
+              count: serverCounts ? serverCounts.businesses : users.filter((u) => u.type === 'business').length,
+            },
             {
               id: 'verification',
               label: 'Pending KYC',
-              count: users.filter((u) => u.kycStatus === 'pending').length,
+              count: serverCounts ? serverCounts.verification : users.filter((u) => u.kycStatus === 'pending').length,
               isHighlight: true,
             },
-            { id: 'banned', label: 'Banned Accounts', count: users.filter((u) => u.status === 'banned').length },
+            {
+              id: 'banned',
+              label: 'Banned Accounts',
+              count: serverCounts ? serverCounts.banned : users.filter((u) => u.status === 'banned').length,
+            },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -334,7 +419,10 @@ export const UsersModule: React.FC<UsersModuleProps> = ({ initialTab = 'all' }) 
                         {/* Ban / Unban */}
                         {user.status === 'banned' ? (
                           <button
-                            onClick={() => unbanUser(user.id)}
+                            onClick={async () => {
+                              await unbanUser(user.id);
+                              fetchAdminUsers(currentPage, activeTab, searchTerm);
+                            }}
                             className="p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-950 text-emerald-600 rounded transition-colors"
                             title="Restore Account"
                           >
@@ -361,12 +449,16 @@ export const UsersModule: React.FC<UsersModuleProps> = ({ initialTab = 'all' }) 
         {/* Pagination */}
         <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500">
           <div>
-            Showing {(currentPage - 1) * pageSize + 1} -{' '}
-            {Math.min(currentPage * pageSize, filteredUsers.length)} of {filteredUsers.length} users
+            {totalMatchingUsers === 0
+              ? 'Showing 0 users'
+              : `Showing ${(currentPage - 1) * pageSize + 1} - ${Math.min(
+                  currentPage * pageSize,
+                  totalMatchingUsers
+                )} of ${totalMatchingUsers} users`}
           </div>
           <div className="flex items-center gap-2">
             <button
-              disabled={currentPage === 1}
+              disabled={currentPage === 1 || isLoadingUsers}
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
               className="p-1.5 rounded border border-slate-200 dark:border-slate-800 disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-800"
             >
@@ -376,7 +468,7 @@ export const UsersModule: React.FC<UsersModuleProps> = ({ initialTab = 'all' }) 
               Page {currentPage} of {totalPages}
             </span>
             <button
-              disabled={currentPage >= totalPages}
+              disabled={currentPage >= totalPages || isLoadingUsers}
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
               className="p-1.5 rounded border border-slate-200 dark:border-slate-800 disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-800"
             >
@@ -390,9 +482,10 @@ export const UsersModule: React.FC<UsersModuleProps> = ({ initialTab = 'all' }) 
       <ConfirmDialog
         isOpen={banDialog.isOpen}
         onClose={() => setBanDialog({ isOpen: false })}
-        onConfirm={(reason) => {
+        onConfirm={async (reason) => {
           if (banDialog.user) {
-            banUser(banDialog.user.id, reason || 'Safety policy violation');
+            await banUser(banDialog.user.id, reason || 'Safety policy violation');
+            fetchAdminUsers(currentPage, activeTab, searchTerm);
           }
         }}
         title={`Ban Account: ${banDialog.user?.name}`}

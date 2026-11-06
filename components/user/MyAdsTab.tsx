@@ -30,11 +30,12 @@ import { isListingBoosted, formatBoostTimeRemaining } from '@/lib/utils/boostHel
 interface MyAdsTabProps {
   userListings: Listing[];
   filteredUserListings: Listing[];
-  activeUserApprovedListingsCount: number;
+  activeUserApprovedListingsCount: number | null;
+  quotaStatus?: 'loading' | 'loaded' | 'unavailable';
   freeQuotaLimit: number;
   extraListingFeeRate: number;
   isQuotaExceeded: boolean;
-  freeQuotaSlotsRemaining: number;
+  freeQuotaSlotsRemaining: number | null;
   adStatusFilter: 'all' | 'approved' | 'pending' | 'expired' | 'sold' | 'rejected';
   adSearchQuery: string;
   onStatusFilterChange: (status: 'all' | 'approved' | 'pending' | 'expired' | 'sold' | 'rejected') => void;
@@ -65,6 +66,7 @@ export const MyAdsTab: React.FC<MyAdsTabProps> = ({
   userListings,
   filteredUserListings,
   activeUserApprovedListingsCount,
+  quotaStatus = 'loaded',
   freeQuotaLimit,
   extraListingFeeRate,
   isQuotaExceeded,
@@ -87,37 +89,69 @@ export const MyAdsTab: React.FC<MyAdsTabProps> = ({
   isLoading = false,
   statusCounts,
 }) => {
+  const isQuotaLoading = quotaStatus === 'loading';
+  const isQuotaUnavailable =
+    quotaStatus === 'unavailable' || activeUserApprovedListingsCount === null;
+
   return (
     <div className="space-y-4">
       {/* Freemium Volume Quota Policy Banner */}
       <div
         className={`p-4 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-xs ${
-          isQuotaExceeded
+          isQuotaLoading || isQuotaUnavailable
+            ? 'bg-slate-50/90 border-slate-300 text-slate-900 dark:bg-slate-900/60 dark:border-slate-800 dark:text-slate-200'
+            : isQuotaExceeded
             ? 'bg-amber-50/90 border-amber-300 text-amber-950 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-200'
             : 'bg-emerald-50/90 border-emerald-300 text-emerald-950 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-200'
         }`}
       >
         <div className="flex items-center gap-3">
-          <div className={`p-2.5 rounded-xl text-white shrink-0 ${isQuotaExceeded ? 'bg-amber-500' : 'bg-emerald-600'}`}>
+          <div
+            className={`p-2.5 rounded-xl text-white shrink-0 ${
+              isQuotaLoading || isQuotaUnavailable
+                ? 'bg-slate-500'
+                : isQuotaExceeded
+                ? 'bg-amber-500'
+                : 'bg-emerald-600'
+            }`}
+          >
             <Layers className="w-5 h-5" />
           </div>
           <div>
             <div className="font-extrabold flex items-center gap-2 flex-wrap">
               <span>
-                Freemium Active Ads Quota: {activeUserApprovedListingsCount} of {freeQuotaLimit} Free Active Ads Used
+                {isQuotaLoading
+                  ? 'Freemium Active Ads Quota: Checking server...'
+                  : isQuotaUnavailable
+                  ? `Freemium Active Ads Quota: Baseline ${freeQuotaLimit} Free Active Ads`
+                  : `Freemium Active Ads Quota: ${activeUserApprovedListingsCount} of ${freeQuotaLimit} Free Active Ads Used`}
               </span>
               <span
                 className={`px-2.5 py-0.5 rounded-full text-[10px] uppercase font-black tracking-wider ${
-                  isQuotaExceeded ? 'bg-amber-200 text-amber-950' : 'bg-emerald-200 text-emerald-950'
+                  isQuotaLoading
+                    ? 'bg-slate-200 text-slate-800'
+                    : isQuotaUnavailable
+                    ? 'bg-amber-100 text-amber-900'
+                    : isQuotaExceeded
+                    ? 'bg-amber-200 text-amber-950'
+                    : 'bg-emerald-200 text-emerald-950'
                 }`}
               >
-                {isQuotaExceeded
+                {isQuotaLoading
+                  ? 'Loading...'
+                  : isQuotaUnavailable
+                  ? 'Quota Status Unavailable'
+                  : isQuotaExceeded
                   ? '⚡ Free Quota Reached'
                   : `✓ ${freeQuotaSlotsRemaining} Free Slot${freeQuotaSlotsRemaining === 1 ? '' : 's'} Remaining`}
               </span>
             </div>
             <p className="text-[11px] text-slate-700 dark:text-slate-300 mt-1">
-              {isQuotaExceeded
+              {isQuotaLoading
+                ? 'Retrieving your authoritative active listing quota count from the server...'
+                : isQuotaUnavailable
+                ? `Your active listing quota count could not be loaded right now. Baseline allowance is ${freeQuotaLimit} free active listings (₹${extraListingFeeRate}/ad thereafter).`
+                : isQuotaExceeded
                 ? `You have reached your baseline quota of ${freeQuotaLimit} free active listings. Publishing additional ads will incur a volume quota fee of ₹${extraListingFeeRate}/ad.`
                 : `Your account includes a baseline of ${freeQuotaLimit} free active ad listings. You can post ${freeQuotaSlotsRemaining} more ad${freeQuotaSlotsRemaining === 1 ? '' : 's'} for free.`}
             </p>
@@ -211,11 +245,15 @@ export const MyAdsTab: React.FC<MyAdsTabProps> = ({
                     {listing.status === 'expired' && <Badge variant="danger" size="sm">Expired</Badge>}
                     {listing.status === 'rejected' && <Badge variant="danger" size="sm">Rejected</Badge>}
 
-                    {listing.isFeatured && (
+                    {listing.isFeatured ? (
                       <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-amber-400 text-slate-950 flex items-center gap-1">
                         <Sparkles className="w-3 h-3 fill-slate-950" /> Featured Ad
                       </span>
-                    )}
+                    ) : listing.customAttributes?.requestedFeatured ? (
+                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-amber-600" /> Featured Pending Payment
+                      </span>
+                    ) : null}
 
                     {isListingBoosted(listing) && (
                       <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 text-white flex items-center gap-1 shadow-xs">

@@ -528,6 +528,7 @@ class InsertQueryBuilder<TTable extends PgTableWithColumns<any>, TReturn = TTabl
   private _conflictMode?: 'nothing' | 'update';
   private _conflictTarget?: ColumnDef<any, any, any>[];
   private _conflictSet?: Record<string, any>;
+  private _conflictWhere?: SqlExpr<any>;
   private _hasReturning = false;
   private _returningProjection?: Record<string, any>;
 
@@ -549,10 +550,12 @@ class InsertQueryBuilder<TTable extends PgTableWithColumns<any>, TReturn = TTabl
   onConflictDoUpdate(opts: {
     target: ColumnDef<any, any, any> | ColumnDef<any, any, any>[];
     set: Record<string, any>;
+    where?: SqlExpr<any>;
   }): this {
     this._conflictMode = 'update';
     this._conflictTarget = Array.isArray(opts.target) ? opts.target : [opts.target];
     this._conflictSet = opts.set;
+    this._conflictWhere = opts.where;
     return this;
   }
 
@@ -621,6 +624,9 @@ class InsertQueryBuilder<TTable extends PgTableWithColumns<any>, TReturn = TTabl
         }
       }
       sqlText += ` ON CONFLICT (${targetSql}) DO UPDATE SET ${setParts.join(', ')}`;
+      if (this._conflictWhere) {
+        sqlText += ` WHERE ${this._conflictWhere.toSql(params)}`;
+      }
     }
 
     if (this._hasReturning) {

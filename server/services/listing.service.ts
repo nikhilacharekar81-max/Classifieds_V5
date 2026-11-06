@@ -460,19 +460,47 @@ export class ListingService {
     const quotaLimit =
       existingSubcategory?.freeListingsQuota ??
       existingCategory.freeListingsQuota ??
+      settings.paidFeatures?.freeListingsLimit ??
       settings.freeListingsLimit ??
       3;
+    const rawCategoryFee =
+      existingSubcategory?.postingFee ??
+      existingCategory.postingFee ??
+      parentCategoryFee;
+    const hasConfiguredCategoryFee =
+      rawCategoryFee !== undefined && rawCategoryFee !== null && Number(rawCategoryFee) > 0;
     const rawPostingFee =
       existingSubcategory?.postingFee ??
       existingCategory.postingFee ??
       parentCategoryFee ??
+      settings.paidFeatures?.extraListingFee ??
       settings.extraListingFee ??
       0;
     const postingFee = Math.max(0, Number(rawPostingFee) || 0);
 
     const paidCfg = settings.paidFeatures as any;
     const featuredDurationDays = paidCfg?.featuredAdDurationDays || 30;
-    const featuredUntil = data.isFeatured ? new Date(Date.now() + featuredDurationDays * 24 * 3600 * 1000) : null;
+    const canSetFeaturedDirectly = Boolean(actorMeta?.isAdminAction);
+    const effectiveIsFeatured = canSetFeaturedDirectly ? Boolean(data.isFeatured) : false;
+    const effectiveIsBoosted = canSetFeaturedDirectly
+      ? Boolean((data as any).isBoosted ?? data.isFeatured)
+      : false;
+    const featuredUntil = effectiveIsFeatured
+      ? new Date(Date.now() + featuredDurationDays * 24 * 3600 * 1000)
+      : null;
+
+    const rawCustomAttrs =
+      data.customAttributes && typeof data.customAttributes === 'object' && !Array.isArray(data.customAttributes)
+        ? { ...data.customAttributes }
+        : {};
+    const sellerRequestedFeatured =
+      !canSetFeaturedDirectly &&
+      Boolean(
+        data.isFeatured ||
+          (data as any).isBoosted ||
+          (data as any).requestedFeatured ||
+          rawCustomAttrs.requestedFeatured
+      );
 
     try {
       // Execute quota count verification, seller row lock, payment verification and listing insertion in ONE single database transaction
@@ -495,9 +523,12 @@ export class ListingService {
 
         let paymentRecordToPersist: { amount: number; paymentGateway: string; paymentId: string } | undefined = undefined;
 
-        // Quota check: A fee is required ONLY when seller has exhausted applicable free quota AND category fee > 0
+        // Enforce configured category/subcategory posting fee independently of free quota,
+        // and enforce extra listing fee when free quota is exceeded and postingFee > 0.
         const isQuotaExceeded = activeCount >= quotaLimit;
-        const requiresFee = isQuotaExceeded && postingFee > 0 && !actorMeta?.isAdminAction;
+        const requiresFee =
+          (hasConfiguredCategoryFee || (isQuotaExceeded && postingFee > 0)) &&
+          !actorMeta?.isAdminAction;
 
         if (requiresFee) {
           const { boostService } = await import('@/server/services/boost.service');
@@ -506,13 +537,17 @@ export class ListingService {
           const orderId = (data as any).postingFeeOrderId?.trim();
           const signature = (data as any).postingFeeSignature?.trim();
 
+          if (!orderId || !paymentId) {
+            throw new Error(
+              hasConfiguredCategoryFee
+                ? `POSTING_FEE_REQUIRED:₹${postingFee}`
+                : `QUOTA_EXCEEDED_FEE_REQUIRED:₹${postingFee}`
+            );
+          }
+
           // Fail closed: payment gateway must be configured for paid postings
           if (!boostService.isGatewayConfigured(paymentGateway)) {
             throw new Error(`GATEWAY_NOT_CONFIGURED:₹${postingFee}`);
-          }
-
-          if (!orderId || !paymentId) {
-            throw new Error(`QUOTA_EXCEEDED_FEE_REQUIRED:₹${postingFee}`);
           }
 
           // Verify server-side posting order exists and belongs to seller
@@ -533,7 +568,10 @@ export class ListingService {
           if (postingOrder.purpose !== 'posting_fee') {
             throw new Error('INVALID_ORDER_PURPOSE:Order purpose must be posting_fee');
           }
-          if (postingOrder.categoryId !== cleanCategoryId) {
+          if (
+            postingOrder.categoryId !== cleanCategoryId &&
+            (!cleanSubcategoryId || postingOrder.categoryId !== cleanSubcategoryId)
+          ) {
             throw new Error('CATEGORY_MISMATCH:Posting order category does not match submitted listing category');
           }
           if (postingOrder.currency !== 'INR') {
@@ -595,6 +633,30 @@ export class ListingService {
           };
         }
 
+        // Preserve seller's selected featured upgrade as a pending order/request without activating it for free
+        if (sellerRequestedFeatured) {
+          let pendingFeaturedOrderId: string | undefined = rawCustomAttrs.pendingFeaturedOrderId;
+          const featuredPrice = Math.max(0, Number(paidCfg?.featuredAdPrice ?? 100) || 100);
+          if (!pendingFeaturedOrderId) {
+            const crypto = await import('node:crypto');
+            pendingFeaturedOrderId = `ORD-FEAT-${crypto.randomUUID()}`;
+            await tx.insert(schema.postingOrders).values({
+              orderId: pendingFeaturedOrderId,
+              userId: sellerId,
+              categoryId: cleanSubcategoryId || cleanCategoryId,
+              amount: String(featuredPrice),
+              currency: 'INR',
+              purpose: 'featured_ad',
+              status: 'pending',
+            });
+          }
+          rawCustomAttrs.requestedFeatured = true;
+          rawCustomAttrs.featuredPaymentStatus = 'pending';
+          rawCustomAttrs.requestedFeaturedPrice = featuredPrice;
+          rawCustomAttrs.requestedFeaturedDurationDays = featuredDurationDays;
+          rawCustomAttrs.pendingFeaturedOrderId = pendingFeaturedOrderId;
+        }
+
         // 3. Atomically insert payment record (if required) and create listing with duplicate check
         return await listingRepository.createWithDuplicateCheck({
           id,
@@ -612,12 +674,12 @@ export class ListingService {
           latitude: data.location?.latitude,
           longitude: data.location?.longitude,
           images: validImages,
-          customAttributes: data.customAttributes || {},
+          customAttributes: rawCustomAttrs,
           status: data.status || 'pending',
           expiresAt,
-          isFeatured: data.isFeatured ?? false,
+          isFeatured: effectiveIsFeatured,
           featuredUntil: featuredUntil || undefined,
-          isBoosted: data.isFeatured ?? false,
+          isBoosted: effectiveIsBoosted,
           paymentRecord: paymentRecordToPersist,
         }, tx);
       });
@@ -667,6 +729,14 @@ export class ListingService {
           status: 503,
         };
       }
+      if (err.message?.startsWith('POSTING_FEE_REQUIRED:')) {
+        const feeStr = err.message.split(':')[1] || '';
+        return {
+          success: false,
+          error: `A posting fee of ${feeStr} is required for this category. Please complete payment first.`,
+          status: 402,
+        };
+      }
       if (err.message?.startsWith('QUOTA_EXCEEDED_FEE_REQUIRED:')) {
         const feeStr = err.message.split(':')[1] || '';
         return {
@@ -693,24 +763,49 @@ export class ListingService {
 
   public async createPostingOrder(params: {
     categoryId: string;
+    subcategoryId?: string;
     userId: string;
   }): Promise<{ success: boolean; order?: any; error?: string; status: number }> {
-    const { categoryId, userId } = params;
+    const { categoryId, subcategoryId, userId } = params;
     const category = await categoryRepository.findById(categoryId);
     if (!category) {
       return { success: false, error: 'Category not found', status: 404 };
+    }
+    if (!category.isActive) {
+      return { success: false, error: 'Category is inactive and cannot accept listings', status: 400 };
+    }
+
+    let subcategory: Awaited<ReturnType<typeof categoryRepository.findById>> = null;
+    if (subcategoryId) {
+      subcategory = await categoryRepository.findById(subcategoryId);
+      if (!subcategory || subcategory.parentId !== category.id) {
+        return {
+          success: false,
+          error: 'Subcategory not found or does not belong to the specified category',
+          status: 400,
+        };
+      }
+      if (!subcategory.isActive) {
+        return { success: false, error: 'Subcategory is inactive and cannot accept listings', status: 400 };
+      }
     }
 
     const settings = await getCachedSystemSettings();
     let parentCategoryFee: number | undefined = undefined;
     if (category.parentId) {
       const parentCat = await categoryRepository.findById(category.parentId);
-      if (parentCat && parentCat.postingFee !== undefined) {
+      if (parentCat && parentCat.postingFee !== undefined && parentCat.postingFee !== null) {
         parentCategoryFee = Number(parentCat.postingFee);
       }
     }
 
-    const rawPostingFee = category.postingFee ?? parentCategoryFee ?? settings.extraListingFee ?? 0;
+    const rawPostingFee =
+      subcategory?.postingFee ??
+      category.postingFee ??
+      parentCategoryFee ??
+      settings.paidFeatures?.extraListingFee ??
+      settings.extraListingFee ??
+      0;
     const postingFee = Math.max(0, Number(rawPostingFee) || 0);
 
     if (postingFee <= 0) {

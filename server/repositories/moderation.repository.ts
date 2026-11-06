@@ -1,6 +1,6 @@
 import { db } from '@/src/db/index';
 import * as schema from '@/src/db/schema';
-import { eq, desc } from '@/src/db/pg-orm';
+import { eq, desc, sql } from '@/src/db/pg-orm';
 import { ReportItem, ModerationRule } from '@/lib/types';
 
 export class ModerationRepository {
@@ -32,13 +32,20 @@ export class ModerationRepository {
     };
   }
 
-  public async findAllReports(limit = 500, offset = 0): Promise<ReportItem[]> {
+  public async findAllReports(
+    limit = 500,
+    offset = 0,
+    statusFilter?: string
+  ): Promise<ReportItem[]> {
     try {
       const safeLimit = Math.min(Math.max(1, Number(limit) || 500), 1000);
       const safeOffset = Math.max(0, Number(offset) || 0);
-      const rows = await db
-        .select()
-        .from(schema.abuseReports)
+      const baseQuery = db.select().from(schema.abuseReports);
+      const filteredQuery =
+        statusFilter && statusFilter !== 'all'
+          ? baseQuery.where(eq(schema.abuseReports.status, statusFilter))
+          : baseQuery;
+      const rows = await filteredQuery
         .orderBy(desc(schema.abuseReports.createdAt))
         .limit(safeLimit)
         .offset(safeOffset);
@@ -46,6 +53,23 @@ export class ModerationRepository {
     } catch (error) {
       console.error('ModerationRepository.findAllReports error:', error);
       throw new Error('Failed to find abuse reports', { cause: error });
+    }
+  }
+
+  public async countReports(statusFilter?: string): Promise<number> {
+    try {
+      const baseQuery = db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(schema.abuseReports);
+      const filteredQuery =
+        statusFilter && statusFilter !== 'all'
+          ? baseQuery.where(eq(schema.abuseReports.status, statusFilter))
+          : baseQuery;
+      const rows = (await filteredQuery) as any[];
+      return Number(rows[0]?.count) || 0;
+    } catch (error) {
+      console.error('ModerationRepository.countReports error:', error);
+      return 0;
     }
   }
 

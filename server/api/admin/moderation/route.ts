@@ -15,11 +15,23 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const status = searchParams.get('status') || undefined;
-    const reports = await moderationService.getReports(status);
-    const rules = await moderationService.getRules();
-    const appeals = await moderationService.getBanAppeals(status);
+    const limit = Math.min(Math.max(1, Number(searchParams.get('limit')) || 500), 1000);
+    const offset = Math.max(0, Number(searchParams.get('offset')) || 0);
 
-    return NextResponse.json({ reports, rules, appeals });
+    const [reports, totalReports, rules, appeals] = await Promise.all([
+      moderationService.getReports(status, limit, offset),
+      moderationService.countReports(status),
+      moderationService.getRules(limit, 0),
+      moderationService.getBanAppeals(status, limit, offset),
+    ]);
+
+    return NextResponse.json({
+      reports,
+      totalReports,
+      rules,
+      appeals,
+      pagination: { limit, offset, total: totalReports },
+    });
   } catch (error: any) {
     console.error('API /api/admin/moderation GET error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });

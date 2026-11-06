@@ -127,7 +127,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
   // Collections (initialized from server-fetched PostgreSQL data during SSR when provided)
   const [listings, setListings] = useState<Listing[]>(() => initialServerData?.listings || []);
   const [categories, setCategories] = useState<Category[]>(() =>
-    initialServerData?.categories && initialServerData.categories.length > 0
+    Array.isArray(initialServerData?.categories)
       ? initialServerData.categories
       : INITIAL_CATEGORIES
   );
@@ -155,7 +155,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
 
   // Sync server-provided reference data when root layout revalidates
   useEffect(() => {
-    if (initialServerData?.categories && initialServerData.categories.length > 0) {
+    if (Array.isArray(initialServerData?.categories)) {
       setCategories(initialServerData.categories);
     }
   }, [initialServerData?.categories]);
@@ -355,7 +355,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
         if (Array.isArray(data.listings)) {
           setListings(data.listings);
         }
-        if (Array.isArray(data.categories) && data.categories.length > 0) {
+        if (Array.isArray(data.categories)) {
           setCategories(data.categories);
         }
         if (Array.isArray(data.locations) && data.locations.length > 0) {
@@ -383,9 +383,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
   };
 
   useEffect(() => {
-    const hasServerCategories = Boolean(
-      initialServerData?.categories && initialServerData.categories.length > 0
-    );
+    const hasServerCategories = Array.isArray(initialServerData?.categories);
     if (initialServerData && hasServerCategories) {
       const pathname = typeof window !== 'undefined' ? window.location.pathname : '/';
       const needsFullCatalogue =

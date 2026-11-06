@@ -20,18 +20,71 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const filter = searchParams.get('filter') || 'all';
+    const search = searchParams.get('search') || undefined;
+    const roleFilter = searchParams.get('role') || undefined;
+    const statusFilter = searchParams.get('status') || undefined;
+    const kycStatusFilter = searchParams.get('kycStatus') || undefined;
 
-    if (filter === 'verification' && !isActualAdmin) {
+    if ((filter === 'verification' || kycStatusFilter) && !isActualAdmin) {
       return NextResponse.json(
         { error: 'Forbidden: Only administrators can inspect KYC verification requests' },
         { status: 403 }
       );
     }
 
-    const users = await userService.getUsers(filter, {
+    const hasPaginationParams =
+      searchParams.has('limit') ||
+      searchParams.has('offset') ||
+      searchParams.has('page') ||
+      searchParams.has('search') ||
+      searchParams.has('role') ||
+      searchParams.has('status') ||
+      searchParams.has('kycStatus') ||
+      searchParams.get('paginated') === '1' ||
+      searchParams.get('paginated') === 'true';
+
+    const rawLimit = Number(searchParams.get('limit'));
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 200) : hasPaginationParams ? 50 : 500;
+    const rawPage = Number(searchParams.get('page'));
+    const rawOffset = Number(searchParams.get('offset'));
+    const offset =
+      searchParams.has('offset') && Number.isFinite(rawOffset) && rawOffset >= 0
+        ? Math.floor(rawOffset)
+        : searchParams.has('page') && Number.isFinite(rawPage) && rawPage >= 1
+        ? (Math.floor(rawPage) - 1) * limit
+        : 0;
+
+    const result = await userService.getPaginatedUsers({
+      filter,
+      search,
+      role: roleFilter,
+      status: statusFilter,
+      kycStatus: kycStatusFilter,
       includeKycDocuments: isActualAdmin,
+      limit,
+      offset,
     });
-    return NextResponse.json(users);
+
+    if (hasPaginationParams) {
+      return NextResponse.json(
+        {
+          users: result.users,
+          items: result.users,
+          total: result.total,
+          limit: result.limit,
+          offset: result.offset,
+          page: Math.floor(result.offset / result.limit) + 1,
+          counts: result.counts,
+        },
+        {
+          headers: { 'X-Total-Count': String(result.total) },
+        }
+      );
+    }
+
+    return NextResponse.json(result.users, {
+      headers: { 'X-Total-Count': String(result.total) },
+    });
   } catch (error: any) {
     console.error('API /api/admin/users GET error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });

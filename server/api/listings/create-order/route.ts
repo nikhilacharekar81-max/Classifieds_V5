@@ -11,12 +11,14 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const categoryId = body.categoryId?.trim();
+    const subcategoryId = body.subcategoryId ? String(body.subcategoryId).trim() : undefined;
     if (!categoryId) {
       return NextResponse.json({ error: 'categoryId is required' }, { status: 400 });
     }
 
     const result = await listingService.createPostingOrder({
       categoryId,
+      subcategoryId,
       userId: authContext.userId,
     });
 

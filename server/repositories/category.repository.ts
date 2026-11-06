@@ -36,27 +36,14 @@ export class CategoryRepository {
         await ensureDatabaseSeeded();
       }
 
-      let rows = await withDbRetry(() =>
+      const rows = await withDbRetry(() =>
         db
           .select()
           .from(schema.categories)
           .orderBy(asc(schema.categories.orderIndex))
       );
 
-      if (rows.length === 0) {
-        await ensureDatabaseSeeded();
-        rows = await withDbRetry(() =>
-          db
-            .select()
-            .from(schema.categories)
-            .orderBy(asc(schema.categories.orderIndex))
-        );
-      }
-
-      if (rows.length === 0) {
-        throw new Error('Category hierarchy is empty after database initialization');
-      }
-
+      // Preserve intentionally empty category tables (#15): do not re-seed or throw when rows.length === 0.
       return rows.map((r) => this.mapRowToCategory(r, 0));
     } catch (error) {
       console.error('CategoryRepository.findAllHierarchy error:', error);

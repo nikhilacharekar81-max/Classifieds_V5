@@ -74,6 +74,7 @@ export class AdminRepository {
 
   public async getSystemSettingsDirect(): Promise<SystemSettings> {
     try {
+      const paymentGatewayConfigured = Boolean(process.env.PAYMENT_GATEWAY_SECRET?.trim());
       const rows = await db.select().from(schema.systemSettings).where(eq(schema.systemSettings.id, 'primary')).limit(1);
       if (!rows.length) {
         return {
@@ -91,24 +92,64 @@ export class AdminRepository {
           watermarkImages: false,
           aiSpamFilterEnabled: true,
           otpLoginEnabled: true,
+          enablePrivacyChoices: true,
           paidFeatures: { ...DEFAULT_PAID_FEATURES_CONFIG },
+          paymentGatewayConfigured,
         };
       }
       const r = rows[0];
       const storedPaidCfg =
-        r.paidFeaturesConfig && typeof r.paidFeaturesConfig === 'object'
+        r.paidFeaturesConfig && typeof r.paidFeaturesConfig === 'object' && !Array.isArray(r.paidFeaturesConfig)
           ? (r.paidFeaturesConfig as Record<string, any>)
           : {};
-      const resolvedFreeLimit =
-        storedPaidCfg.freeListingsLimit !== undefined && storedPaidCfg.freeListingsLimit !== null
-          ? Number(storedPaidCfg.freeListingsLimit)
-          : r.freeListingsLimit ?? DEFAULT_PAID_FEATURES_CONFIG.freeListingsLimit;
-      const resolvedExtraFee =
-        storedPaidCfg.extraListingFee !== undefined && storedPaidCfg.extraListingFee !== null
-          ? Number(storedPaidCfg.extraListingFee)
-          : r.extraListingFee !== undefined && r.extraListingFee !== null
+
+      const resolveNum = (val: any, fallback: number): number => {
+        if (val !== undefined && val !== null && typeof val !== 'boolean' && !isNaN(Number(val)) && isFinite(Number(val))) {
+          return Number(val);
+        }
+        return fallback;
+      };
+      const resolveBool = (val: any, fallback: boolean): boolean => {
+        return typeof val === 'boolean' ? val : fallback;
+      };
+
+      const resolvedFreeLimit = resolveNum(
+        storedPaidCfg.freeListingsLimit,
+        r.freeListingsLimit !== undefined && r.freeListingsLimit !== null
+          ? Number(r.freeListingsLimit)
+          : DEFAULT_PAID_FEATURES_CONFIG.freeListingsLimit
+      );
+      const resolvedExtraFee = resolveNum(
+        storedPaidCfg.extraListingFee,
+        r.extraListingFee !== undefined && r.extraListingFee !== null
           ? Number(r.extraListingFee)
-          : DEFAULT_PAID_FEATURES_CONFIG.extraListingFee;
+          : DEFAULT_PAID_FEATURES_CONFIG.extraListingFee
+      );
+      const resolvedEnablePrivacyChoices = resolveBool(
+        storedPaidCfg.enablePrivacyChoices,
+        true
+      );
+
+      const mergedPaidFeatures = {
+        masterMonetizationEnabled: resolveBool(storedPaidCfg.masterMonetizationEnabled, DEFAULT_PAID_FEATURES_CONFIG.masterMonetizationEnabled),
+        freemiumQuotaEnabled: resolveBool(storedPaidCfg.freemiumQuotaEnabled, DEFAULT_PAID_FEATURES_CONFIG.freemiumQuotaEnabled),
+        freeListingsLimit: resolvedFreeLimit,
+        extraListingFee: resolvedExtraFee,
+        paidSubcategoriesEnabled: resolveBool(storedPaidCfg.paidSubcategoriesEnabled, DEFAULT_PAID_FEATURES_CONFIG.paidSubcategoriesEnabled),
+        defaultSubcategoryFee: resolveNum(storedPaidCfg.defaultSubcategoryFee, DEFAULT_PAID_FEATURES_CONFIG.defaultSubcategoryFee),
+        featuredAdEnabled: resolveBool(storedPaidCfg.featuredAdEnabled, DEFAULT_PAID_FEATURES_CONFIG.featuredAdEnabled),
+        featuredAdPrice: resolveNum(storedPaidCfg.featuredAdPrice, DEFAULT_PAID_FEATURES_CONFIG.featuredAdPrice),
+        featuredAdDurationDays: resolveNum(storedPaidCfg.featuredAdDurationDays, DEFAULT_PAID_FEATURES_CONFIG.featuredAdDurationDays),
+        adBoostEnabled: resolveBool(storedPaidCfg.adBoostEnabled, DEFAULT_PAID_FEATURES_CONFIG.adBoostEnabled),
+        quickBoostPrice: resolveNum(storedPaidCfg.quickBoostPrice, DEFAULT_PAID_FEATURES_CONFIG.quickBoostPrice),
+        spotlightBoostPrice: resolveNum(storedPaidCfg.spotlightBoostPrice, DEFAULT_PAID_FEATURES_CONFIG.spotlightBoostPrice),
+        premiumSurgeBoostPrice: resolveNum(storedPaidCfg.premiumSurgeBoostPrice, DEFAULT_PAID_FEATURES_CONFIG.premiumSurgeBoostPrice),
+        displayAdsEnabled: resolveBool(storedPaidCfg.displayAdsEnabled, DEFAULT_PAID_FEATURES_CONFIG.displayAdsEnabled),
+        headerBannerEnabled: resolveBool(storedPaidCfg.headerBannerEnabled, DEFAULT_PAID_FEATURES_CONFIG.headerBannerEnabled),
+        inFeedBannerEnabled: resolveBool(storedPaidCfg.inFeedBannerEnabled, DEFAULT_PAID_FEATURES_CONFIG.inFeedBannerEnabled),
+        sidebarBannerEnabled: resolveBool(storedPaidCfg.sidebarBannerEnabled, DEFAULT_PAID_FEATURES_CONFIG.sidebarBannerEnabled),
+        bannerDailyRate: resolveNum(storedPaidCfg.bannerDailyRate, DEFAULT_PAID_FEATURES_CONFIG.bannerDailyRate),
+      };
 
       return {
         siteName: r.siteName,
@@ -117,20 +158,17 @@ export class AdminRepository {
         timezone: r.timezone,
         dateFormat: r.dateFormat,
         listingDurationDays: r.listingDurationDays,
-        freeListingsLimit: r.freeListingsLimit,
-        extraListingFee: Number(r.extraListingFee),
+        freeListingsLimit: resolvedFreeLimit,
+        extraListingFee: resolvedExtraFee,
         maxPhotosPerListing: r.maxPhotosPerListing,
         autoApproveVerifiedUsers: r.autoApproveVerifiedUsers,
         maintenanceMode: r.maintenanceMode,
         watermarkImages: r.watermarkImages,
         aiSpamFilterEnabled: r.aiSpamFilterEnabled,
         otpLoginEnabled: r.otpLoginEnabled,
-        paidFeatures: {
-          ...DEFAULT_PAID_FEATURES_CONFIG,
-          ...storedPaidCfg,
-          freeListingsLimit: resolvedFreeLimit,
-          extraListingFee: resolvedExtraFee,
-        },
+        enablePrivacyChoices: resolvedEnablePrivacyChoices,
+        paidFeatures: mergedPaidFeatures,
+        paymentGatewayConfigured,
       };
     } catch (error) {
       console.error('AdminRepository.getSystemSettingsDirect error:', error);
@@ -140,7 +178,11 @@ export class AdminRepository {
 
   public async getSystemSettings(): Promise<SystemSettings> {
     try {
-      return await getCachedSystemSettings();
+      const cached = await getCachedSystemSettings();
+      return {
+        ...cached,
+        paymentGatewayConfigured: Boolean(process.env.PAYMENT_GATEWAY_SECRET?.trim()),
+      };
     } catch (error) {
       console.error('AdminRepository.getSystemSettings error:', error);
       throw new Error('Failed to get system settings', { cause: error });
@@ -164,7 +206,18 @@ export class AdminRepository {
       if (data.watermarkImages !== undefined) fields.watermarkImages = data.watermarkImages;
       if (data.aiSpamFilterEnabled !== undefined) fields.aiSpamFilterEnabled = data.aiSpamFilterEnabled;
       if (data.otpLoginEnabled !== undefined) fields.otpLoginEnabled = data.otpLoginEnabled;
-      if (data.paidFeatures !== undefined) fields.paidFeaturesConfig = data.paidFeatures;
+      if (data.paidFeatures !== undefined || data.enablePrivacyChoices !== undefined) {
+        const current = await this.getSystemSettingsDirect();
+        fields.paidFeaturesConfig = {
+          ...(current.paidFeatures || DEFAULT_PAID_FEATURES_CONFIG),
+          ...(data.paidFeatures || {}),
+          ...(data.enablePrivacyChoices !== undefined
+            ? { enablePrivacyChoices: data.enablePrivacyChoices }
+            : current.enablePrivacyChoices !== undefined
+            ? { enablePrivacyChoices: current.enablePrivacyChoices }
+            : {}),
+        };
+      }
 
       await db
         .insert(schema.systemSettings)

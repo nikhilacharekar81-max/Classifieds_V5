@@ -6,22 +6,36 @@ import { UserAccount } from '@/lib/types';
 export class UserService {
   public async getUsers(
     filter: string = 'all',
-    options?: { includeKycDocuments?: boolean; limit?: number; offset?: number }
+    options?: {
+      includeKycDocuments?: boolean;
+      limit?: number;
+      offset?: number;
+      search?: string;
+      role?: string;
+      status?: string;
+      kycStatus?: string;
+    }
   ): Promise<UserAccount[]> {
-    const all = await userRepository.findAllForAdmin(options);
-    if (filter === 'regular' || filter === 'users') {
-      return all.filter((u) => u.type === 'user');
-    }
-    if (filter === 'businesses') {
-      return all.filter((u) => u.type === 'business');
-    }
-    if (filter === 'verification') {
-      return all.filter((u) => u.kycStatus === 'pending');
-    }
-    if (filter === 'banned') {
-      return all.filter((u) => u.status === 'banned');
-    }
-    return all;
+    const res = await userRepository.findPaginatedForAdmin({
+      filter,
+      ...options,
+      limit: options?.limit ?? 500,
+      offset: options?.offset ?? 0,
+    });
+    return res.users;
+  }
+
+  public async getPaginatedUsers(options?: {
+    filter?: string;
+    search?: string;
+    role?: string;
+    status?: string;
+    kycStatus?: string;
+    includeKycDocuments?: boolean;
+    limit?: number;
+    offset?: number;
+  }) {
+    return await userRepository.findPaginatedForAdmin(options);
   }
 
   public async getUserById(id: string): Promise<UserAccount | null> {

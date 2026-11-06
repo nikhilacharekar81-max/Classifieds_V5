@@ -169,6 +169,7 @@ export const UserPanelPage: React.FC = () => {
     rejected: 0,
   });
   const [loadingSellerListings, setLoadingSellerListings] = useState(false);
+  const [quotaStatus, setQuotaStatus] = useState<'loading' | 'loaded' | 'unavailable'>('loading');
 
   const fetchSellerListings = React.useCallback(
     async (
@@ -179,6 +180,7 @@ export const UserPanelPage: React.FC = () => {
       limit = sellerPageSize
     ) => {
       setLoadingSellerListings(true);
+      setQuotaStatus((prev) => (prev === 'loaded' ? prev : 'loading'));
       try {
         const params = new URLSearchParams();
         params.set('sellerId', sellerId);
@@ -189,7 +191,9 @@ export const UserPanelPage: React.FC = () => {
         params.set('limit', String(limit));
         params.set('offset', String(Math.max(0, (page - 1) * limit)));
 
-        const res = await fetch(`/api/listings?${params.toString()}`);
+        const res = await fetch(`/api/listings?${params.toString()}`, {
+          credentials: 'include',
+        });
         if (res.ok) {
           const data = await res.json();
           if (Array.isArray(data.items)) {
@@ -198,13 +202,22 @@ export const UserPanelPage: React.FC = () => {
             setSellerTotal(total);
             if (data.statusCounts) {
               setSellerStatusCounts(data.statusCounts);
+              if (typeof data.statusCounts.activeQuotaCount === 'number') {
+                setQuotaStatus('loaded');
+              } else {
+                setQuotaStatus('unavailable');
+              }
+            } else {
+              setQuotaStatus('unavailable');
             }
             return { total, items: data.items };
           }
         }
+        setQuotaStatus('unavailable');
         return null;
       } catch (err) {
         console.error('Failed to fetch seller listings:', err);
+        setQuotaStatus('unavailable');
         return null;
       } finally {
         setLoadingSellerListings(false);
@@ -216,6 +229,8 @@ export const UserPanelPage: React.FC = () => {
   React.useEffect(() => {
     if (currentUser?.id) {
       fetchSellerListings(currentUser.id, sellerPage, adStatusFilter, adSearchQuery);
+    } else {
+      setQuotaStatus('unavailable');
     }
   }, [currentUser?.id, sellerPage, adStatusFilter, adSearchQuery, fetchSellerListings]);
 
@@ -234,22 +249,19 @@ export const UserPanelPage: React.FC = () => {
     : currentUser?.id
       ? listings.filter((l) => l.sellerId === currentUser.id)
       : [];
-  const nowMs = Date.now();
-  const fallbackQuotaCount = userListings.filter(
-    (l) =>
-      (l.status === 'approved' || l.status === 'pending') &&
-      (!l.expiresAt || new Date(l.expiresAt).getTime() >= nowMs)
-  ).length;
-  const activeUserApprovedListingsCount =
-    typeof sellerStatusCounts.activeQuotaCount === 'number'
+  // Never fall back to truncated local listings or unfiltered status sums for active quota count (#13)
+  const activeUserApprovedListingsCount: number | null =
+    quotaStatus === 'loaded' && typeof sellerStatusCounts.activeQuotaCount === 'number'
       ? sellerStatusCounts.activeQuotaCount
-      : sellerStatusCounts.approved + sellerStatusCounts.pending > 0
-      ? sellerStatusCounts.approved + sellerStatusCounts.pending
-      : fallbackQuotaCount;
+      : null;
   const freeQuotaLimit = settings.paidFeatures?.freeListingsLimit ?? settings.freeListingsLimit ?? 3;
   const extraListingFeeRate = settings.paidFeatures?.extraListingFee ?? settings.extraListingFee ?? 99;
-  const isQuotaExceeded = activeUserApprovedListingsCount >= freeQuotaLimit;
-  const freeQuotaSlotsRemaining = Math.max(0, freeQuotaLimit - activeUserApprovedListingsCount);
+  const isQuotaExceeded =
+    activeUserApprovedListingsCount !== null && activeUserApprovedListingsCount >= freeQuotaLimit;
+  const freeQuotaSlotsRemaining =
+    activeUserApprovedListingsCount !== null
+      ? Math.max(0, freeQuotaLimit - activeUserApprovedListingsCount)
+      : null;
 
   // When sellerListings is populated from server-side pagination, it is already filtered and paginated
   const filteredUserListings = sellerListings !== null
@@ -480,7 +492,9 @@ export const UserPanelPage: React.FC = () => {
         activeUserId={currentUser?.id || ''}
         currentUser={currentUser}
         userListings={userListings}
+        totalSellerAdsCount={totalSellerAdsCount}
         activeUserApprovedListingsCount={activeUserApprovedListingsCount}
+        quotaStatus={quotaStatus}
         freeQuotaLimit={freeQuotaLimit}
         isQuotaExceeded={isQuotaExceeded}
         onSelectUser={() => {}}
@@ -530,6 +544,7 @@ export const UserPanelPage: React.FC = () => {
             userListings={userListings}
             filteredUserListings={filteredUserListings}
             activeUserApprovedListingsCount={activeUserApprovedListingsCount}
+            quotaStatus={quotaStatus}
             freeQuotaLimit={freeQuotaLimit}
             extraListingFeeRate={extraListingFeeRate}
             isQuotaExceeded={isQuotaExceeded}

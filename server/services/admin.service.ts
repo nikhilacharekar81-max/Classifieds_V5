@@ -318,12 +318,39 @@ export class AdminService {
       validated.maxPhotosPerListing = val;
     }
 
+    const allowedTopLevelKeys = new Set<string>([
+      'siteName',
+      'listingDurationDays',
+      'extraListingFee',
+      'freeListingsLimit',
+      'maxPhotosPerListing',
+      'autoApproveVerifiedUsers',
+      'maintenanceMode',
+      'watermarkImages',
+      'aiSpamFilterEnabled',
+      'otpLoginEnabled',
+      'enablePrivacyChoices',
+      'defaultCurrency',
+      'currencySymbol',
+      'timezone',
+      'dateFormat',
+      'paidFeatures',
+      'paymentGatewayConfigured', // read-only status flag ignored if echoed back
+    ]);
+
+    for (const key of Object.keys(newSettings)) {
+      if (!allowedTopLevelKeys.has(key)) {
+        throw validationErr(`Unrecognized system setting field: '${key}'`);
+      }
+    }
+
     const booleanKeys: Array<keyof SystemSettings> = [
       'autoApproveVerifiedUsers',
       'maintenanceMode',
       'watermarkImages',
       'aiSpamFilterEnabled',
       'otpLoginEnabled',
+      'enablePrivacyChoices',
     ];
     for (const key of booleanKeys) {
       if (newSettings[key] !== undefined) {
@@ -376,7 +403,36 @@ export class AdminService {
         'freemiumQuotaEnabled',
         'paidSubcategoriesEnabled',
         'featuredAdEnabled',
+        'adBoostEnabled',
+        'displayAdsEnabled',
+        'headerBannerEnabled',
+        'inFeedBannerEnabled',
+        'sidebarBannerEnabled',
       ] as const;
+
+      const pfNonNegativeNumberKeys = [
+        'extraListingFee',
+        'defaultSubcategoryFee',
+        'featuredAdPrice',
+        'quickBoostPrice',
+        'spotlightBoostPrice',
+        'premiumSurgeBoostPrice',
+        'bannerDailyRate',
+      ] as const;
+
+      const allowedPaidKeys = new Set<string>([
+        ...pfBooleanKeys,
+        ...pfNonNegativeNumberKeys,
+        'freeListingsLimit',
+        'featuredAdDurationDays',
+      ]);
+
+      for (const k of Object.keys(pf)) {
+        if (!allowedPaidKeys.has(k)) {
+          throw validationErr(`Unrecognized paidFeatures field: 'paidFeatures.${k}'`);
+        }
+      }
+
       for (const k of pfBooleanKeys) {
         if (pf[k] !== undefined) {
           if (typeof pf[k] !== 'boolean') {
@@ -388,7 +444,14 @@ export class AdminService {
 
       if (pf.freeListingsLimit !== undefined) {
         const v = Number(pf.freeListingsLimit);
-        if (typeof pf.freeListingsLimit === 'boolean' || !Number.isInteger(v) || v < 0 || v > 10000) {
+        if (
+          typeof pf.freeListingsLimit === 'boolean' ||
+          pf.freeListingsLimit === null ||
+          pf.freeListingsLimit === '' ||
+          !Number.isInteger(v) ||
+          v < 0 ||
+          v > 10000
+        ) {
           throw validationErr('paidFeatures.freeListingsLimit must be a non-negative integer');
         }
         basePaid.freeListingsLimit = v;
@@ -397,36 +460,38 @@ export class AdminService {
         }
       }
 
-      if (pf.extraListingFee !== undefined) {
-        const v = Number(pf.extraListingFee);
-        if (typeof pf.extraListingFee === 'boolean' || isNaN(v) || !isFinite(v) || v < 0 || v > 1000000) {
-          throw validationErr('paidFeatures.extraListingFee must be a non-negative number');
+      for (const k of pfNonNegativeNumberKeys) {
+        if (pf[k] !== undefined) {
+          const v = Number(pf[k]);
+          if (
+            typeof pf[k] === 'boolean' ||
+            pf[k] === null ||
+            pf[k] === '' ||
+            isNaN(v) ||
+            !isFinite(v) ||
+            v < 0 ||
+            v > 1000000
+          ) {
+            throw validationErr(`paidFeatures.${k} must be a non-negative number`);
+          }
+          const rounded = Number(v.toFixed(2));
+          basePaid[k] = rounded;
+          if (k === 'extraListingFee' && validated.extraListingFee === undefined) {
+            validated.extraListingFee = rounded;
+          }
         }
-        basePaid.extraListingFee = Number(v.toFixed(2));
-        if (validated.extraListingFee === undefined) {
-          validated.extraListingFee = Number(v.toFixed(2));
-        }
-      }
-
-      if (pf.defaultSubcategoryFee !== undefined) {
-        const v = Number(pf.defaultSubcategoryFee);
-        if (typeof pf.defaultSubcategoryFee === 'boolean' || isNaN(v) || !isFinite(v) || v < 0 || v > 1000000) {
-          throw validationErr('paidFeatures.defaultSubcategoryFee must be a non-negative number');
-        }
-        basePaid.defaultSubcategoryFee = Number(v.toFixed(2));
-      }
-
-      if (pf.featuredAdPrice !== undefined) {
-        const v = Number(pf.featuredAdPrice);
-        if (typeof pf.featuredAdPrice === 'boolean' || isNaN(v) || !isFinite(v) || v < 0 || v > 1000000) {
-          throw validationErr('paidFeatures.featuredAdPrice must be a non-negative number');
-        }
-        basePaid.featuredAdPrice = Number(v.toFixed(2));
       }
 
       if (pf.featuredAdDurationDays !== undefined) {
         const v = Number(pf.featuredAdDurationDays);
-        if (typeof pf.featuredAdDurationDays === 'boolean' || !Number.isInteger(v) || v < 1 || v > 365) {
+        if (
+          typeof pf.featuredAdDurationDays === 'boolean' ||
+          pf.featuredAdDurationDays === null ||
+          pf.featuredAdDurationDays === '' ||
+          !Number.isInteger(v) ||
+          v < 1 ||
+          v > 365
+        ) {
           throw validationErr('paidFeatures.featuredAdDurationDays must be an integer between 1 and 365');
         }
         basePaid.featuredAdDurationDays = v;

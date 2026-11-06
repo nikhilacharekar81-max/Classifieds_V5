@@ -79,44 +79,10 @@ export async function checkIsFullyInitialized(executor: SeedDbExecutor = db): Pr
     return false;
   }
 
-  // Once the completion marker ('init_complete_v3') is persisted in system_settings,
-  // verify that core reference tables exist and are populated without re-seeding
-  // individual categories, custom fields, locations, or rules that an admin intentionally deleted.
-  const categoryCountRes = await executor
-    .select({ count: sql<number>`count(*)::int` })
-    .from(schema.categories);
-  if (Number(categoryCountRes[0]?.count || 0) === 0) {
-    return false;
-  }
-
-  const locationCountRes = await executor
-    .select({ count: sql<number>`count(*)::int` })
-    .from(schema.locations);
-  if (Number(locationCountRes[0]?.count || 0) === 0) {
-    return false;
-  }
-
-  const packageCountRes = await executor
-    .select({ count: sql<number>`count(*)::int` })
-    .from(schema.boostPackages);
-  if (Number(packageCountRes[0]?.count || 0) === 0) {
-    return false;
-  }
-
-  const emailTemplateCountRes = await executor
-    .select({ count: sql<number>`count(*)::int` })
-    .from(schema.emailTemplates);
-  if (Number(emailTemplateCountRes[0]?.count || 0) === 0) {
-    return false;
-  }
-
-  const cmsPageCountRes = await executor
-    .select({ count: sql<number>`count(*)::int` })
-    .from(schema.cmsPages);
-  if (Number(cmsPageCountRes[0]?.count || 0) === 0) {
-    return false;
-  }
-
+  // Once the completion marker ('init_complete_v3') is persisted in system_settings at the end of
+  // seedEssentialProductionData(), the database has completed initial bootstrap seeding.
+  // Do NOT require categories (or other admin-manageable tables) to be non-empty (#15), so that
+  // an intentionally emptied category table is preserved as empty instead of re-seeding INITIAL_CATEGORIES.
   return true;
 }
 

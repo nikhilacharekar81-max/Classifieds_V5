@@ -442,6 +442,7 @@ export interface SystemSettings {
   otpLoginEnabled: boolean;
   enablePrivacyChoices?: boolean;
   paidFeatures?: PaidFeaturesConfig;
+  paymentGatewayConfigured?: boolean;
 }
 
 export interface UserGeoLocation {

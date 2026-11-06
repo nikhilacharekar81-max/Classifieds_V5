@@ -123,41 +123,54 @@ export const PostAdPage: React.FC = () => {
   const [paymentMethod, setPaymentMethod] = useState<'upi' | 'card' | 'netbanking'>('upi');
   const [wantFeatured, setWantFeatured] = useState(false);
   const [serverActiveQuotaCount, setServerActiveQuotaCount] = useState<number | null>(null);
+  const [quotaStatus, setQuotaStatus] = useState<'loading' | 'loaded' | 'unavailable'>('loading');
 
   useEffect(() => {
     if (!currentUser?.id) {
       setServerActiveQuotaCount(null);
+      setQuotaStatus('unavailable');
       return;
     }
     let cancelled = false;
-    fetch(`/api/listings?sellerId=${encodeURIComponent(currentUser.id)}&limit=1`)
+    setQuotaStatus('loading');
+    fetch(`/api/listings?sellerId=${encodeURIComponent(currentUser.id)}&limit=1`, {
+      credentials: 'include',
+    })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (!cancelled && data?.statusCounts && typeof data.statusCounts.activeQuotaCount === 'number') {
-          setServerActiveQuotaCount(data.statusCounts.activeQuotaCount);
+        if (cancelled) return;
+        const authoritativeCount = data?.statusCounts?.activeQuotaCount;
+        if (typeof authoritativeCount === 'number' && Number.isFinite(authoritativeCount)) {
+          setServerActiveQuotaCount(authoritativeCount);
+          setQuotaStatus('loaded');
+        } else {
+          setServerActiveQuotaCount(null);
+          setQuotaStatus('unavailable');
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) {
+          setServerActiveQuotaCount(null);
+          setQuotaStatus('unavailable');
+        }
+      });
     return () => {
       cancelled = true;
     };
   }, [currentUser?.id, listings.length]);
 
-  // Freemium Volume Quota calculations (matches server: non-expired approved + pending)
+  // Never fall back to truncated client-side bootstrap listings for quota counts (#13)
   const userActiveListingsCount = useMemo(() => {
-    if (!currentUser?.id) return 0;
-    if (serverActiveQuotaCount !== null) return serverActiveQuotaCount;
-    const now = Date.now();
-    return listings.filter(
-      (l) =>
-        l.sellerId === currentUser.id &&
-        (l.status === 'approved' || l.status === 'pending') &&
-        (!l.expiresAt || new Date(l.expiresAt).getTime() >= now)
-    ).length;
-  }, [listings, currentUser, serverActiveQuotaCount]);
+    if (!currentUser?.id) return null;
+    if (quotaStatus === 'loaded' && serverActiveQuotaCount !== null) {
+      return serverActiveQuotaCount;
+    }
+    return null;
+  }, [currentUser?.id, quotaStatus, serverActiveQuotaCount]);
 
   const paidCfg = settings.paidFeatures;
   const currencySymbol = settings.currencySymbol || '₹';
+  const paymentGatewayConfigured = Boolean(settings.paymentGatewayConfigured);
   const isMasterMonetized = paidCfg ? paidCfg.masterMonetizationEnabled : true;
   const isQuotaEnabled = isMasterMonetized && (paidCfg ? paidCfg.freemiumQuotaEnabled : true);
   const isSubcatFeeEnabled = isMasterMonetized && (paidCfg ? paidCfg.paidSubcategoriesEnabled : true);
@@ -177,9 +190,10 @@ export const PostAdPage: React.FC = () => {
     3;
   const extraListingFeeRate = paidCfg?.extraListingFee ?? settings.extraListingFee ?? 99;
 
-  const isVolumeQuotaExceeded = isQuotaEnabled && userActiveListingsCount >= freeQuotaLimit;
-  const volumeQuotaFee = isVolumeQuotaExceeded ? extraListingFeeRate : 0;
-  const remainingFreeListings = Math.max(0, freeQuotaLimit - userActiveListingsCount);
+  const isVolumeQuotaExceeded =
+    isQuotaEnabled && userActiveListingsCount !== null && userActiveListingsCount >= freeQuotaLimit;
+  const remainingFreeListings =
+    userActiveListingsCount !== null ? Math.max(0, freeQuotaLimit - userActiveListingsCount) : null;
 
   // As-you-type debounced duplicate title check for immediate user feedback
   useEffect(() => {
@@ -215,11 +229,16 @@ export const PostAdPage: React.FC = () => {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [states, cities, postForm.state]);
 
+  const configuredCategoryFee =
+    selectedSubcategory?.postingFee !== undefined && selectedSubcategory?.postingFee !== null
+      ? Number(selectedSubcategory.postingFee)
+      : selectedCategory?.postingFee !== undefined && selectedCategory?.postingFee !== null
+        ? Number(selectedCategory.postingFee)
+        : undefined;
   const rawPostingFee =
-    selectedSubcategory?.postingFee ??
-    selectedCategory?.postingFee ??
-    paidCfg?.defaultSubcategoryFee ??
-    149;
+    configuredCategoryFee !== undefined
+      ? configuredCategoryFee
+      : paidCfg?.defaultSubcategoryFee ?? 149;
   const postingFeeAmount = Math.max(0, Number(rawPostingFee) || 0);
   const effectivePaidFlag =
     selectedSubcategory !== undefined
@@ -227,12 +246,17 @@ export const PostAdPage: React.FC = () => {
         ? Boolean(selectedSubcategory.isPaid)
         : Boolean(selectedCategory?.isPaid)
       : Boolean(selectedCategory?.isPaid);
-  const isPaidSubcategory = isSubcatFeeEnabled && effectivePaidFlag && postingFeeAmount > 0;
+  const isPaidSubcategory =
+    (configuredCategoryFee !== undefined && configuredCategoryFee > 0) ||
+    (isSubcatFeeEnabled && effectivePaidFlag && postingFeeAmount > 0);
 
+  // Paid category/subcategory fees apply independently of free quota; do not double-charge quota fee on paid categories (#2)
+  const volumeQuotaFee = !isPaidSubcategory && isVolumeQuotaExceeded ? extraListingFeeRate : 0;
   const featuredAdPrice = paidCfg?.featuredAdPrice ?? 100;
   const featuredFee = isFeaturedEnabled && wantFeatured ? featuredAdPrice : 0;
   const baseFee = isPaidSubcategory ? postingFeeAmount : 0;
-  const totalFee = isMasterMonetized ? baseFee + volumeQuotaFee + featuredFee : 0;
+  const mandatoryPostingFee = isMasterMonetized ? baseFee + volumeQuotaFee : 0;
+  const totalFee = isMasterMonetized ? mandatoryPostingFee + featuredFee : 0;
   const requiresPayment = totalFee > 0;
 
   const activeCategoryFields = customFields.filter((f) => {
@@ -326,6 +350,16 @@ export const PostAdPage: React.FC = () => {
     }
 
     const listingDurationDays = settings.listingDurationDays || 30;
+    const isAdminActor = currentUser.role === 'admin' || currentUser.role === 'super_admin';
+
+    if (mandatoryPostingFee > 0 && !isAdminActor && !paymentGatewayConfigured) {
+      addToast({
+        title: 'Payment Gateway Not Configured',
+        message: `This listing requires a posting fee of ${currencySymbol}${mandatoryPostingFee}, but online payments are not currently configured.`,
+        type: 'error',
+      });
+      return;
+    }
 
     const { listing: newAd, error, code } = await addListing({
       title: postForm.title,
@@ -340,7 +374,8 @@ export const PostAdPage: React.FC = () => {
       description: postForm.description,
       images: finalImages,
       status: 'pending',
-      isFeatured: false,
+      isFeatured: isAdminActor ? wantFeatured : false,
+      requestedFeatured: !isAdminActor && wantFeatured ? true : undefined,
       featuredUntil: undefined,
       isBoosted: false,
       location: {
@@ -350,10 +385,17 @@ export const PostAdPage: React.FC = () => {
       },
       customAttributes: {
         ...postForm.dynamicAttributes,
-        ...(wantFeatured ? { requestedFeatured: true } : {}),
+        ...(wantFeatured
+          ? {
+              requestedFeatured: true,
+              featuredPaymentStatus: isAdminActor ? 'approved' : 'pending',
+              requestedFeaturedPrice: featuredAdPrice,
+              requestedFeaturedDurationDays: paidCfg?.featuredAdDurationDays ?? 30,
+            }
+          : {}),
       },
       expiresAt: new Date(Date.now() + listingDurationDays * 86400000).toISOString().split('T')[0],
-    });
+    } as any);
 
     if (!newAd) {
       if (code === 'DUPLICATE_TITLE') {
@@ -364,10 +406,10 @@ export const PostAdPage: React.FC = () => {
       return;
     }
 
-    if (wantFeatured) {
+    if (wantFeatured && !isAdminActor) {
       addToast({
         title: 'Standard Listing Submitted (Featured Pending Payment)',
-        message: `Your ad #${newAd.id} was submitted for moderation as a standard listing. The Featured upgrade (${currencySymbol}${featuredAdPrice}) is not active because the payment gateway is not configured.`,
+        message: `Your ad #${newAd.id} was submitted for moderation as a standard listing. The Featured upgrade (${currencySymbol}${featuredAdPrice}) is saved as pending payment verification.`,
         type: 'warning',
       });
     } else if (requiresPayment) {
@@ -377,9 +419,13 @@ export const PostAdPage: React.FC = () => {
         type: 'info',
       });
     } else {
+      const quotaSummary =
+        userActiveListingsCount !== null
+          ? `(${userActiveListingsCount + 1}/${freeQuotaLimit} active ads used)`
+          : `(Free limit: ${freeQuotaLimit} active ads)`;
       addToast({
         title: 'Free Classified Ad Submitted!',
-        message: `Your ad #${newAd.id} was posted using your free quota (${userActiveListingsCount + 1}/${freeQuotaLimit} active ads used). It is now awaiting moderation.`,
+        message: `Your ad #${newAd.id} was posted using your free quota ${quotaSummary}. It is now awaiting moderation.`,
         type: 'success',
       });
     }
@@ -459,6 +505,7 @@ export const PostAdPage: React.FC = () => {
                 isVolumeQuotaExceeded={isVolumeQuotaExceeded}
                 remainingFreeListings={remainingFreeListings}
                 userActiveListingsCount={userActiveListingsCount}
+                quotaStatus={quotaStatus}
                 freeQuotaLimit={freeQuotaLimit}
                 extraListingFeeRate={extraListingFeeRate}
               />
@@ -565,8 +612,9 @@ export const PostAdPage: React.FC = () => {
                 wantFeatured={wantFeatured}
                 currencySymbol={currencySymbol}
                 featuredAdPrice={featuredAdPrice}
-                featuredAdDurationDays={paidCfg?.featuredAdDurationDays || 30}
+                featuredAdDurationDays={paidCfg?.featuredAdDurationDays ?? 30}
                 requiresPayment={requiresPayment}
+                paymentGatewayConfigured={paymentGatewayConfigured}
                 totalFee={totalFee}
                 isPaidSubcategory={isPaidSubcategory}
                 postingFeeAmount={postingFeeAmount}
@@ -574,6 +622,7 @@ export const PostAdPage: React.FC = () => {
                 selectedSubcategory={selectedSubcategory}
                 isVolumeQuotaExceeded={isVolumeQuotaExceeded}
                 userActiveListingsCount={userActiveListingsCount}
+                quotaStatus={quotaStatus}
                 volumeQuotaFee={volumeQuotaFee}
                 freeQuotaLimit={freeQuotaLimit}
                 paymentMethod={paymentMethod}
@@ -603,15 +652,20 @@ export const PostAdPage: React.FC = () => {
                 <button
                   type="submit"
                   className={`px-8 py-3 text-white font-bold rounded-xl shadow-lg text-sm flex items-center gap-2 transition-all cursor-pointer hover:scale-102 ${
-                    requiresPayment
+                    requiresPayment && paymentGatewayConfigured
                       ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/30'
                       : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/30'
                   }`}
                 >
-                  {requiresPayment ? (
+                  {requiresPayment && paymentGatewayConfigured ? (
                     <>
                       <IndianRupee className="w-4 h-4" />
                       <span>Pay ₹{totalFee} & Post Ad Now</span>
+                    </>
+                  ) : wantFeatured && mandatoryPostingFee === 0 ? (
+                    <>
+                      <Upload className="w-4 h-4" />
+                      <span>Post Ad & Save Featured Request</span>
                     </>
                   ) : (
                     <>

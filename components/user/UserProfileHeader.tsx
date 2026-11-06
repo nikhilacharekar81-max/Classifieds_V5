@@ -20,7 +20,9 @@ interface UserProfileHeaderProps {
   activeUserId: string;
   currentUser: UserAccount;
   userListings: Listing[];
-  activeUserApprovedListingsCount: number;
+  totalSellerAdsCount?: number;
+  activeUserApprovedListingsCount: number | null;
+  quotaStatus?: 'loading' | 'loaded' | 'unavailable';
   freeQuotaLimit: number;
   isQuotaExceeded: boolean;
   onSelectUser: (userId: string) => void;
@@ -32,12 +34,17 @@ export const UserProfileHeader: React.FC<UserProfileHeaderProps> = ({
   activeUserId,
   currentUser,
   userListings,
+  totalSellerAdsCount,
   activeUserApprovedListingsCount,
+  quotaStatus = 'loaded',
   freeQuotaLimit,
   isQuotaExceeded,
   onSelectUser,
   onOpenKycModal,
 }) => {
+  const isQuotaLoading = quotaStatus === 'loading';
+  const isQuotaUnavailable =
+    quotaStatus === 'unavailable' || activeUserApprovedListingsCount === null;
   return (
     <>
       {/* Top Header Navigation */}
@@ -146,13 +153,19 @@ export const UserProfileHeader: React.FC<UserProfileHeaderProps> = ({
           {/* Quick Metrics */}
           <div className="flex items-center gap-3 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
             <div className="bg-slate-50 dark:bg-slate-800/60 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700/80 text-center min-w-[90px]">
-              <div className="text-lg font-black text-slate-900 dark:text-white">{userListings.length}</div>
+              <div className="text-lg font-black text-slate-900 dark:text-white">
+                {totalSellerAdsCount !== undefined ? totalSellerAdsCount : userListings.length}
+              </div>
               <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Total Ads</div>
             </div>
 
             <div className="bg-slate-50 dark:bg-slate-800/60 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700/80 text-center min-w-[90px]">
               <div className="text-lg font-black text-emerald-600 dark:text-emerald-400">
-                {activeUserApprovedListingsCount}
+                {isQuotaLoading
+                  ? '...'
+                  : isQuotaUnavailable
+                  ? '—'
+                  : activeUserApprovedListingsCount}
               </div>
               <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Active Live</div>
             </div>
@@ -160,18 +173,36 @@ export const UserProfileHeader: React.FC<UserProfileHeaderProps> = ({
             {/* Freemium Volume Quota Box */}
             <div
               className={`px-4 py-2.5 rounded-xl border text-center min-w-[125px] ${
-                isQuotaExceeded
+                isQuotaLoading || isQuotaUnavailable
+                  ? 'bg-slate-50 dark:bg-slate-800/60 border-slate-300 dark:border-slate-700'
+                  : isQuotaExceeded
                   ? 'bg-amber-50/90 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800'
                   : 'bg-emerald-50/90 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800'
               }`}
             >
               <div className="text-lg font-black tracking-tight flex items-center justify-center gap-1">
-                <span className={isQuotaExceeded ? 'text-amber-700 dark:text-amber-300' : 'text-emerald-700 dark:text-emerald-300'}>
-                  {activeUserApprovedListingsCount} / {freeQuotaLimit}
+                <span
+                  className={
+                    isQuotaLoading || isQuotaUnavailable
+                      ? 'text-slate-600 dark:text-slate-300'
+                      : isQuotaExceeded
+                      ? 'text-amber-700 dark:text-amber-300'
+                      : 'text-emerald-700 dark:text-emerald-300'
+                  }
+                >
+                  {isQuotaLoading
+                    ? `... / ${freeQuotaLimit}`
+                    : isQuotaUnavailable
+                    ? `— / ${freeQuotaLimit}`
+                    : `${activeUserApprovedListingsCount} / ${freeQuotaLimit}`}
                 </span>
               </div>
               <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-400">
-                Free Quota
+                {isQuotaLoading
+                  ? 'Checking Quota'
+                  : isQuotaUnavailable
+                  ? 'Quota Unavailable'
+                  : 'Free Quota'}
               </div>
             </div>
 

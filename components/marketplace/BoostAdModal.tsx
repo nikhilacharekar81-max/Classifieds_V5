@@ -89,13 +89,14 @@ export const BoostAdModal: React.FC<BoostAdModalProps> = ({
   const [upiId, setUpiId] = useState('user@okhdfcbank');
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [completedStep, setCompletedStep] = useState<'selection' | 'success'>('selection');
+  const [completedStep, setCompletedStep] = useState<'selection' | 'success' | 'pending_order'>('selection');
 
   if (!isOpen) return null;
 
   const selectedPackage =
     boostPackages.find((p) => p.id === selectedPackageId) || boostPackages[0];
 
+  const paymentGatewayConfigured = Boolean(app?.settings?.paymentGatewayConfigured);
   const price = selectedPackage?.price || 0;
   const taxAmount = Math.round(price * 0.18);
   const totalPayable = price + taxAmount;
@@ -119,12 +120,41 @@ export const BoostAdModal: React.FC<BoostAdModalProps> = ({
     setErrorMessage(null);
 
     try {
+      if (!paymentGatewayConfigured) {
+        const orderRes = await fetch('/api/boost/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            listingId: listing.id,
+            packageId: selectedPackage.id,
+            paymentMethod,
+          }),
+        });
+        const orderData = await orderRes.json().catch(() => ({}));
+        if (!orderRes.ok || !orderData.success) {
+          setErrorMessage(
+            orderData.error || orderData.message || 'Unable to record pending boost order.'
+          );
+          setIsProcessing(false);
+          return;
+        }
+        setCompletedStep('pending_order');
+        setIsProcessing(false);
+        dispatchPublicToast({
+          type: 'warning',
+          title: 'Boost Order Saved (Payment Pending)',
+          message: `Your boost order for "${listing.title}" is saved as pending because the payment gateway is not configured.`,
+        });
+        return;
+      }
+
       if (app?.boostListing) {
         const result = await app.boostListing(listing.id, selectedPackage.id, paymentMethod, {
           paymentId: `placeholder_${Date.now()}`,
           signature: 'placeholder_signature',
           amount: totalPayable,
-          currency: 'INR'
+          currency: 'INR',
         });
         if (!result.success) {
           setErrorMessage(result.message);
@@ -198,7 +228,33 @@ export const BoostAdModal: React.FC<BoostAdModalProps> = ({
 
         {/* Content */}
         <div className="p-6 space-y-6 flex-1">
-          {completedStep === 'success' ? (
+          {completedStep === 'pending_order' ? (
+            <div className="text-center py-6 space-y-4">
+              <div className="w-16 h-16 bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 rounded-full flex items-center justify-center mx-auto ring-8 ring-amber-50 dark:ring-amber-900/30">
+                <Clock className="w-8 h-8" />
+              </div>
+              <div>
+                <h4 className="text-xl font-black text-slate-900 dark:text-white">
+                  Boost Order Saved (Pending Payment)
+                </h4>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 max-w-md mx-auto">
+                  Your boost request for{' '}
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
+                    &quot;{listing.title}&quot;
+                  </span>{' '}
+                  has been recorded as pending payment verification because the payment gateway is not currently configured.
+                </p>
+              </div>
+              <div className="pt-4">
+                <button
+                  onClick={onClose}
+                  className="w-full py-3 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-sm transition-all shadow-md cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          ) : completedStep === 'success' ? (
             <div className="text-center py-6 space-y-4">
               <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto ring-8 ring-emerald-50 dark:ring-emerald-900/30">
                 <CheckCircle2 className="w-8 h-8" />
@@ -380,64 +436,73 @@ export const BoostAdModal: React.FC<BoostAdModalProps> = ({
                 )}
               </div>
 
-              <div>
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block mb-2">
-                  Select Payment Method
-                </label>
+              {paymentGatewayConfigured ? (
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block mb-2">
+                    Select Payment Method
+                  </label>
 
-                <div className="grid grid-cols-3 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('upi')}
-                    className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
-                      paymentMethod === 'upi'
-                        ? 'border-indigo-600 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 ring-1 ring-indigo-600'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
-                    }`}
-                  >
-                    <QrCode className="w-4 h-4" />
-                    <span>Instant UPI</span>
-                  </button>
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('upi')}
+                      className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                        paymentMethod === 'upi'
+                          ? 'border-indigo-600 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 ring-1 ring-indigo-600'
+                          : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <QrCode className="w-4 h-4" />
+                      <span>Instant UPI</span>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('card')}
-                    className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
-                      paymentMethod === 'card'
-                        ? 'border-indigo-600 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 ring-1 ring-indigo-600'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
-                    }`}
-                  >
-                    <CreditCard className="w-4 h-4" />
-                    <span>Cards</span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('card')}
+                      className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                        paymentMethod === 'card'
+                          ? 'border-indigo-600 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 ring-1 ring-indigo-600'
+                          : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <CreditCard className="w-4 h-4" />
+                      <span>Cards</span>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('netbanking')}
-                    className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
-                      paymentMethod === 'netbanking'
-                        ? 'border-indigo-600 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 ring-1 ring-indigo-600'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
-                    }`}
-                  >
-                    <Building className="w-4 h-4" />
-                    <span>Netbanking</span>
-                  </button>
-                </div>
-
-                {paymentMethod === 'upi' && (
-                  <div className="mt-2.5">
-                    <input
-                      type="text"
-                      value={upiId}
-                      onChange={(e) => setUpiId(e.target.value)}
-                      placeholder="Virtual Payment Address (e.g. mobile@upi)"
-                      className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                    />
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('netbanking')}
+                      className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                        paymentMethod === 'netbanking'
+                          ? 'border-indigo-600 bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 ring-1 ring-indigo-600'
+                          : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <Building className="w-4 h-4" />
+                      <span>Netbanking</span>
+                    </button>
                   </div>
-                )}
-              </div>
+
+                  {paymentMethod === 'upi' && (
+                    <div className="mt-2.5">
+                      <input
+                        type="text"
+                        value={upiId}
+                        onChange={(e) => setUpiId(e.target.value)}
+                        placeholder="Virtual Payment Address (e.g. mobile@upi)"
+                        className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
+                  <div>
+                    <span className="font-bold">Payment Gateway Not Configured:</span> Online payment checkout is not enabled. Your boost request can be saved as a pending order and will activate only after payment is verified.
+                  </div>
+                </div>
+              )}
 
               <div className="bg-slate-50 dark:bg-slate-800/40 rounded-xl p-3.5 border border-slate-200 dark:border-slate-700 text-xs space-y-1.5">
                 <div className="flex justify-between text-slate-600 dark:text-slate-400">
@@ -449,7 +514,7 @@ export const BoostAdModal: React.FC<BoostAdModalProps> = ({
                   <span>₹{taxAmount}</span>
                 </div>
                 <div className="flex justify-between text-sm font-black border-t border-slate-200 dark:border-slate-700 pt-2 text-slate-900 dark:text-white">
-                  <span>Total Amount Payable:</span>
+                  <span>{paymentGatewayConfigured ? 'Total Amount Payable:' : 'Total Pending Amount:'}</span>
                   <span className="text-indigo-600 dark:text-indigo-400">₹{totalPayable}</span>
                 </div>
               </div>
@@ -471,21 +536,30 @@ export const BoostAdModal: React.FC<BoostAdModalProps> = ({
                   {isProcessing ? (
                     <span className="flex items-center gap-2">
                       <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                      Confirming Secure Payment...
+                      {paymentGatewayConfigured ? 'Confirming Secure Payment...' : 'Saving Pending Boost Order...'}
                     </span>
                   ) : isAlreadyBoosted ? (
                     'Boost Already Active on this Ad'
-                  ) : (
+                  ) : paymentGatewayConfigured ? (
                     <>
                       <Rocket className="w-4 h-4 text-amber-300" />
                       <span>Pay ₹{totalPayable} &amp; Boost Ad Now</span>
+                    </>
+                  ) : (
+                    <>
+                      <Rocket className="w-4 h-4 text-amber-300" />
+                      <span>Save Boost Order (₹{totalPayable} Pending Payment)</span>
                     </>
                   )}
                 </button>
 
                 <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400 mt-2">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                  <span>256-Bit Encrypted Payment • Instant Rank Elevation</span>
+                  <span>
+                    {paymentGatewayConfigured
+                      ? '256-Bit Encrypted Payment • Instant Rank Elevation'
+                      : 'Verified Payment Required Before Boost Activation'}
+                  </span>
                 </div>
               </div>
             </>

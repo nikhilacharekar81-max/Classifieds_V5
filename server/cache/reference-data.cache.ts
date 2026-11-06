@@ -69,8 +69,8 @@ export async function enqueueDurableInvalidation(
   const id = `outbox_${tag}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const executor = tx ?? db;
 
-  const performUpsert = () =>
-    executor
+  const performUpsert = async (): Promise<{ id: string; attempts: number }[]> => {
+    const updated = await executor
       .insert(cacheInvalidationOutbox)
       .values({
         id,
@@ -90,11 +90,30 @@ export async function enqueueDurableInvalidation(
           lastError: null,
           completedAt: null,
         },
+        // Coalesce concurrent invalidations (#5): if the tag is already 'pending' with no error backoff,
+        // skip the redundant row write/lock while still bumping generation if 'completed', 'processing', or in retry backoff.
+        where: sql`"cache_invalidation_outbox"."status" <> 'pending' OR "cache_invalidation_outbox"."last_error" IS NOT NULL`,
       })
       .returning({
         id: cacheInvalidationOutbox.id,
         attempts: cacheInvalidationOutbox.attempts,
       });
+
+    if (updated.length > 0) {
+      return updated;
+    }
+
+    const existing = await executor
+      .select({
+        id: cacheInvalidationOutbox.id,
+        attempts: cacheInvalidationOutbox.attempts,
+      })
+      .from(cacheInvalidationOutbox)
+      .where(eq(cacheInvalidationOutbox.tag, tag))
+      .limit(1);
+
+    return existing.length > 0 ? existing : [{ id, attempts: 1 }];
+  };
 
   let res: { id: string; attempts: number }[];
   if (tx) {
@@ -102,7 +121,7 @@ export async function enqueueDurableInvalidation(
   } else {
     res = await withDbRetry(performUpsert);
   }
-  
+
   ensureOutboxRetryWorkerStarted();
   return { id: res[0].id, generation: res[0].attempts };
 }
@@ -753,26 +772,22 @@ export async function invalidateLiveListingCountsCache(): Promise<void> {
 
     try {
       if (success) {
+        // Avoid unconditional hot-row upsert on every successful listing count invalidation (#5).
+        // Only update the outbox row if a non-completed entry exists for this tag.
         await withDbRetry(async () =>
           await db
-            .insert(cacheInvalidationOutbox)
-            .values({
-              id,
-              tag,
+            .update(cacheInvalidationOutbox)
+            .set({
               status: 'completed',
-              attempts: 1,
               lastError: null,
-              nextRetryAt: now,
               completedAt: now,
             })
-            .onConflictDoUpdate({
-              target: cacheInvalidationOutbox.tag,
-              set: {
-                status: 'completed',
-                lastError: null,
-                completedAt: now,
-              },
-            })
+            .where(
+              and(
+                eq(cacheInvalidationOutbox.tag, tag),
+                sql`"cache_invalidation_outbox"."status" <> 'completed'`
+              )
+            )
         );
       } else {
         hasKnownPendingOutboxEntries = true;

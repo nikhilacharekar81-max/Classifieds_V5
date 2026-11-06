@@ -31,7 +31,7 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
   onClose,
   onSuccess,
 }) => {
-  const { featureListing, addToast, settings } = useApp();
+  const { featureListing, updateListing, currentUser, addToast, settings } = useApp();
 
   const [selectedPlan, setSelectedPlan] = useState<{
     id: string;
@@ -81,31 +81,67 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
   ];
 
   const currencySymbol = settings.currencySymbol || '₹';
+  const paymentGatewayConfigured = Boolean(settings.paymentGatewayConfigured);
+  const isActualAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
   const taxAmount = Math.round(selectedPlan.price * 0.18);
   const totalPayable = selectedPlan.price + taxAmount;
 
-  const handleActivateFeature = () => {
+  const handleActivateFeature = async () => {
     setIsProcessing(true);
 
-    setTimeout(() => {
-      // Calculate future expiry date
-      const futureDate = new Date();
-      futureDate.setDate(futureDate.getDate() + selectedPlan.days);
-      const formattedUntil = futureDate.toISOString().split('T')[0];
+    try {
+      if (isActualAdmin) {
+        const futureDate = new Date();
+        futureDate.setDate(futureDate.getDate() + selectedPlan.days);
+        const formattedUntil = futureDate.toISOString().split('T')[0];
 
-      // Update listing featured status
-      featureListing(listing.id, true);
+        featureListing(listing.id, true);
+
+        setIsProcessing(false);
+        addToast({
+          type: 'success',
+          title: '⭐ Ad Featured (Admin Override)',
+          message: `"${listing.title.substring(0, 30)}..." is now Featured for ${selectedPlan.days} days until ${formattedUntil}.`,
+        });
+
+        if (onSuccess) onSuccess();
+        onClose();
+        return;
+      }
+
+      // Ordinary sellers cannot activate Featured without verified payment (#2B & #14).
+      // Save the pending featured request on the listing so it awaits verified payment.
+      await updateListing({
+        ...listing,
+        customAttributes: {
+          ...(listing.customAttributes || {}),
+          requestedFeatured: true,
+          featuredPaymentStatus: 'pending',
+          requestedFeaturedPlanId: selectedPlan.id,
+          requestedFeaturedDays: selectedPlan.days,
+          requestedFeaturedPrice: selectedPlan.price,
+        },
+      });
 
       setIsProcessing(false);
       addToast({
-        type: 'success',
-        title: '⭐ Ad Featured Successfully!',
-        message: `"${listing.title.substring(0, 30)}..." is now Featured for ${selectedPlan.days} days until ${formattedUntil}.`,
+        type: 'warning',
+        title: 'Featured Request Saved (Pending Payment)',
+        message: paymentGatewayConfigured
+          ? `Your ${selectedPlan.days}-day Featured upgrade request (${currencySymbol}${totalPayable}) has been recorded and requires verified payment before activation.`
+          : `Your ${selectedPlan.days}-day Featured upgrade request (${currencySymbol}${totalPayable}) has been saved as pending because the online payment gateway is not configured.`,
       });
 
       if (onSuccess) onSuccess();
       onClose();
-    }, 800);
+    } catch (err: any) {
+      setIsProcessing(false);
+      addToast({
+        type: 'error',
+        title: 'Unable to Save Featured Request',
+        message: err?.message || 'An unexpected error occurred while saving your request.',
+      });
+    }
   };
 
   return (
@@ -222,58 +258,69 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
           </div>
         </div>
 
-        {/* Step 2: Payment Method */}
+        {/* Step 2: Payment Method (Gated on paymentGatewayConfigured) */}
         <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
-          <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-            Select Payment Method:
-          </label>
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              type="button"
-              onClick={() => setPaymentMethod('upi')}
-              className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors ${
-                paymentMethod === 'upi'
-                  ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-500'
-                  : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50'
-              }`}
-            >
-              <QrCode className="w-4 h-4" /> Instant UPI / QR
-            </button>
-            <button
-              type="button"
-              onClick={() => setPaymentMethod('card')}
-              className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors ${
-                paymentMethod === 'card'
-                  ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-500'
-                  : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50'
-              }`}
-            >
-              <CreditCard className="w-4 h-4" /> Debit / Credit
-            </button>
-            <button
-              type="button"
-              onClick={() => setPaymentMethod('netbanking')}
-              className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors ${
-                paymentMethod === 'netbanking'
-                  ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-500'
-                  : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50'
-              }`}
-            >
-              <Building className="w-4 h-4" /> NetBanking
-            </button>
-          </div>
-
-          {paymentMethod === 'upi' && (
-            <div className="p-3 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 space-y-1.5">
-              <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300">
-                UPI ID (GPay / PhonePe / Paytm):
+          {paymentGatewayConfigured ? (
+            <>
+              <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Select Payment Method:
               </label>
-              <input
-                type="text"
-                value={upiId}
-                onChange={(e) => setUpiId(e.target.value)}
-                className="w-full text-xs font-mono border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              />
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod('upi')}
+                  className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors ${
+                    paymentMethod === 'upi'
+                      ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-500'
+                      : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50'
+                  }`}
+                >
+                  <QrCode className="w-4 h-4" /> Instant UPI / QR
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod('card')}
+                  className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors ${
+                    paymentMethod === 'card'
+                      ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-500'
+                      : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50'
+                  }`}
+                >
+                  <CreditCard className="w-4 h-4" /> Debit / Credit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod('netbanking')}
+                  className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors ${
+                    paymentMethod === 'netbanking'
+                      ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-500'
+                      : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50'
+                  }`}
+                >
+                  <Building className="w-4 h-4" /> NetBanking
+                </button>
+              </div>
+
+              {paymentMethod === 'upi' && (
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 space-y-1.5">
+                  <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                    UPI ID (GPay / PhonePe / Paytm):
+                  </label>
+                  <input
+                    type="text"
+                    value={upiId}
+                    onChange={(e) => setUpiId(e.target.value)}
+                    className="w-full text-xs font-mono border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  />
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold">Payment Gateway Not Configured:</span> Online payment checkout is not currently enabled. Your Featured upgrade request will be saved as pending payment verification and will not activate until payment is completed.
+              </div>
             </div>
           )}
         </div>
@@ -306,7 +353,15 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
               className="px-6 py-2.5 bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-400 hover:from-amber-500 hover:to-yellow-500 text-slate-950 font-black text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer w-1/2 sm:w-auto"
             >
               <Sparkles className="w-4 h-4 fill-slate-950" />
-              <span>{isProcessing ? 'Activating Feature...' : `Feature Now (${currencySymbol}${totalPayable})`}</span>
+              <span>
+                {isProcessing
+                  ? 'Saving...'
+                  : isActualAdmin
+                  ? `Activate Feature (${currencySymbol}${totalPayable})`
+                  : paymentGatewayConfigured
+                  ? `Request Feature (${currencySymbol}${totalPayable})`
+                  : `Save Featured Request (${currencySymbol}${totalPayable} Pending)`}
+              </span>
             </button>
           </div>
         </div>

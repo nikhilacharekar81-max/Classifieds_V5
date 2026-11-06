@@ -6,6 +6,7 @@ import { invalidateLiveListingCountsCache } from '@/server/cache/reference-data.
 import { PromotionalPackage, OrderTransaction, BoostAnalyticsSummary, Listing } from '@/lib/types';
 import crypto from 'node:crypto';
 import { db } from '@/src/db/index';
+import * as schema from '@/src/db/schema';
 import { sql } from '@/src/db/pg-orm';
 
 
@@ -753,37 +754,40 @@ export class BoostService {
   }
 
   public async getBoostAnalytics(): Promise<BoostAnalyticsSummary> {
-    const allTransactions = await boostRepository.findAllTransactions();
-    const allListingsRes = await listingRepository.findMarketplaceListings({ limit: 1000 });
-    const allListings = allListingsRes.items;
+    // Compute analytics directly via SQL aggregate queries across the full tables (#17)
+    // instead of summing truncated 500/1000-row slices in memory.
+    const [txAggRows, listingAggRows] = await Promise.all([
+      db
+        .select({
+          totalTxCount: sql<number>`count(*)::int`,
+          totalRevenue: sql<number>`coalesce(sum(case when ${schema.boostTransactions.status} = 'completed' then coalesce(${schema.boostTransactions.totalAmount}, ${schema.boostTransactions.amount}, 0) else 0 end), 0)::float`,
+        })
+        .from(schema.boostTransactions),
+      db
+        .select({
+          activeBoostsCount: sql<number>`coalesce(sum(case when ${schema.listings.isBoosted} = true and (${schema.listings.boostExpiresAt} is null or ${schema.listings.boostExpiresAt} > now()) then 1 else 0 end), 0)::int`,
+          expiredBoostsCount: sql<number>`coalesce(sum(case when ${schema.listings.boostStatus} = 'expired' or (${schema.listings.isBoosted} = true and ${schema.listings.boostExpiresAt} <= now()) then 1 else 0 end), 0)::int`,
+          totalDurationHours: sql<number>`coalesce(sum(coalesce(${schema.listings.boostDurationHours}, 0)), 0)::int`,
+          boostedAdViews: sql<number>`coalesce(sum(coalesce(${schema.listings.boostViews}, 0)), 0)::int`,
+          boostedAdImpressions: sql<number>`coalesce(sum(coalesce(${schema.listings.boostImpressions}, 0)), 0)::int`,
+          boostedAdClicks: sql<number>`coalesce(sum(coalesce(${schema.listings.boostClicks}, 0)), 0)::int`,
+        })
+        .from(schema.listings),
+    ]);
 
-    let totalRevenue = 0;
-    for (const tx of allTransactions) {
-      if (tx.status === 'completed') {
-        totalRevenue += tx.totalAmount || tx.amount || 0;
-      }
-    }
+    const txAgg = (txAggRows as any[])[0] || {};
+    const listingAgg = (listingAggRows as any[])[0] || {};
 
-    let activeBoostsCount = 0;
-    let expiredBoostsCount = 0;
-    let totalDurationHours = 0;
-    let boostedAdViews = 0;
-    let boostedAdImpressions = 0;
-    let boostedAdClicks = 0;
+    const totalRevenue = Number(txAgg.totalRevenue) || 0;
+    const totalTxCount = Number(txAgg.totalTxCount) || 0;
+    const activeBoostsCount = Number(listingAgg.activeBoostsCount) || 0;
+    const expiredBoostsCount = Number(listingAgg.expiredBoostsCount) || 0;
+    const totalDurationHours = Number(listingAgg.totalDurationHours) || 0;
+    const boostedAdViews = Number(listingAgg.boostedAdViews) || 0;
+    const boostedAdImpressions = Number(listingAgg.boostedAdImpressions) || 0;
+    const boostedAdClicks = Number(listingAgg.boostedAdClicks) || 0;
 
-    for (const listing of allListings) {
-      if (listing.isBoosted) {
-        activeBoostsCount++;
-      } else if (listing.boostStatus === 'expired') {
-        expiredBoostsCount++;
-      }
-      totalDurationHours += listing.boostDurationHours || 0;
-      boostedAdViews += listing.boostViews || 0;
-      boostedAdImpressions += listing.boostImpressions || 0;
-      boostedAdClicks += listing.boostClicks || 0;
-    }
-
-    const totalBoosts = activeBoostsCount + expiredBoostsCount || allTransactions.length;
+    const totalBoosts = Math.max(activeBoostsCount + expiredBoostsCount, totalTxCount);
     const avgDurationHours = totalBoosts > 0 ? Math.round(totalDurationHours / totalBoosts) : 24;
 
     return {
@@ -798,8 +802,8 @@ export class BoostService {
     };
   }
 
-  public async getAllTransactions(): Promise<OrderTransaction[]> {
-    return await boostRepository.findAllTransactions();
+  public async getAllTransactions(limit = 500, offset = 0): Promise<OrderTransaction[]> {
+    return await boostRepository.findAllTransactions(limit, offset);
   }
 }
 

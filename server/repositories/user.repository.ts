@@ -1,6 +1,6 @@
 import { db, withDbRetry } from '@/src/db/index';
 import * as schema from '@/src/db/schema';
-import { eq, desc, and, ne, gt, isNull, sql } from '@/src/db/pg-orm';
+import { eq, desc, and, ne, gt, isNull, inArray, sql } from '@/src/db/pg-orm';
 import { UserAccount } from '@/lib/types';
 
 export class UserRepository {
@@ -151,12 +151,14 @@ export class UserRepository {
         db
           .select()
           .from(schema.users)
-          .orderBy(desc(schema.users.createdAt))
+          .orderBy(desc(schema.users.createdAt), desc(schema.users.id))
           .limit(safeLimit)
           .offset(safeOffset)
       )) as any[];
       const users = rows.map((r) => this.mapRowToUser(r));
+      if (users.length === 0) return [];
 
+      const userIds = users.map((u) => u.id);
       try {
         const listingStatsRows = (await withDbRetry(() =>
           db
@@ -166,6 +168,7 @@ export class UserRepository {
               active: sql<number>`sum(case when ${schema.listings.status} = 'approved' and ${schema.listings.expiresAt} >= now() then 1 else 0 end)::int`,
             })
             .from(schema.listings)
+            .where(inArray(schema.listings.sellerId, userIds))
             .groupBy(schema.listings.sellerId)
         )) as any[];
 
@@ -197,58 +200,188 @@ export class UserRepository {
     }
   }
 
-  public async findAllForAdmin(options?: {
+  public async findPaginatedForAdmin(options?: {
+    filter?: string;
+    search?: string;
+    role?: string;
+    status?: string;
+    kycStatus?: string;
     includeKycDocuments?: boolean;
     limit?: number;
     offset?: number;
-  }): Promise<UserAccount[]> {
+  }): Promise<{
+    users: UserAccount[];
+    total: number;
+    limit: number;
+    offset: number;
+    counts: {
+      all: number;
+      users: number;
+      businesses: number;
+      verification: number;
+      banned: number;
+    };
+  }> {
     const includeKyc = options?.includeKycDocuments ?? true;
-    const safeLimit = Math.min(Math.max(1, Number(options?.limit) || 500), 1000);
+    const safeLimit = Math.min(Math.max(1, Number(options?.limit) || 50), 1000);
     const safeOffset = Math.max(0, Number(options?.offset) || 0);
+    const filter = options?.filter || 'all';
+
     try {
-      const users = await this.findAll(safeLimit, safeOffset);
+      const conditions: any[] = [];
+      if (filter === 'regular' || filter === 'users') {
+        conditions.push(eq(schema.users.type, 'user'));
+      } else if (filter === 'businesses') {
+        conditions.push(eq(schema.users.type, 'business'));
+      } else if (filter === 'verification') {
+        conditions.push(eq(schema.users.kycStatus, 'pending'));
+      } else if (filter === 'banned') {
+        conditions.push(eq(schema.users.status, 'banned'));
+      }
+
+      if (options?.role && options.role !== 'all') {
+        if (options.role === 'user' || options.role === 'business') {
+          conditions.push(eq(schema.users.type, options.role));
+        } else {
+          conditions.push(eq(schema.users.adminRole, options.role));
+        }
+      }
+      if (options?.status && options.status !== 'all') {
+        conditions.push(eq(schema.users.status, options.status));
+      }
+      if (options?.kycStatus && options.kycStatus !== 'all') {
+        conditions.push(eq(schema.users.kycStatus, options.kycStatus));
+      }
+      if (options?.search && options.search.trim()) {
+        const pattern = `%${options.search.trim().toLowerCase()}%`;
+        conditions.push(
+          sql`(LOWER("users"."name") LIKE ${pattern} OR LOWER("users"."email") LIKE ${pattern} OR LOWER(COALESCE("users"."phone", '')) LIKE ${pattern} OR LOWER(COALESCE("users"."city", '')) LIKE ${pattern} OR LOWER("users"."id") LIKE ${pattern})`
+        );
+      }
+
+      const whereClause =
+        conditions.length === 0
+          ? undefined
+          : conditions.length === 1
+          ? conditions[0]
+          : and(...conditions);
+
+      const [countsRows, filteredCountRows, rows] = await Promise.all([
+        withDbRetry(() =>
+          db
+            .select({
+              all: sql<number>`count(*)::int`,
+              users: sql<number>`sum(case when ${schema.users.type} = 'user' then 1 else 0 end)::int`,
+              businesses: sql<number>`sum(case when ${schema.users.type} = 'business' then 1 else 0 end)::int`,
+              verification: sql<number>`sum(case when ${schema.users.kycStatus} = 'pending' then 1 else 0 end)::int`,
+              banned: sql<number>`sum(case when ${schema.users.status} = 'banned' then 1 else 0 end)::int`,
+            })
+            .from(schema.users)
+        ),
+        whereClause
+          ? withDbRetry(() =>
+              db
+                .select({ total: sql<number>`count(*)::int` })
+                .from(schema.users)
+                .where(whereClause)
+            )
+          : Promise.resolve(null),
+        withDbRetry(() => {
+          const q = db.select().from(schema.users);
+          const filtered = whereClause ? q.where(whereClause) : q;
+          return filtered
+            .orderBy(desc(schema.users.createdAt), desc(schema.users.id))
+            .limit(safeLimit)
+            .offset(safeOffset);
+        }),
+      ]);
+
+      const rawCounts = (countsRows as any[])[0] || {};
+      const counts = {
+        all: Number(rawCounts.all) || 0,
+        users: Number(rawCounts.users) || 0,
+        businesses: Number(rawCounts.businesses) || 0,
+        verification: Number(rawCounts.verification) || 0,
+        banned: Number(rawCounts.banned) || 0,
+      };
+      const total = filteredCountRows
+        ? Number((filteredCountRows as any[])[0]?.total) || 0
+        : counts.all;
+
+      const baseUsers = (rows as any[]).map((r) => this.mapRowToUser(r));
+      if (baseUsers.length === 0) {
+        return { users: [], total, limit: safeLimit, offset: safeOffset, counts };
+      }
+
+      const userIds = baseUsers.map((u) => u.id);
+
+      const [listingStatsRows, kycRows, sessionRows] = await Promise.all([
+        withDbRetry(() =>
+          db
+            .select({
+              sellerId: schema.listings.sellerId,
+              total: sql<number>`count(*)::int`,
+              active: sql<number>`sum(case when ${schema.listings.status} = 'approved' and ${schema.listings.expiresAt} >= now() then 1 else 0 end)::int`,
+            })
+            .from(schema.listings)
+            .where(inArray(schema.listings.sellerId, userIds))
+            .groupBy(schema.listings.sellerId)
+        ).catch(() => []),
+        includeKyc
+          ? withDbRetry(() =>
+              db
+                .select()
+                .from(schema.kycDocuments)
+                .where(inArray(schema.kycDocuments.userId, userIds))
+                .orderBy(desc(schema.kycDocuments.submittedAt))
+            ).catch(() => [])
+          : Promise.resolve([]),
+        withDbRetry(() =>
+          db
+            .select({
+              userId: schema.userSessions.userId,
+              ipAddress: schema.userSessions.ipAddress,
+            })
+            .from(schema.userSessions)
+            .where(inArray(schema.userSessions.userId, userIds))
+            .orderBy(desc(schema.userSessions.createdAt))
+        ).catch(() => []),
+      ]);
+
+      const statsMap = new Map<string, { total: number; active: number }>();
+      for (const row of listingStatsRows as any[]) {
+        if (row.sellerId) {
+          statsMap.set(row.sellerId, {
+            total: Number(row.total) || 0,
+            active: Number(row.active) || 0,
+          });
+        }
+      }
 
       const kycByUserId = new Map<string, typeof schema.kycDocuments.$inferSelect>();
       if (includeKyc) {
-        const kycRows = (await withDbRetry(() =>
-          db
-            .select()
-            .from(schema.kycDocuments)
-            .orderBy(desc(schema.kycDocuments.submittedAt))
-            .limit(1000)
-        )) as any[];
-
-        for (const kyc of kycRows) {
+        for (const kyc of kycRows as any[]) {
           if (!kycByUserId.has(kyc.userId)) {
             kycByUserId.set(kyc.userId, kyc);
           }
         }
       }
 
-      // Query most recent recorded IP address from user_sessions per user
-      const sessionRows = (await withDbRetry(() =>
-        db
-          .select({
-            userId: schema.userSessions.userId,
-            ipAddress: schema.userSessions.ipAddress,
-          })
-          .from(schema.userSessions)
-          .orderBy(desc(schema.userSessions.createdAt))
-          .limit(1000)
-      )) as any[];
-
       const ipByUserId = new Map<string, string>();
-      for (const sess of sessionRows) {
+      for (const sess of sessionRows as any[]) {
         if (sess.userId && !ipByUserId.has(sess.userId) && sess.ipAddress && sess.ipAddress !== 'unknown') {
           ipByUserId.set(sess.userId, sess.ipAddress);
         }
       }
 
-      return users.map((u) => {
+      const enrichedUsers = baseUsers.map((u) => {
+        const stats = statsMap.get(u.id);
         const kyc = includeKyc ? kycByUserId.get(u.id) : undefined;
         const lastIp = ipByUserId.get(u.id) || 'Not recorded';
         const base: UserAccount = {
           ...u,
+          totalListings: stats?.total ?? 0,
+          activeListings: stats?.active ?? 0,
           lastIp,
         };
         if (kyc) {
@@ -268,10 +401,36 @@ export class UserRepository {
         }
         return base;
       });
+
+      return {
+        users: enrichedUsers,
+        total,
+        limit: safeLimit,
+        offset: safeOffset,
+        counts,
+      };
     } catch (error) {
-      console.error('UserRepository.findAllForAdmin error:', error);
-      return await this.findAll(safeLimit, safeOffset);
+      console.error('UserRepository.findPaginatedForAdmin error:', error);
+      throw new Error('Failed to find users for admin', { cause: error });
     }
+  }
+
+  public async findAllForAdmin(options?: {
+    filter?: string;
+    search?: string;
+    role?: string;
+    status?: string;
+    kycStatus?: string;
+    includeKycDocuments?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<UserAccount[]> {
+    const res = await this.findPaginatedForAdmin({
+      ...options,
+      limit: options?.limit ?? 500,
+      offset: options?.offset ?? 0,
+    });
+    return res.users;
   }
 
   public async findByIdForAdmin(id: string, includeKycDocument: boolean = false): Promise<UserAccount | null> {

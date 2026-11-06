@@ -8,12 +8,16 @@ import * as schema from '@/src/db/schema';
 import { eq, desc, and } from '@/src/db/pg-orm';
 
 export class ModerationService {
-  public async getReports(statusFilter?: string): Promise<ReportItem[]> {
-    const all = await moderationRepository.findAllReports();
-    if (statusFilter && statusFilter !== 'all') {
-      return all.filter((r) => r.status === statusFilter);
-    }
-    return all;
+  public async getReports(
+    statusFilter?: string,
+    limit = 500,
+    offset = 0
+  ): Promise<ReportItem[]> {
+    return await moderationRepository.findAllReports(limit, offset, statusFilter);
+  }
+
+  public async countReports(statusFilter?: string): Promise<number> {
+    return await moderationRepository.countReports(statusFilter);
   }
 
   public async submitReport(data: {
@@ -71,8 +75,8 @@ export class ModerationService {
   }
 
   // Rules
-  public async getRules(): Promise<ModerationRule[]> {
-    return await moderationRepository.findAllRules();
+  public async getRules(limit = 200, offset = 0): Promise<ModerationRule[]> {
+    return await moderationRepository.findAllRules(limit, offset);
   }
 
   public async addRule(
@@ -112,13 +116,23 @@ export class ModerationService {
     return updated ? updated.isActive : false;
   }
 
-  public async getBanAppeals(statusFilter?: string): Promise<any[]> {
+  public async getBanAppeals(
+    statusFilter?: string,
+    limit = 500,
+    offset = 0
+  ): Promise<any[]> {
     try {
-      const rows = await db.select().from(schema.banAppeals).orderBy(desc(schema.banAppeals.createdAt));
-      if (statusFilter && statusFilter !== 'all') {
-        return rows.filter((r) => r.status === statusFilter);
-      }
-      return rows;
+      const safeLimit = Math.min(Math.max(1, Number(limit) || 500), 1000);
+      const safeOffset = Math.max(0, Number(offset) || 0);
+      const baseQuery = db.select().from(schema.banAppeals);
+      const filteredQuery =
+        statusFilter && statusFilter !== 'all'
+          ? baseQuery.where(eq(schema.banAppeals.status, statusFilter))
+          : baseQuery;
+      return await filteredQuery
+        .orderBy(desc(schema.banAppeals.createdAt))
+        .limit(safeLimit)
+        .offset(safeOffset);
     } catch (error) {
       console.error('ModerationService.getBanAppeals error:', error);
       return [];
