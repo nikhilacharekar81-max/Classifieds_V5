@@ -7,10 +7,21 @@ interface CacheEntry {
   value: any;
   expiresAt: number | null;
   tags: string[];
+  version: number;
 }
 
 const dataCacheStore = new Map<string, CacheEntry>();
 const tagIndex = new Map<string, Set<string>>();
+const tagVersions = new Map<string, number>();
+
+async function ensureTagVersionsLoaded(tags: string[]): Promise<void> {
+  for (const tag of tags) {
+    if (!tagVersions.has(tag)) {
+      const res = await db.select().from(schema.cacheVersions).where(eq(schema.cacheVersions.tag, tag)).limit(1);
+      tagVersions.set(tag, res[0]?.version || 1);
+    }
+  }
+}
 
 export function unstable_cache<T extends (...args: any[]) => Promise<any>>(
   fn: T,
@@ -22,6 +33,7 @@ export function unstable_cache<T extends (...args: any[]) => Promise<any>>(
   const revalidateSeconds = options?.revalidate;
 
   const wrapped = async (...args: any[]) => {
+    await ensureTagVersionsLoaded(tags);
     let serializedArgs = '';
     try {
       serializedArgs = JSON.stringify(args);
@@ -32,7 +44,18 @@ export function unstable_cache<T extends (...args: any[]) => Promise<any>>(
     const now = Date.now();
     const existing = dataCacheStore.get(cacheKey);
 
-    if (existing && (existing.expiresAt === null || existing.expiresAt > now)) {
+    // Verify tag versions
+    let isStale = false;
+    if (existing) {
+      for (const tag of existing.tags) {
+        if (tagVersions.get(tag) !== existing.version) {
+          isStale = true;
+          break;
+        }
+      }
+    }
+
+    if (existing && !isStale && (existing.expiresAt === null || existing.expiresAt > now)) {
       return existing.value;
     }
 
@@ -42,10 +65,13 @@ export function unstable_cache<T extends (...args: any[]) => Promise<any>>(
         ? now + revalidateSeconds * 1000
         : null;
 
+    const entryVersion = tags.length > 0 ? Math.max(...tags.map(t => tagVersions.get(t) || 1)) : 1;
+    
     dataCacheStore.set(cacheKey, {
       value: result,
       expiresAt,
       tags,
+      version: entryVersion,
     });
 
     for (const tag of tags) {
@@ -63,7 +89,21 @@ export function unstable_cache<T extends (...args: any[]) => Promise<any>>(
   return wrapped as T;
 }
 
-export function revalidateTag(tag: string): void {
+export async function revalidateTag(tag: string): Promise<void> {
+  // Update version in DB
+  await db
+    .insert(schema.cacheVersions)
+    .values({ tag, version: 1 })
+    .onConflictDoUpdate({
+      target: schema.cacheVersions.tag,
+      set: { version: sql`version + 1`, updatedAt: new Date() }
+    });
+  
+  // Refresh local version
+  const res = await db.select().from(schema.cacheVersions).where(eq(schema.cacheVersions.tag, tag)).limit(1);
+  tagVersions.set(tag, res[0]?.version || 1);
+
+  // Clear local cache
   const keys = tagIndex.get(tag);
   if (keys) {
     for (const key of keys) {

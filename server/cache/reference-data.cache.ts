@@ -38,7 +38,7 @@ let hasKnownPendingOutboxEntries = true;
 function tryHealInvalidationTag(tag: string): void {
   if (!failedInvalidationTags.has(tag)) return;
   try {
-    revalidateTag(tag);
+    await revalidateTag(tag);
     failedInvalidationTags.delete(tag);
     recordDurableInvalidation(tag, true).catch(() => {});
   } catch (err) {
@@ -122,7 +122,13 @@ export async function recordDurableInvalidation(
             lastError: null,
             completedAt: now,
           })
-          .where(and(eq(cacheInvalidationOutbox.id, eventId), eq(cacheInvalidationOutbox.status, 'processing')));
+          .where(
+            and(
+              eq(cacheInvalidationOutbox.id, eventId),
+              eq(cacheInvalidationOutbox.status, 'processing'),
+              expectedGeneration !== undefined ? eq(cacheInvalidationOutbox.attempts, expectedGeneration) : sql`TRUE`
+            )
+          );
 
         if (updated.length === 0) {
           // If no event found to update, insert as a completed event directly.
@@ -599,7 +605,7 @@ export async function invalidateCategoryReferenceCache(tx?: DbExecutor): Promise
     let success = false;
     let errStr: string | undefined;
     try {
-      revalidateTag(tag);
+      await revalidateTag(tag);
       failedInvalidationTags.delete(tag);
       success = true;
     } catch (error: any) {
@@ -640,7 +646,7 @@ export async function invalidateLocationReferenceCache(tx?: DbExecutor): Promise
     let success = false;
     let errStr: string | undefined;
     try {
-      revalidateTag(tag);
+      await revalidateTag(tag);
       failedInvalidationTags.delete(tag);
       success = true;
     } catch (error: any) {
@@ -676,7 +682,7 @@ export async function invalidateSettingsReferenceCache(tx?: DbExecutor): Promise
   let success = false;
   let errStr: string | undefined;
   try {
-    revalidateTag(REFERENCE_CACHE_TAGS.SETTINGS);
+    await revalidateTag(REFERENCE_CACHE_TAGS.SETTINGS);
     failedInvalidationTags.delete(REFERENCE_CACHE_TAGS.SETTINGS);
     success = true;
   } catch (error: any) {
@@ -712,7 +718,7 @@ export async function invalidateLiveListingCountsCache(): Promise<void> {
   }
 
   try {
-    revalidateTag(REFERENCE_CACHE_TAGS.LISTING_COUNTS);
+    await revalidateTag(REFERENCE_CACHE_TAGS.LISTING_COUNTS);
     failedInvalidationTags.delete(REFERENCE_CACHE_TAGS.LISTING_COUNTS);
     success = true;
   } catch (error: any) {
