@@ -37,7 +37,7 @@ export async function uploadImage(file: File): Promise<string> {
 
   const filename = `${crypto.randomUUID()}_${Date.now()}.${ext}`;
 
-  if (process.env.AWS_BUCKET_NAME && process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+  if (process.env.S3_BUCKET_NAME && process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
     const s3Client = new S3Client({
       region: process.env.AWS_REGION || 'us-east-1',
       credentials: {
@@ -48,13 +48,13 @@ export async function uploadImage(file: File): Promise<string> {
     const key = `listings/${filename}`;
     await s3Client.send(
       new PutObjectCommand({
-        Bucket: process.env.AWS_BUCKET_NAME,
+        Bucket: process.env.S3_BUCKET_NAME,
         Key: key,
         Body: buffer,
         ContentType: contentType,
       })
     );
-    return `https://${process.env.AWS_BUCKET_NAME}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${key}`;
+    return `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${key}`;
   } else {
     const uploadDir = path.resolve(process.cwd(), 'public', 'uploads');
     if (!fs.existsSync(uploadDir)) {

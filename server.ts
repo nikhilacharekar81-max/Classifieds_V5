@@ -201,15 +201,21 @@ async function startServer() {
   app.all('/api/auth/logout-all', createExpressRouteHandler(authLogoutAllRoute));
   app.all('/api/auth/unsubscribe', createExpressRouteHandler(authUnsubscribeRoute));
 
-  // Listings Routes
+  // Listings Routes (Sensitive)
   app.all('/api/listings/create-order', createExpressRouteHandler(listingsCreateOrderRoute));
   app.all('/api/listings/upload', createExpressRouteHandler(listingsUploadRoute));
   app.all('/api/listings/check-duplicate', createExpressRouteHandler(listingsCheckDuplicateRoute));
   app.all('/api/listings/bulk-action', createExpressRouteHandler(listingsBulkActionRoute));
   app.all('/api/listings/:id/reveal-phone', createExpressRouteHandler(listingsRevealPhoneRoute));
   app.all('/api/listings/:id/favorite', createExpressRouteHandler(listingsFavoriteRoute));
-  app.all('/api/listings/:id', createExpressRouteHandler(listingsByIdRoute));
-  app.all('/api/listings', createExpressRouteHandler(listingsRoute));
+  app.all('/api/listings/:id', (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    next();
+  }, createExpressRouteHandler(listingsByIdRoute));
+  app.all('/api/listings', (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    next();
+  }, createExpressRouteHandler(listingsRoute));
 
   // Boost & Monetization Routes
   app.all('/api/boost/packages/:id', createExpressRouteHandler(boostPackageByIdRoute));
@@ -223,7 +229,10 @@ async function startServer() {
   app.all('/api/chat', createExpressRouteHandler(chatRoute));
   app.all('/api/reports', createExpressRouteHandler(reportsRoute));
   app.all('/api/user/kyc', createExpressRouteHandler(userKycRoute));
-  app.all('/api/user/account', createExpressRouteHandler(userAccountRoute));
+  app.all('/api/user/account', (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    next();
+  }, createExpressRouteHandler(userAccountRoute));
 
   // SEO robots.txt
   app.get('/robots.txt', (req, res) => {

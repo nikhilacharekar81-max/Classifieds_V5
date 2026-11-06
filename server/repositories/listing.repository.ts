@@ -633,6 +633,9 @@ export class ListingRepository {
 
   public async bulkDelete(ids: string[]): Promise<{ deletedCount: number }> {
     try {
+      await db.delete(schema.boostTransactions).where(inArray(schema.boostTransactions.listingId, ids));
+      await db.delete(schema.boostOrders).where(inArray(schema.boostOrders.listingId, ids));
+
       const res = await db
         .delete(schema.listings)
         .where(inArray(schema.listings.id, ids))

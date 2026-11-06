@@ -1256,6 +1256,10 @@ export class ListingService {
       throw new Error('Unauthorized: You do not own this listing');
     }
 
+    // Delete related boost transactions first to avoid FK violations
+    await db.delete(schema.boostTransactions).where(eq(schema.boostTransactions.listingId, id));
+    await db.delete(schema.boostOrders).where(eq(schema.boostOrders.listingId, id));
+
     const deleted = await listingRepository.delete(id);
     if (deleted) {
       await invalidateLiveListingCountsCache();

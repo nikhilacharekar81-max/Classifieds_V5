@@ -405,6 +405,11 @@ export async function ensurePgSchemaApplied(): Promise<void> {
       } catch {
         // Ignore if already dropped or table created without NOT NULL
       }
+      // Custom indices for production performance
+      await adminPool.query(`CREATE INDEX IF NOT EXISTS idx_listings_seller_id ON listings (seller_id)`);
+      await adminPool.query(`CREATE INDEX IF NOT EXISTS idx_boost_orders_listing_id_status ON boost_orders (listing_id, status)`);
+      await adminPool.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_target_id ON audit_logs (target_id)`);
+      await adminPool.query(`CREATE INDEX IF NOT EXISTS idx_email_logs_listing_id ON email_logs (listing_id)`);
     } finally {
       await adminPool.end().catch(() => {});
     }
