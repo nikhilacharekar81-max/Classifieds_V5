@@ -551,11 +551,18 @@ export class ListingService {
           }
 
           // Verify server-side posting order exists and belongs to seller
-          await tx.execute(sql`SELECT order_id FROM posting_orders WHERE order_id = ${orderId} FOR UPDATE`);
+          await tx.execute(
+            sql`SELECT order_id FROM posting_orders WHERE order_id = ${orderId} OR provider_order_id = ${orderId} FOR UPDATE`
+          );
           const orderRows = await tx
             .select()
             .from(schema.postingOrders)
-            .where(eq(schema.postingOrders.orderId, orderId))
+            .where(
+              or(
+                eq(schema.postingOrders.orderId, orderId),
+                eq(schema.postingOrders.providerOrderId, orderId)
+              )
+            )
             .limit(1);
 
           const postingOrder = orderRows[0];
@@ -584,9 +591,10 @@ export class ListingService {
             throw new Error(`AMOUNT_MISMATCH:Order amount ₹${postingOrder.amount} does not match required fee ₹${postingFee}`);
           }
 
-          // Cryptographic signature verification
+          // Cryptographic signature verification against Razorpay provider order ID
+          const razorpayOrderIdForSignature = postingOrder.providerOrderId || postingOrder.orderId;
           const isSignatureValid = boostService.verifyPaymentSignature({
-            orderId,
+            orderId: razorpayOrderIdForSignature,
             paymentId,
             signature,
           });
@@ -597,7 +605,8 @@ export class ListingService {
           // Independent payment-provider capture verification (valid signature alone is not proof of capture)
           const captureVerification = await boostService.verifyCapturedPaymentEvent(
             {
-              orderId,
+              orderId: postingOrder.orderId,
+              providerOrderId: postingOrder.providerOrderId || undefined,
               paymentId,
               paymentGateway,
               expectedAmount: postingFee,

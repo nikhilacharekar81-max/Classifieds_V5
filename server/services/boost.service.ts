@@ -612,8 +612,17 @@ export class BoostService {
     ).trim();
 
     const eventId = String(
-      params.eventId || body.event_id || body.id || `evt_${crypto.randomUUID()}`
+      params.eventId ||
+      body.event_id ||
+      body.id ||
+      (paymentId && (providerOrderId || internalOrderId)
+        ? `razorpay_${eventType || 'capture'}_${providerOrderId || internalOrderId}_${paymentId}`
+        : '')
     ).trim();
+
+    if (!eventId) {
+      return { success: false, message: 'Missing stable event identifier for idempotency', status: 400 };
+    }
 
     const gateway = String(params.paymentGateway || 'Razorpay').trim();
 
@@ -621,14 +630,14 @@ export class BoostService {
       return { success: false, message: 'Missing required Razorpay paymentId or orderId in webhook payload', status: 400 };
     }
 
-    // Razorpay amounts are in paise (divide by 100 to get INR rupees)
+    // Razorpay payment entity amounts are always in paise (divide by 100 to get INR rupees)
     let verifiedAmount: number | undefined = undefined;
     if (typeof paymentEntity.amount === 'number' && paymentEntity.amount > 0) {
-      verifiedAmount = paymentEntity.amount > 1000 ? paymentEntity.amount / 100 : paymentEntity.amount;
+      verifiedAmount = paymentEntity.amount / 100;
     } else if (typeof params.amount === 'number') {
-      verifiedAmount = params.amount > 1000 ? params.amount / 100 : params.amount;
+      verifiedAmount = params.amount;
     } else if (typeof body.amount === 'number') {
-      verifiedAmount = body.amount > 1000 ? body.amount / 100 : body.amount;
+      verifiedAmount = body.amount;
     }
 
     const verifiedCurrency = String(
