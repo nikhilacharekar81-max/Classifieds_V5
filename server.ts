@@ -25,6 +25,7 @@ import * as authVerifyEmailRequestRoute from './server/api/auth/verify-email/req
 import * as authVerifyEmailConfirmRoute from './server/api/auth/verify-email/confirm/route.ts';
 import * as authLogoutAllRoute from './server/api/auth/logout-all/route.ts';
 import * as listingsRoute from './server/api/listings/route.ts';
+import * as listingsUploadRoute from './server/api/listings/upload/route.ts';
 import * as listingsByIdRoute from './server/api/listings/[id]/route.ts';
 import * as listingsRevealPhoneRoute from './server/api/listings/[id]/reveal-phone/route.ts';
 import * as listingsCheckDuplicateRoute from './server/api/listings/check-duplicate/route.ts';
@@ -123,6 +124,7 @@ async function startServer() {
   app.all('/api/auth/logout-all', createExpressRouteHandler(authLogoutAllRoute));
 
   // Listings Routes
+  app.all('/api/listings/upload', createExpressRouteHandler(listingsUploadRoute));
   app.all('/api/listings/check-duplicate', createExpressRouteHandler(listingsCheckDuplicateRoute));
   app.all('/api/listings/bulk-action', createExpressRouteHandler(listingsBulkActionRoute));
   app.all('/api/listings/:id/reveal-phone', createExpressRouteHandler(listingsRevealPhoneRoute));

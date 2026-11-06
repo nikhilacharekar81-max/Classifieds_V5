@@ -500,6 +500,8 @@ export class ListingRepository {
     customAttributes?: Record<string, any>;
     status?: string;
     expiresAt?: Date;
+    isFeatured?: boolean;
+    isBoosted?: boolean;
   }): Promise<Listing> {
     try {
       const exp = data.expiresAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
@@ -524,6 +526,8 @@ export class ListingRepository {
             longitude: data.longitude || null,
             images: data.images || [],
             customAttributes: data.customAttributes || {},
+            isFeatured: data.isFeatured ?? false,
+            isBoosted: data.isBoosted ?? false,
             status: data.status || 'pending',
             expiresAt: exp,
           })

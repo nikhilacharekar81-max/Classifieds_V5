@@ -85,15 +85,15 @@ export async function enqueueDurableInvalidation(
         generation: cacheInvalidationOutbox.attempts,
       });
 
-  let res: { id: string; generation: number }[];
+  let res: { id: string }[];
   if (tx) {
     res = await performUpsert();
   } else {
     res = await withDbRetry(performUpsert);
   }
-
+  
   ensureOutboxRetryWorkerStarted();
-  return { id, generation: res?.[0]?.generation };
+  return { id: res[0].id };
 }
 
 /**
