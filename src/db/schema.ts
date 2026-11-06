@@ -459,6 +459,12 @@ export const cacheInvalidationOutbox = pgTable(
   ]
 );
 
+export const cacheVersions = pgTable('cache_versions', {
+  tag: varchar('tag', { length: 128 }).primaryKey(),
+  version: integer('version').notNull().default(1),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 // 24. Ban Appeals
 export const banAppeals = pgTable('ban_appeals', {
   id: varchar('id', { length: 64 }).primaryKey(),

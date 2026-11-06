@@ -21,7 +21,14 @@ export async function uploadImage(file: File): Promise<string> {
   const isPng = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
   const isWebp = buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50;
 
-  if (!isJpeg && !isPng && !isWebp) {
+  let contentType: string;
+  if (isJpeg) {
+    contentType = 'image/jpeg';
+  } else if (isPng) {
+    contentType = 'image/png';
+  } else if (isWebp) {
+    contentType = 'image/webp';
+  } else {
     throw new Error('Invalid image format');
   }
 
@@ -32,7 +39,7 @@ export async function uploadImage(file: File): Promise<string> {
       Bucket: process.env.AWS_BUCKET_NAME,
       Key: key,
       Body: buffer,
-      ContentType: file.type,
+      ContentType: contentType,
     })
   );
 

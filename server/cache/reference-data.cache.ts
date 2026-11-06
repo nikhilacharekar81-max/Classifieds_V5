@@ -25,6 +25,7 @@ export const REFERENCE_CACHE_TAGS = {
   LOCATIONS: 'marketplace-locations',
   SETTINGS: 'marketplace-settings',
   LISTING_COUNTS: 'marketplace-live-counts',
+  CACHE_VERSIONS: 'cache-versions',
 } as const;
 
 /**
@@ -65,14 +66,14 @@ export async function enqueueDurableInvalidation(
 ): Promise<{ id: string; generation?: number }> {
   hasKnownPendingOutboxEntries = true;
   const now = new Date();
-  const id = `outbox_${tag}`;
+  const id = `outbox_${tag}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const executor = tx ?? db;
 
   const performUpsert = () =>
     executor
       .insert(cacheInvalidationOutbox)
       .values({
-        id: `outbox_${tag}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        id,
         tag,
         status: 'pending',
         attempts: 1,
@@ -82,10 +83,10 @@ export async function enqueueDurableInvalidation(
       })
       .returning({
         id: cacheInvalidationOutbox.id,
-        generation: cacheInvalidationOutbox.attempts,
+        attempts: cacheInvalidationOutbox.attempts,
       });
 
-  let res: { id: string }[];
+  let res: { id: string; attempts: number }[];
   if (tx) {
     res = await performUpsert();
   } else {
@@ -93,7 +94,7 @@ export async function enqueueDurableInvalidation(
   }
   
   ensureOutboxRetryWorkerStarted();
-  return { id: res[0].id, generation: res[0].generation };
+  return { id: res[0].id, generation: res[0].attempts };
 }
 
 /**
@@ -105,15 +106,24 @@ export async function recordDurableInvalidation(
   success: boolean,
   errMessage?: string,
   tx?: DbExecutor,
-  expectedGeneration?: number
+  expectedGeneration?: number,
+  eventId?: string
 ): Promise<void> {
   try {
     const now = new Date();
-    const id = `outbox_${tag}`;
     const executor = tx ?? db;
 
     const performRecord = async () => {
       if (success) {
+        const whereClause = eventId 
+            ? eq(cacheInvalidationOutbox.id, eventId)
+            : and(
+              eq(cacheInvalidationOutbox.tag, tag),
+              expectedGeneration !== undefined
+                ? eq(cacheInvalidationOutbox.attempts, expectedGeneration)
+                : eq(cacheInvalidationOutbox.status, 'pending')
+            );
+
         const updated = await executor
           .update(cacheInvalidationOutbox)
           .set({
@@ -121,21 +131,14 @@ export async function recordDurableInvalidation(
             lastError: null,
             completedAt: now,
           })
-          .where(
-            and(
-              eq(cacheInvalidationOutbox.tag, tag),
-              expectedGeneration !== undefined
-                ? eq(cacheInvalidationOutbox.attempts, expectedGeneration)
-                : eq(cacheInvalidationOutbox.status, 'pending')
-            )
-          )
+          .where(whereClause)
           .returning({ id: cacheInvalidationOutbox.id });
 
-        if (updated.length === 0 && expectedGeneration === undefined) {
+        if (updated.length === 0 && !eventId) {
           await executor
             .insert(cacheInvalidationOutbox)
             .values({
-              id,
+              id: `outbox_${tag}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
               tag,
               status: 'completed',
               attempts: 1,
@@ -145,25 +148,26 @@ export async function recordDurableInvalidation(
             })
             .onConflictDoNothing();
         }
+      } else if (eventId) {
+        await executor
+          .update(cacheInvalidationOutbox)
+          .set({
+            status: 'pending',
+            attempts: sql`${cacheInvalidationOutbox.attempts} + 1`,
+            lastError: errMessage || 'Failed to revalidate cache tag',
+            nextRetryAt: new Date(Date.now() + 30000),
+          })
+          .where(eq(cacheInvalidationOutbox.id, eventId));
       } else {
         await executor
           .insert(cacheInvalidationOutbox)
           .values({
-            id,
+            id: `outbox_${tag}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
             tag,
             status: 'pending',
             attempts: 1,
             lastError: errMessage || 'Failed to revalidate cache tag',
             nextRetryAt: new Date(Date.now() + 30000),
-          })
-          .onConflictDoUpdate({
-            target: cacheInvalidationOutbox.tag,
-            set: {
-              status: 'pending',
-              attempts: sql`${cacheInvalidationOutbox.attempts} + 1`,
-              lastError: errMessage || 'Failed to revalidate cache tag',
-              nextRetryAt: new Date(Date.now() + 30000),
-            },
           });
       }
     };
@@ -593,8 +597,10 @@ export async function invalidateCategoryReferenceCache(tx?: DbExecutor): Promise
   ];
   for (const tag of tagsToInvalidate) {
     let generation: number | undefined;
+    let eventId: string | undefined;
     try {
       const enqueueRes = await enqueueDurableInvalidation(tag, tx);
+      eventId = enqueueRes.id;
       generation = enqueueRes.generation;
     } catch (e) {
       console.error(`[ReferenceCache] Failed to enqueue durable outbox for tag "${tag}":`, e);
@@ -613,7 +619,7 @@ export async function invalidateCategoryReferenceCache(tx?: DbExecutor): Promise
     }
 
     try {
-      await recordDurableInvalidation(tag, success, errStr, tx, generation);
+      await recordDurableInvalidation(tag, success, errStr, tx, generation, eventId);
     } catch (outboxErr) {
       console.error(`[ReferenceCache] Error recording outbox completion for "${tag}":`, outboxErr);
     }
@@ -632,8 +638,10 @@ export async function invalidateLocationReferenceCache(tx?: DbExecutor): Promise
   ];
   for (const tag of tagsToInvalidate) {
     let generation: number | undefined;
+    let eventId: string | undefined;
     try {
       const enqueueRes = await enqueueDurableInvalidation(tag, tx);
+      eventId = enqueueRes.id;
       generation = enqueueRes.generation;
     } catch (e) {
       console.error(`[ReferenceCache] Failed to enqueue durable outbox for tag "${tag}":`, e);
@@ -652,7 +660,7 @@ export async function invalidateLocationReferenceCache(tx?: DbExecutor): Promise
     }
 
     try {
-      await recordDurableInvalidation(tag, success, errStr, tx, generation);
+      await recordDurableInvalidation(tag, success, errStr, tx, generation, eventId);
     } catch (outboxErr) {
       console.error(`[ReferenceCache] Error recording outbox completion for "${tag}":`, outboxErr);
     }
@@ -666,8 +674,10 @@ export async function invalidateLocationReferenceCache(tx?: DbExecutor): Promise
 
 export async function invalidateSettingsReferenceCache(tx?: DbExecutor): Promise<void> {
   let generation: number | undefined;
+  let eventId: string | undefined;
   try {
     const enqueueRes = await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.SETTINGS, tx);
+    eventId = enqueueRes.id;
     generation = enqueueRes.generation;
   } catch (e) {
     console.error(`[ReferenceCache] Failed to enqueue durable outbox for settings:`, e);
@@ -686,7 +696,7 @@ export async function invalidateSettingsReferenceCache(tx?: DbExecutor): Promise
   }
 
   try {
-    await recordDurableInvalidation(REFERENCE_CACHE_TAGS.SETTINGS, success, errStr, tx, generation);
+    await recordDurableInvalidation(REFERENCE_CACHE_TAGS.SETTINGS, success, errStr, tx, generation, eventId);
   } catch (outboxErr) {
     console.error('[ReferenceCache] Error recording outbox for settings:', outboxErr);
   }
@@ -700,6 +710,17 @@ export async function invalidateSettingsReferenceCache(tx?: DbExecutor): Promise
 export async function invalidateLiveListingCountsCache(): Promise<void> {
   let success = false;
   let errStr: string | undefined = undefined;
+  let eventId: string | undefined;
+  let generation: number | undefined;
+
+  try {
+    const enqueueRes = await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS);
+    eventId = enqueueRes.id;
+    generation = enqueueRes.generation;
+  } catch (e) {
+    console.error(`[ReferenceCache] Failed to enqueue durable outbox for tag "${REFERENCE_CACHE_TAGS.LISTING_COUNTS}":`, e);
+  }
+
   try {
     revalidateTag(REFERENCE_CACHE_TAGS.LISTING_COUNTS);
     failedInvalidationTags.delete(REFERENCE_CACHE_TAGS.LISTING_COUNTS);
@@ -715,7 +736,7 @@ export async function invalidateLiveListingCountsCache(): Promise<void> {
     console.error('[ReferenceCache] Failed to revalidate root layout path after listing count mutation:', error);
   }
   try {
-    await recordDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS, success, errStr);
+    await recordDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS, success, errStr, undefined, generation, eventId);
   } catch (outboxErr) {
     console.error('[ReferenceCache] Error recording outbox invalidation:', outboxErr);
   }
