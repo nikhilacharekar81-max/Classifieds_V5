@@ -38,6 +38,12 @@ const EMAIL_MIGRATION_SQL = `
       "updated_at" timestamp with time zone DEFAULT now() NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS "cache_versions" (
+      "tag" varchar(128) PRIMARY KEY NOT NULL,
+      "version" integer NOT NULL DEFAULT 1,
+      "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+  );
+
   UPDATE "listings" SET "status" = 'expired' WHERE "status" IN ('approved', 'pending') AND "expires_at" <= NOW();
   DROP INDEX IF EXISTS "idx_unique_active_ad_title_per_seller";
   CREATE UNIQUE INDEX IF NOT EXISTS "idx_unique_active_ad_title_per_seller" ON "listings" ("seller_id", LOWER(REGEXP_REPLACE(TRIM("title"), '\\s+', ' ', 'g'))) WHERE "status" IN ('approved', 'pending');

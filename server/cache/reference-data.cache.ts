@@ -35,12 +35,12 @@ export const REFERENCE_CACHE_TAGS = {
 const failedInvalidationTags = new Set<string>();
 let hasKnownPendingOutboxEntries = true;
 
-function tryHealInvalidationTag(tag: string): void {
+async function tryHealInvalidationTag(tag: string): Promise<void> {
   if (!failedInvalidationTags.has(tag)) return;
   try {
     await revalidateTag(tag);
     failedInvalidationTags.delete(tag);
-    recordDurableInvalidation(tag, true).catch(() => {});
+    await recordDurableInvalidation(tag, true).catch(() => {});
   } catch (err) {
     console.error(`[ReferenceCache] Deferred revalidation retry failed for tag "${tag}":`, err);
   }
@@ -125,26 +125,33 @@ export async function recordDurableInvalidation(
           .where(
             and(
               eq(cacheInvalidationOutbox.id, eventId),
-              eq(cacheInvalidationOutbox.status, 'processing'),
+              inArray(cacheInvalidationOutbox.status, ['pending', 'processing']),
               expectedGeneration !== undefined ? eq(cacheInvalidationOutbox.attempts, expectedGeneration) : sql`TRUE`
             )
           );
 
         if (updated.length === 0) {
-          // If no event found to update, insert as a completed event directly.
-          await executor
-            .insert(cacheInvalidationOutbox)
-            .values({
-              id: eventId || `outbox_${tag}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-              tag,
-              status: 'completed',
-              attempts: 1,
-              lastError: null,
-              nextRetryAt: now,
-              completedAt: now,
-            });
+          // If no pending/processing event found to update, insert as completed if ID exists
+          if (eventId) {
+              await executor
+                .insert(cacheInvalidationOutbox)
+                .values({
+                  id: eventId,
+                  tag,
+                  status: 'completed',
+                  attempts: expectedGeneration || 1,
+                  lastError: null,
+                  nextRetryAt: now,
+                  completedAt: now,
+                })
+                .onConflictDoUpdate({
+                  target: cacheInvalidationOutbox.id,
+                  set: { status: 'completed', completedAt: now, lastError: null }
+                });
+          }
         }
       } else if (eventId) {
+        // Failure path: only update if still owned by 'processing' lease
         await executor
           .update(cacheInvalidationOutbox)
           .set({
@@ -153,7 +160,13 @@ export async function recordDurableInvalidation(
             lastError: errMessage || 'Failed to revalidate cache tag',
             nextRetryAt: new Date(Date.now() + 30000),
           })
-          .where(eq(cacheInvalidationOutbox.id, eventId));
+          .where(
+            and(
+                eq(cacheInvalidationOutbox.id, eventId),
+                eq(cacheInvalidationOutbox.status, 'processing'),
+                expectedGeneration !== undefined ? eq(cacheInvalidationOutbox.attempts, expectedGeneration) : sql`TRUE`
+            )
+          );
       } else {
         await executor
           .insert(cacheInvalidationOutbox)
@@ -250,7 +263,7 @@ export async function processPendingInvalidations(): Promise<void> {
       const currentAttempts = lockResult[0].attempts;
 
       try {
-        revalidateTag(entry.tag);
+        await revalidateTag(entry.tag);
         failedInvalidationTags.delete(entry.tag);
 
         await withDbRetry(() =>

@@ -3,6 +3,10 @@
  * for Vite + Express + PostgreSQL server runtime.
  */
 
+import { db } from '@/src/db/index';
+import * as schema from '@/src/db/schema';
+import { eq } from '@/src/db/pg-orm';
+
 interface CacheEntry {
   value: any;
   expiresAt: number | null;
