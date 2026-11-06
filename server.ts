@@ -146,7 +146,7 @@ async function startServer() {
   };
 
   // Admin Console Routes with granular RBAC
-  app.all('/api/admin/metrics', adminGuard(), createExpressRouteHandler(adminMetricsRoute));
+  app.all('/api/admin/metrics', adminGuard('canManageSettings'), createExpressRouteHandler(adminMetricsRoute));
   app.all('/api/admin/categories/:id', adminGuard('canManageCategories'), createExpressRouteHandler(adminCategoryByIdRoute));
   app.all('/api/admin/categories', adminGuard('canManageCategories'), createExpressRouteHandler(adminCategoriesRoute));
   app.all('/api/admin/locations/:id', adminGuard('canManageSettings'), createExpressRouteHandler(adminLocationByIdRoute));
@@ -279,6 +279,8 @@ ${urls
       res.status(500).type('text/plain').send(err?.message || 'Error generating sitemap');
     }
   });
+
+  app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads')));
 
   let vite: ViteDevServer | undefined;
   if (isDevelopment) {

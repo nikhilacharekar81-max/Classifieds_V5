@@ -11,6 +11,14 @@ import {
   UserAccount,
 } from '@/lib/types';
 
+function escapeHtml(str: string): string {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 export class EmailService {
   public async getTemplates(): Promise<EmailTemplate[]> {
     return await emailRepository.findAllTemplates();
@@ -69,7 +77,7 @@ export class EmailService {
         toName: logData.toName,
         subject: logData.subject,
         body: logData.body,
-        status: 'failed',
+        status: 'not_configured',
         type: logData.type,
         listingId: logData.listingId,
         relatedUserId: logData.relatedUserId,
@@ -143,30 +151,10 @@ export class EmailService {
   }
 
   public async filterAudienceUsers(filter: NewsletterAudienceFilter | string, customState?: string, customCity?: string): Promise<UserAccount[]> {
-    const allUsers = (await userRepository.findAll()).filter((u) => u.status === 'active' && u.emailSubscribed);
     const target = typeof filter === 'string' ? filter : filter.target;
-
-    switch (target) {
-      case 'active_sellers':
-        return allUsers.filter((u) => u.activeListings > 0);
-      case 'business_users':
-        return allUsers.filter((u) => u.type === 'business');
-      case 'individual_users':
-        return allUsers.filter((u) => u.type === 'user');
-      case 'city_specific': {
-        const city = customCity || (typeof filter !== 'string' ? filter.city : '');
-        if (!city || city === 'all') return allUsers;
-        return allUsers.filter((u) => u.location.city.toLowerCase() === city.toLowerCase());
-      }
-      case 'state_specific': {
-        const state = customState || (typeof filter !== 'string' ? filter.state : '');
-        if (!state || state === 'all') return allUsers;
-        return allUsers.filter((u) => u.location.state.toLowerCase() === state.toLowerCase());
-      }
-      case 'all_subscribed':
-      default:
-        return allUsers;
-    }
+    const city = customCity || (typeof filter !== 'string' ? filter.city : undefined);
+    const state = customState || (typeof filter !== 'string' ? filter.state : undefined);
+    return await emailRepository.findAudienceUsers(target, state, city);
   }
 
   public async createNewsletterCampaign(data: Omit<NewsletterCampaign, 'id' | 'createdAt' | 'sentCount'>): Promise<NewsletterCampaign> {
@@ -195,6 +183,12 @@ export class EmailService {
       return { success: false, recipientCount: 0, message: 'Campaign not found' };
     }
 
+    if (campaign.status === 'sending' || campaign.status === 'sent') {
+      return { success: false, recipientCount: 0, message: `Campaign is already ${campaign.status} and cannot be sent again.` };
+    }
+
+    await emailRepository.updateCampaignStatus(campaignId, 'sending');
+
     const recipients = await this.filterAudienceUsers(campaign.targetAudience || 'all_subscribed', campaign.targetState, campaign.targetCity);
     const count = recipients.length;
 
@@ -204,14 +198,17 @@ export class EmailService {
       const unsubToken = await userRepository.generateUnsubscribeToken(user.id);
       const unsubUrl = `${baseUrl.replace(/\/$/, '')}/api/auth/unsubscribe?token=${unsubToken}`;
       
+      const safeName = escapeHtml(user.name);
+      const safeCity = escapeHtml(user.location?.city || 'India');
+
       const personalizedBody = (campaign.contentHtml || '')
-        .replace(/\{\{user_name\}\}/g, user.name)
-        .replace(/\{\{city\}\}/g, user.location?.city || 'India')
-        .replace(/\{\{unsubscribe_url\}\}/g, unsubUrl);
+        .replace(/\{\{user_name\}\}/g, () => safeName)
+        .replace(/\{\{city\}\}/g, () => safeCity)
+        .replace(/\{\{unsubscribe_url\}\}/g, () => unsubUrl);
 
       const personalizedSubject = campaign.subject
-        .replace(/\{\{user_name\}\}/g, user.name)
-        .replace(/\{\{city\}\}/g, user.location?.city || 'India');
+        .replace(/\{\{user_name\}\}/g, () => safeName)
+        .replace(/\{\{city\}\}/g, () => safeCity);
 
       await this.sendEmail({
         toEmail: user.email,
@@ -223,6 +220,8 @@ export class EmailService {
         relatedUserId: user.id,
       });
     }
+
+    await emailRepository.updateCampaignStatus(campaignId, 'sent', count);
 
     await adminRepository.createAuditLog({
       adminId: actor?.id || 'system',

@@ -35,11 +35,11 @@ test('Finding 1 & 2: Renewal and Expiry Date Protection', async () => {
   const modToken = `token_mod_${Date.now()}`;
 
   await pool.query(`
-    INSERT INTO users (id, name, email, type, status, admin_role) VALUES
-      ($1, 'Test Seller', '${sellerId}@example.com', 'user', 'active', NULL),
-      ($2, 'Other Seller', '${otherSellerId}@example.com', 'user', 'active', NULL),
-      ($3, 'Test Admin', '${adminId}@example.com', 'user', 'active', 'admin'),
-      ($4, 'Test Mod', '${modId}@example.com', 'user', 'active', 'moderator')
+    INSERT INTO users (id, name, email, type, status, admin_role, email_verified) VALUES
+      ($1, 'Test Seller', '${sellerId}@example.com', 'user', 'active', NULL, TRUE),
+      ($2, 'Other Seller', '${otherSellerId}@example.com', 'user', 'active', NULL, TRUE),
+      ($3, 'Test Admin', '${adminId}@example.com', 'user', 'active', 'admin', TRUE),
+      ($4, 'Test Mod', '${modId}@example.com', 'user', 'active', 'moderator', TRUE)
   `, [sellerId, otherSellerId, adminId, modId]);
 
   await pool.query(`
@@ -178,10 +178,10 @@ test('Finding 3: Moderation Permissions for Moderators and Admins', async () => 
   const adminToken = `token_a3_${Date.now()}`;
 
   await pool.query(`
-    INSERT INTO users (id, name, email, type, status, admin_role) VALUES
-      ($1, 'F3 Seller', '${sellerId}@example.com', 'user', 'active', NULL),
-      ($2, 'F3 Moderator', '${modId}@example.com', 'user', 'active', 'moderator'),
-      ($3, 'F3 Admin', '${adminId}@example.com', 'user', 'active', 'admin')
+    INSERT INTO users (id, name, email, type, status, admin_role, email_verified) VALUES
+      ($1, 'F3 Seller', '${sellerId}@example.com', 'user', 'active', NULL, TRUE),
+      ($2, 'F3 Moderator', '${modId}@example.com', 'user', 'active', 'moderator', TRUE),
+      ($3, 'F3 Admin', '${adminId}@example.com', 'user', 'active', 'admin', TRUE)
   `, [sellerId, modId, adminId]);
 
   await pool.query(`
@@ -254,10 +254,10 @@ test('Finding 4: Loading Seller & Moderation Listings Beyond Bootstrap', async (
   const adminToken = `token_a4_${Date.now()}`;
 
   await pool.query(`
-    INSERT INTO users (id, name, email, type, status, admin_role) VALUES
-      ($1, 'Seller F4', '${sellerId}@example.com', 'user', 'active', NULL),
-      ($2, 'Other F4', '${otherSellerId}@example.com', 'user', 'active', NULL),
-      ($3, 'Admin F4', '${adminId}@example.com', 'user', 'active', 'admin')
+    INSERT INTO users (id, name, email, type, status, admin_role, email_verified) VALUES
+      ($1, 'Seller F4', '${sellerId}@example.com', 'user', 'active', NULL, TRUE),
+      ($2, 'Other F4', '${otherSellerId}@example.com', 'user', 'active', NULL, TRUE),
+      ($3, 'Admin F4', '${adminId}@example.com', 'user', 'active', 'admin', TRUE)
   `, [sellerId, otherSellerId, adminId]);
 
   await pool.query(`
@@ -328,9 +328,9 @@ test('Fix 1: Prevent sold listings from being renewed (seller, admin, and reposi
   const adminToken = `token_fix1_a_${Date.now()}`;
 
   await pool.query(`
-    INSERT INTO users (id, name, email, type, status, admin_role) VALUES
-      ($1, 'Fix1 Seller', '${sellerId}@example.com', 'user', 'active', NULL),
-      ($2, 'Fix1 Admin', '${adminId}@example.com', 'user', 'active', 'admin')
+    INSERT INTO users (id, name, email, type, status, admin_role, email_verified) VALUES
+      ($1, 'Fix1 Seller', '${sellerId}@example.com', 'user', 'active', NULL, TRUE),
+      ($2, 'Fix1 Admin', '${adminId}@example.com', 'user', 'active', 'admin', TRUE)
   `, [sellerId, adminId]);
 
   await pool.query(`
@@ -427,8 +427,8 @@ test('Fix 2: Pagination of seller listings via API limit and offset beyond 200 i
   const baseTime = Date.now();
 
   await pool.query(`
-    INSERT INTO users (id, name, email, type, status, admin_role) VALUES
-      ($1, 'Fix2 Seller', '${sellerId}@example.com', 'user', 'active', NULL)
+    INSERT INTO users (id, name, email, type, status, admin_role, email_verified) VALUES
+      ($1, 'Fix2 Seller', '${sellerId}@example.com', 'user', 'active', NULL, TRUE)
   `, [sellerId]);
 
   await pool.query(`

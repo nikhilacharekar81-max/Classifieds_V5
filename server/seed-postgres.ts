@@ -155,6 +155,19 @@ export async function checkIsFullyInitialized(executor: SeedDbExecutor = db): Pr
 export async function seedEssentialProductionData(executor: SeedDbExecutor = db): Promise<void> {
   console.log('--- Starting Essential Production Database Initialization ---');
 
+  // Category migration preflight: validate duplicate slugs and orphan parent references
+  const slugSet = new Set<string>();
+  const catIdSet = new Set(INITIAL_CATEGORIES.map((c) => c.id));
+  for (const cat of INITIAL_CATEGORIES) {
+    if (slugSet.has(cat.slug)) {
+      throw new Error(`Category preflight error: duplicate slug "${cat.slug}" detected.`);
+    }
+    slugSet.add(cat.slug);
+    if (cat.parentId && !catIdSet.has(cat.parentId)) {
+      throw new Error(`Category preflight error: orphan parent reference "${cat.parentId}" for category "${cat.id}".`);
+    }
+  }
+
   // 1. Categories (Batch Insert: Parents first, then Children)
   const parentCategories = INITIAL_CATEGORIES.filter((c) => !c.parentId);
   const childCategories = INITIAL_CATEGORIES.filter((c) => c.parentId);

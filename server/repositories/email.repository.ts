@@ -199,6 +199,73 @@ export class EmailRepository {
       throw new Error('Failed to create newsletter campaign', { cause: error });
     }
   }
+
+  public async updateCampaignStatus(campaignId: string, status: string, sentCount?: number): Promise<void> {
+    try {
+      const updateData: any = { status };
+      if (status === 'sent') {
+        updateData.sentAt = new Date();
+      }
+      if (sentCount !== undefined) {
+        updateData.sentCount = sentCount;
+      }
+      await db
+        .update(schema.newsletterCampaigns)
+        .set(updateData)
+        .where(eq(schema.newsletterCampaigns.id, campaignId));
+    } catch (error) {
+      console.error('EmailRepository.updateCampaignStatus error:', error);
+    }
+  }
+
+  public async findAudienceUsers(target: string, state?: string, city?: string): Promise<UserAccount[]> {
+    try {
+      let sqlWhere = `status = 'active' AND email_subscribed = TRUE`;
+      const params: any[] = [];
+      let paramIdx = 1;
+
+      if (target === 'active_sellers') {
+        sqlWhere += ` AND id IN (SELECT seller_id FROM listings WHERE status = 'approved' AND expires_at >= NOW())`;
+      } else if (target === 'business_users') {
+        sqlWhere += ` AND type = 'business'`;
+      } else if (target === 'individual_users') {
+        sqlWhere += ` AND type = 'user'`;
+      } else if (target === 'city_specific' && city && city !== 'all') {
+        sqlWhere += ` AND LOWER(city) = LOWER($${paramIdx})`;
+        params.push(city);
+        paramIdx++;
+      } else if (target === 'state_specific' && state && state !== 'all') {
+        sqlWhere += ` AND LOWER(state) = LOWER($${paramIdx})`;
+        params.push(state);
+        paramIdx++;
+      }
+
+      const rows = await db.execute(`SELECT * FROM users WHERE ${sqlWhere}`, params);
+      const rowsList = Array.isArray(rows) ? rows : (rows as any).rows || [];
+      return rowsList.map((r: any) => ({
+        id: r.id,
+        name: r.name,
+        email: r.email,
+        phone: r.phone || '',
+        avatar: r.avatar_url || '',
+        type: r.type,
+        status: r.status,
+        kycStatus: r.kyc_status,
+        emailSubscribed: r.email_subscribed,
+        location: { city: r.city || 'Mumbai', state: r.state || 'Maharashtra' },
+        totalListings: 0,
+        activeListings: 0,
+        rating: Number(r.rating || 5.0),
+        reviewCount: r.review_count || 0,
+        joinedDate: r.created_at ? new Date(r.created_at).toISOString().split('T')[0] : '2026-01-01',
+        lastLogin: r.updated_at ? new Date(r.updated_at).toISOString().split('T')[0] : '2026-01-01',
+        lastIp: 'Not recorded',
+      }));
+    } catch (err) {
+      console.error('findAudienceUsers error:', err);
+      return [];
+    }
+  }
 }
 
 export const emailRepository = new EmailRepository();

@@ -121,7 +121,9 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const renewalDays = typeof data?.days === 'number' && Number.isFinite(data.days) && data.days > 0
+      const renewalDays = !isPrivileged
+        ? 30
+        : typeof data?.days === 'number' && Number.isFinite(data.days) && data.days > 0
         ? Math.floor(data.days)
         : 30;
       const count = await listingService.bulkRenew(ids, renewalDays);

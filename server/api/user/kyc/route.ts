@@ -57,6 +57,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'A valid document number is required' }, { status: 400 });
     }
 
+    const last4 = cleanDocNumber.slice(-4);
+    const maskedDocNumber = cleanDocNumber.length > 4 ? `****-****-${last4}` : cleanDocNumber;
+
     const cleanFileUrl = String(fileUrl || '').trim();
     if (!cleanFileUrl) {
       return NextResponse.json({ error: 'Document file scan is required' }, { status: 400 });
@@ -89,7 +92,7 @@ export async function POST(req: NextRequest) {
       id,
       userId: authContext.userId, // Authenticated user ID derived strictly from verified session
       documentType,
-      documentNumber: cleanDocNumber,
+      documentNumber: maskedDocNumber,
       fileUrl: cleanFileUrl,
     });
 

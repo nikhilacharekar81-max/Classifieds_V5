@@ -435,16 +435,34 @@ export class ListingService {
 
     // Enforce Quota and Fees (Integrity check) with row-level locking to prevent parallel bypass
     const { db } = await import('@/src/db/index');
-    const { sql, eq } = await import('@/src/db/pg-orm');
+    const { sql, eq, and, inArray } = await import('@/src/db/pg-orm');
     const schema = await import('@/src/db/schema');
     
     await db.execute(sql`SELECT id FROM users WHERE id = ${sellerId} FOR UPDATE`);
-    const seller = await userRepository.findById(sellerId);
-    const activeCount = seller?.activeListings || 0;
+
+    const activeCountRes = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.listings)
+      .where(
+        and(
+          eq(schema.listings.sellerId, sellerId),
+          inArray(schema.listings.status, ['approved', 'pending']),
+          sql`${schema.listings.expiresAt} >= NOW()`
+        )
+      );
+    const activeCount = Number(activeCountRes[0]?.count || 0);
+
+    let parentCategoryFee: number | undefined = undefined;
+    if (existingCategory.parentId) {
+      const parentCat = await categoryRepository.findById(existingCategory.parentId);
+      if (parentCat && parentCat.postingFee !== undefined) {
+        parentCategoryFee = Number(parentCat.postingFee);
+      }
+    }
     
-    // Priority: Category quota -> System default
+    // Priority: Category quota -> System default. Use ?? to treat 0 as free.
     const quotaLimit = existingCategory.freeListingsQuota ?? settings.freeListingsLimit ?? 3;
-    const postingFee = (existingCategory.postingFee !== undefined && existingCategory.postingFee !== null) ? Number(existingCategory.postingFee) : (settings.extraListingFee || 0);
+    const postingFee = existingCategory.postingFee ?? parentCategoryFee ?? settings.extraListingFee ?? 0;
 
     if (activeCount >= quotaLimit && !actorMeta?.isAdminAction) {
       const paymentId = (data as any).postingFeePaymentId;

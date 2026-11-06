@@ -27,6 +27,7 @@ test('Password Policy — Signup accepts 4-20 chars and rejects outside range', 
   const req4 = createMockRequest('http://localhost:3000/api/auth/signup', {
     name: 'Test 4',
     email: email4,
+    phone: '+919876543210',
     password: '1234', // Exactly 4 chars
   });
   const res4 = await signupHandler(req4);
@@ -36,6 +37,7 @@ test('Password Policy — Signup accepts 4-20 chars and rejects outside range', 
   const req20 = createMockRequest('http://localhost:3000/api/auth/signup', {
     name: 'Test 20',
     email: email20,
+    phone: '+919876543210',
     password: 'a1!b2@c3#d4$e5%f6^g7', // Exactly 20 chars
   });
   const res20 = await signupHandler(req20);
@@ -44,6 +46,7 @@ test('Password Policy — Signup accepts 4-20 chars and rejects outside range', 
   const reqShort = createMockRequest('http://localhost:3000/api/auth/signup', {
     name: 'Test Short',
     email: `short_${Date.now()}@example.com`,
+    phone: '+919876543210',
     password: '123', // 3 chars
   });
   const resShort = await signupHandler(reqShort);
@@ -52,6 +55,7 @@ test('Password Policy — Signup accepts 4-20 chars and rejects outside range', 
   const reqLong = createMockRequest('http://localhost:3000/api/auth/signup', {
     name: 'Test Long',
     email: `long_${Date.now()}@example.com`,
+    phone: '+919876543210',
     password: 'a'.repeat(21), // 21 chars
   });
   const resLong = await signupHandler(reqLong);

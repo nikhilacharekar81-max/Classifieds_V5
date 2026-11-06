@@ -57,17 +57,29 @@ export class UserService {
     }
 
     const updated = await userRepository.update(id, fields);
-    if (updated && actor) {
-      await adminRepository.createAuditLog({
-        adminId: actor.id,
-        adminName: actor.name,
-        action: 'USER_UPDATED',
-        module: 'Users',
-        targetId: id,
-        targetSummary: updated.name,
-        details: `Updated user fields: ${Object.keys(fields).join(', ')}`,
-        ipAddress: actor.ipAddress || 'unknown',
-      });
+    if (updated) {
+      if (fields.name !== undefined || fields.phone !== undefined) {
+        const { db } = await import('@/src/db/index');
+        const schema = await import('@/src/db/schema');
+        const { eq } = await import('@/src/db/pg-orm');
+        const listingUpdates: any = {};
+        if (fields.name !== undefined) listingUpdates.sellerName = fields.name;
+        if (fields.phone !== undefined) listingUpdates.sellerPhone = fields.phone;
+        await db.update(schema.listings).set(listingUpdates).where(eq(schema.listings.sellerId, id));
+      }
+
+      if (actor) {
+        await adminRepository.createAuditLog({
+          adminId: actor.id,
+          adminName: actor.name,
+          action: 'USER_UPDATED',
+          module: 'Users',
+          targetId: id,
+          targetSummary: updated.name,
+          details: `Updated user fields: ${Object.keys(fields).join(', ')}`,
+          ipAddress: actor.ipAddress || 'unknown',
+        });
+      }
     }
     return updated;
   }

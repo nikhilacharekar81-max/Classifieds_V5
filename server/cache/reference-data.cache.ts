@@ -82,6 +82,16 @@ export async function enqueueDurableInvalidation(
         nextRetryAt: now,
         completedAt: null,
       })
+      .onConflictDoUpdate({
+        target: cacheInvalidationOutbox.tag,
+        set: {
+          attempts: sql`"cache_invalidation_outbox"."attempts" + 1`,
+          status: 'pending',
+          nextRetryAt: now,
+          lastError: null,
+          completedAt: null,
+        },
+      })
       .returning({
         id: cacheInvalidationOutbox.id,
         attempts: cacheInvalidationOutbox.attempts,
