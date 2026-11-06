@@ -63,7 +63,7 @@ export function isListingCacheBypassed(): boolean {
 export async function enqueueDurableInvalidation(
   tag: string = REFERENCE_CACHE_TAGS.LISTING_COUNTS,
   tx?: DbExecutor
-): Promise<{ id: string; generation?: number }> {
+): Promise<{ id: string; generation: number }> {
   hasKnownPendingOutboxEntries = true;
   const now = new Date();
   const id = `outbox_${tag}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -115,15 +115,6 @@ export async function recordDurableInvalidation(
 
     const performRecord = async () => {
       if (success) {
-        const whereClause = eventId 
-            ? and(eq(cacheInvalidationOutbox.id, eventId), eq(cacheInvalidationOutbox.status, 'processing'))
-            : and(
-              eq(cacheInvalidationOutbox.tag, tag),
-              expectedGeneration !== undefined
-                ? eq(cacheInvalidationOutbox.attempts, expectedGeneration)
-                : eq(cacheInvalidationOutbox.status, 'pending')
-            );
-
         const updated = await executor
           .update(cacheInvalidationOutbox)
           .set({
@@ -131,22 +122,21 @@ export async function recordDurableInvalidation(
             lastError: null,
             completedAt: now,
           })
-          .where(whereClause)
-          .returning({ id: cacheInvalidationOutbox.id });
+          .where(and(eq(cacheInvalidationOutbox.id, eventId), eq(cacheInvalidationOutbox.status, 'processing')));
 
-        if (updated.length === 0 && !eventId) {
+        if (updated.length === 0) {
+          // If no event found to update, insert as a completed event directly.
           await executor
             .insert(cacheInvalidationOutbox)
             .values({
-              id: `outbox_${tag}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+              id: eventId || `outbox_${tag}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
               tag,
               status: 'completed',
               attempts: 1,
               lastError: null,
               nextRetryAt: now,
               completedAt: now,
-            })
-            .onConflictDoNothing();
+            });
         }
       } else if (eventId) {
         await executor

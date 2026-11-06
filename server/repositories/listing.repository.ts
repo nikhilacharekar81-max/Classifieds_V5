@@ -734,6 +734,122 @@ export class ListingRepository {
       throw new Error('Bulk renewal failed in PostgreSQL', { cause: error });
     }
   }
+
+  public async createWithDuplicateCheck(data: {
+    id: string;
+    sellerId: string;
+    sellerName: string;
+    sellerPhone: string;
+    categoryId: string;
+    subcategoryId?: string;
+    title: string;
+    description: string;
+    price?: number | null;
+    state: string;
+    city: string;
+    locality: string;
+    latitude?: number;
+    longitude?: number;
+    images?: string[];
+    customAttributes?: Record<string, any>;
+    status?: string;
+    expiresAt?: Date;
+    isFeatured?: boolean;
+    isBoosted?: boolean;
+  }): Promise<Listing> {
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${data.sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW()`
+      );
+
+      const normalized = normalizeAdTitle(data.title);
+      const conditions = [
+        eq(schema.listings.sellerId, data.sellerId),
+        sql`LOWER(REGEXP_REPLACE(TRIM(${schema.listings.title}), '\\s+', ' ', 'g')) = ${normalized}`,
+        inArray(schema.listings.status, ['approved', 'pending']),
+        gte(schema.listings.expiresAt, new Date()),
+      ];
+      const conflicts = await tx
+        .select({ id: schema.listings.id })
+        .from(schema.listings)
+        .where(and(...conditions))
+        .limit(1);
+
+      if (conflicts.length > 0) throw new Error('DUPLICATE_TITLE');
+
+      const inserted = await tx
+        .insert(schema.listings)
+        .values({
+          id: data.id,
+          sellerId: data.sellerId,
+          sellerName: data.sellerName,
+          sellerPhone: data.sellerPhone,
+          categoryId: data.categoryId,
+          subcategoryId: data.subcategoryId || null,
+          title: data.title,
+          description: data.description,
+          price: data.price !== undefined && data.price !== null ? String(data.price) : null,
+          state: data.state,
+          city: data.city,
+          locality: data.locality,
+          latitude: data.latitude || null,
+          longitude: data.longitude || null,
+          images: data.images || [],
+          customAttributes: data.customAttributes || {},
+          isFeatured: data.isFeatured ?? false,
+          isBoosted: data.isBoosted ?? false,
+          status: data.status || 'pending',
+          expiresAt: data.expiresAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        })
+        .returning();
+
+      await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS, tx);
+      return this.mapRowToListing(inserted[0]);
+    });
+  }
+
+  public async updateWithDuplicateCheck(
+    id: string,
+    fields: Partial<typeof schema.listings.$inferInsert>,
+    sellerId: string
+  ): Promise<Listing | null> {
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW()`
+      );
+
+      if (fields.title) {
+        const normalized = normalizeAdTitle(fields.title);
+        const conditions = [
+          eq(schema.listings.sellerId, sellerId),
+          sql`LOWER(REGEXP_REPLACE(TRIM(${schema.listings.title}), '\\s+', ' ', 'g')) = ${normalized}`,
+          inArray(schema.listings.status, ['approved', 'pending']),
+          gte(schema.listings.expiresAt, new Date()),
+          sql`${schema.listings.id} != ${id}`,
+        ];
+        const conflicts = await tx
+          .select({ id: schema.listings.id })
+          .from(schema.listings)
+          .where(and(...conditions))
+          .limit(1);
+
+        if (conflicts.length > 0) throw new Error('DUPLICATE_TITLE');
+      }
+
+      const updated = await tx
+        .update(schema.listings)
+        .set({ ...fields, updatedAt: new Date() })
+        .where(eq(schema.listings.id, id))
+        .returning();
+
+      if (!updated.length) return null;
+
+      if (doesListingUpdateAffectCounts(fields)) {
+        await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS, tx);
+      }
+      return this.mapRowToListing(updated[0]);
+    });
+  }
 }
 
 export const listingRepository = new ListingRepository();

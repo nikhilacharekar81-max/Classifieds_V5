@@ -384,41 +384,32 @@ export class ListingService {
       }
     }
 
-    // Enforce PostgreSQL partial unique index check
-    const dupCheck = await listingRepository.checkDuplicateActiveTitle(sellerId, data.title);
-    if (dupCheck.isDuplicate) {
-      return {
-        success: false,
-        error: DUPLICATE_TITLE_ERROR_MESSAGE,
-        status: 409,
-      };
-    }
-
     // Collision-resistant ID
     const id = `lst_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const expiresAt = new Date(Date.now() + 30 * 24 * 3600 * 1000);
 
     try {
-      const created = await listingRepository.create({
-        id,
-        sellerId,
-        sellerName: actorMeta?.name || data.sellerName || 'Authenticated User',
-        sellerPhone: data.sellerPhone || '',
-        categoryId: cleanCategoryId,
-        subcategoryId: cleanSubcategoryId || undefined,
-        title: data.title,
-        description: data.description,
-        price: priceNum,
-        state: data.location?.state || 'Maharashtra',
-        city: data.location?.city || 'Mumbai',
-        locality: data.location?.locality || 'Locality',
-        latitude: data.location?.latitude,
-        longitude: data.location?.longitude,
-        images: validImages,
-        customAttributes: data.customAttributes || {},
-        status: data.status || 'pending',
-        expiresAt,
-      });
+    // Perform duplicate title check and stale ad expiration in the same transaction
+    const created = await listingRepository.createWithDuplicateCheck({
+      id,
+      sellerId,
+      sellerName: actorMeta?.name || data.sellerName || 'Authenticated User',
+      sellerPhone: data.sellerPhone || '',
+      categoryId: cleanCategoryId,
+      subcategoryId: cleanSubcategoryId || undefined,
+      title: data.title,
+      description: data.description,
+      price: priceNum,
+      state: data.location?.state || 'Maharashtra',
+      city: data.location?.city || 'Mumbai',
+      locality: data.location?.locality || 'Locality',
+      latitude: data.location?.latitude,
+      longitude: data.location?.longitude,
+      images: validImages,
+      customAttributes: data.customAttributes || {},
+      status: data.status || 'pending',
+      expiresAt,
+    });
 
       // 1. Immediately trigger listing count invalidation right after successful database insert
       try {
@@ -448,16 +439,7 @@ export class ListingService {
       return { success: true, listing: created, status: 201 };
     } catch (err: any) {
       console.error('ListingService.createListing error:', err);
-      const isTitleIndexViolation =
-        (err?.code === '23505' || err?.cause?.code === '23505') &&
-        (err?.constraint === 'idx_unique_active_ad_title_per_seller' ||
-          err?.cause?.constraint === 'idx_unique_active_ad_title_per_seller' ||
-          String(err?.message || '').includes('idx_unique_active_ad_title_per_seller') ||
-          String(err?.cause?.message || '').includes('idx_unique_active_ad_title_per_seller') ||
-          String(err?.detail || '').includes('idx_unique_active_ad_title_per_seller') ||
-          String(err?.cause?.detail || '').includes('idx_unique_active_ad_title_per_seller'));
-
-      if (isTitleIndexViolation) {
+      if (err.message === 'DUPLICATE_TITLE') {
         return { success: false, error: DUPLICATE_TITLE_ERROR_MESSAGE, status: 409 };
       }
       return { success: false, error: err.message || 'Failed to save listing', status: 500 };
@@ -607,12 +589,6 @@ export class ListingService {
     }
 
     // Duplicate title check if title changed
-    if (normalizeAdTitle(targetTitle) !== normalizeAdTitle(existing.title)) {
-      const dupCheck = await listingRepository.checkDuplicateActiveTitle(sellerId, targetTitle, id);
-      if (dupCheck.isDuplicate) {
-        return { success: false, error: DUPLICATE_TITLE_ERROR_MESSAGE, status: 409 };
-      }
-    }
 
     if (updatedData.customAttributes !== undefined) {
       safeFields.customAttributes = typeof updatedData.customAttributes === 'object' && updatedData.customAttributes !== null
@@ -728,27 +704,14 @@ export class ListingService {
     }
 
     try {
-      const updated = await listingRepository.update(id, safeFields);
+      const updated = await listingRepository.updateWithDuplicateCheck(id, safeFields, sellerId);
       if (!updated) {
         return { success: false, error: 'Failed to update listing', status: 500 };
-      }
-
-      if (doesListingUpdateAffectCounts(safeFields)) {
-        await invalidateLiveListingCountsCache();
       }
       return { success: true, listing: updated, status: 200 };
     } catch (err: any) {
       console.error('ListingService.updateListing error:', err);
-      const isTitleIndexViolation =
-        (err?.code === '23505' || err?.cause?.code === '23505') &&
-        (err?.constraint === 'idx_unique_active_ad_title_per_seller' ||
-          err?.cause?.constraint === 'idx_unique_active_ad_title_per_seller' ||
-          String(err?.message || '').includes('idx_unique_active_ad_title_per_seller') ||
-          String(err?.cause?.message || '').includes('idx_unique_active_ad_title_per_seller') ||
-          String(err?.detail || '').includes('idx_unique_active_ad_title_per_seller') ||
-          String(err?.cause?.detail || '').includes('idx_unique_active_ad_title_per_seller'));
-
-      if (isTitleIndexViolation) {
+      if (err.message === 'DUPLICATE_TITLE') {
         return { success: false, error: DUPLICATE_TITLE_ERROR_MESSAGE, status: 409 };
       }
       return { success: false, error: err.message || 'Failed to update listing', status: 500 };
