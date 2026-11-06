@@ -352,13 +352,46 @@ export const PostAdPage: React.FC = () => {
     const listingDurationDays = settings.listingDurationDays || 30;
     const isAdminActor = currentUser.role === 'admin' || currentUser.role === 'super_admin';
 
-    if (mandatoryPostingFee > 0 && !isAdminActor && !paymentGatewayConfigured) {
-      addToast({
-        title: 'Payment Gateway Not Configured',
-        message: `This listing requires a posting fee of ${currencySymbol}${mandatoryPostingFee}, but online payments are not currently configured.`,
-        type: 'error',
-      });
-      return;
+    let createdOrderId: string | undefined = undefined;
+    if (mandatoryPostingFee > 0 && !isAdminActor) {
+      if (!paymentGatewayConfigured) {
+        addToast({
+          title: 'Payment Gateway Not Configured',
+          message: `This listing requires a posting fee of ${currencySymbol}${mandatoryPostingFee}, but online payments are not currently configured.`,
+          type: 'error',
+        });
+        return;
+      }
+
+      try {
+        const orderRes = await fetch('/api/listings/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            categoryId: postForm.categoryId,
+            subcategoryId: postForm.subcategoryId || undefined,
+            purpose: 'posting_fee',
+          }),
+        });
+        const orderData = await orderRes.json();
+        if (!orderRes.ok || !orderData.orderId) {
+          addToast({
+            title: 'Posting Order Failed',
+            message: orderData.error || 'Failed to create a server-side posting order.',
+            type: 'error',
+          });
+          return;
+        }
+        createdOrderId = orderData.orderId;
+      } catch (err: any) {
+        addToast({
+          title: 'Checkout Error',
+          message: err?.message || 'Could not initiate posting fee checkout.',
+          type: 'error',
+        });
+        return;
+      }
     }
 
     const { listing: newAd, error, code } = await addListing({
@@ -378,6 +411,7 @@ export const PostAdPage: React.FC = () => {
       requestedFeatured: !isAdminActor && wantFeatured ? true : undefined,
       featuredUntil: undefined,
       isBoosted: false,
+      postingFeeOrderId: createdOrderId,
       location: {
         city: postForm.city,
         state: postForm.state,

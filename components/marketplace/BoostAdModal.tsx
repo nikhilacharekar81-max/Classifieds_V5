@@ -149,49 +149,51 @@ export const BoostAdModal: React.FC<BoostAdModalProps> = ({
         return;
       }
 
-      if (app?.boostListing) {
-        const result = await app.boostListing(listing.id, selectedPackage.id, paymentMethod, {
-          paymentId: `placeholder_${Date.now()}`,
-          signature: 'placeholder_signature',
+      // Gateway is configured: create order and execute payment verification
+      const orderRes = await fetch('/api/boost/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          listingId: listing.id,
+          packageId: selectedPackage.id,
+          paymentMethod,
+        }),
+      });
+      const orderData = await orderRes.json().catch(() => ({}));
+      if (!orderRes.ok || !orderData.success || !orderData.orderId) {
+        setErrorMessage(orderData.error || 'Failed to create boost order.');
+        setIsProcessing(false);
+        return;
+      }
+
+      const verifyRes = await fetch('/api/boost/verify-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          orderId: orderData.orderId,
+          paymentGateway: paymentMethod,
           amount: totalPayable,
           currency: 'INR',
-        });
-        if (!result.success) {
-          setErrorMessage(result.message);
-          setIsProcessing(false);
-          return;
-        }
-        setCompletedStep('success');
+        }),
+      });
+      const verifyData = await verifyRes.json().catch(() => ({}));
+      if (!verifyRes.ok || !verifyData.success) {
+        setErrorMessage(verifyData.error || 'Payment verification failed. Boost could not be activated without confirmed payment capture.');
         setIsProcessing(false);
-        if (result.listing && onBoostSuccess) {
-          onBoostSuccess(result.listing);
-        }
-      } else {
-        const res = await fetch('/api/listings/boost', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            listingId: listing.id,
-            packageId: selectedPackage.id,
-            paymentMethod,
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.success) {
-          setErrorMessage(data.error || data.message || 'Unable to process boost request.');
-          setIsProcessing(false);
-          return;
-        }
-        setCompletedStep('success');
-        setIsProcessing(false);
-        dispatchPublicToast({
-          type: 'success',
-          title: 'Ad Boost Activated!',
-          message: `"${listing.title}" is now boosted to the top of category feeds.`,
-        });
-        if (data.data && onBoostSuccess) {
-          onBoostSuccess(data.data);
-        }
+        return;
+      }
+
+      setCompletedStep('success');
+      setIsProcessing(false);
+      dispatchPublicToast({
+        type: 'success',
+        title: 'Ad Boost Activated!',
+        message: `"${listing.title}" is now boosted to the top of category feeds.`,
+      });
+      if (verifyData.data && onBoostSuccess) {
+        onBoostSuccess(verifyData.data);
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'Payment processing encountered an error. Please try again.');

@@ -69,8 +69,8 @@ export async function enqueueDurableInvalidation(
   const id = `outbox_${tag}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const executor = tx ?? db;
 
-  const performUpsert = async (): Promise<{ id: string; attempts: number }[]> => {
-    const updated = await executor
+  const performInsert = async (): Promise<{ id: string; attempts: number }[]> => {
+    const inserted = await executor
       .insert(cacheInvalidationOutbox)
       .values({
         id,
@@ -81,45 +81,19 @@ export async function enqueueDurableInvalidation(
         nextRetryAt: now,
         completedAt: null,
       })
-      .onConflictDoUpdate({
-        target: cacheInvalidationOutbox.tag,
-        set: {
-          attempts: sql`"cache_invalidation_outbox"."attempts" + 1`,
-          status: 'pending',
-          nextRetryAt: now,
-          lastError: null,
-          completedAt: null,
-        },
-        // Coalesce concurrent invalidations (#5): if the tag is already 'pending' with no error backoff,
-        // skip the redundant row write/lock while still bumping generation if 'completed', 'processing', or in retry backoff.
-        where: sql`"cache_invalidation_outbox"."status" <> 'pending' OR "cache_invalidation_outbox"."last_error" IS NOT NULL`,
-      })
       .returning({
         id: cacheInvalidationOutbox.id,
         attempts: cacheInvalidationOutbox.attempts,
       });
 
-    if (updated.length > 0) {
-      return updated;
-    }
-
-    const existing = await executor
-      .select({
-        id: cacheInvalidationOutbox.id,
-        attempts: cacheInvalidationOutbox.attempts,
-      })
-      .from(cacheInvalidationOutbox)
-      .where(eq(cacheInvalidationOutbox.tag, tag))
-      .limit(1);
-
-    return existing.length > 0 ? existing : [{ id, attempts: 1 }];
+    return inserted.length > 0 ? inserted : [{ id, attempts: 1 }];
   };
 
   let res: { id: string; attempts: number }[];
   if (tx) {
-    res = await performUpsert();
+    res = await performInsert();
   } else {
-    res = await withDbRetry(performUpsert);
+    res = await withDbRetry(performInsert);
   }
 
   ensureOutboxRetryWorkerStarted();

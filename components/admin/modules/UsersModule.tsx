@@ -63,11 +63,12 @@ export const UsersModule: React.FC<UsersModuleProps> = ({ initialTab = 'all' }) 
     verification: number;
     banned: number;
   } | null>(null);
-  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [usersFetchError, setUsersFetchError] = useState<string | null>(null);
 
   const fetchAdminUsers = React.useCallback(
     async (page = currentPage, tab = activeTab, search = searchTerm) => {
       setIsLoadingUsers(true);
+      setUsersFetchError(null);
       try {
         const params = new URLSearchParams();
         params.set('paginated', '1');
@@ -90,14 +91,30 @@ export const UsersModule: React.FC<UsersModuleProps> = ({ initialTab = 'all' }) 
               setServerCounts(data.counts);
             }
           }
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData.error || `Failed to fetch users (HTTP ${res.status})`;
+          setUsersFetchError(errMsg);
+          addToast({
+            type: 'error',
+            title: 'User Fetch Failed',
+            message: errMsg,
+          });
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Failed to fetch paginated admin users:', err);
+        const errMsg = err?.message || 'Network error fetching users';
+        setUsersFetchError(errMsg);
+        addToast({
+          type: 'error',
+          title: 'User Fetch Failed',
+          message: errMsg,
+        });
       } finally {
         setIsLoadingUsers(false);
       }
     },
-    [currentPage, activeTab, searchTerm, pageSize]
+    [currentPage, activeTab, searchTerm, pageSize, addToast]
   );
 
   React.useEffect(() => {
@@ -135,31 +152,70 @@ export const UsersModule: React.FC<UsersModuleProps> = ({ initialTab = 'all' }) 
     return filteredUsers.slice(start, start + pageSize);
   }, [serverUsers, filteredUsers, currentPage, pageSize]);
 
-  // CSV Export (fetches full filtered set up to 200 rows from server when available)
+  // Multi-batch CSV Export (fetches complete set limit=200 per batch from server without loading all at once) (#17)
   const exportUsersCSV = async () => {
-    let exportRowsSource = serverUsers !== null ? serverUsers : filteredUsers;
+    setIsLoadingUsers(true);
+    let allExportUsers: UserAccount[] = [];
+    let currentOffset = 0;
+    const batchSize = 200;
+    let hasMore = true;
+    let fetchError: string | null = null;
+
     try {
-      const params = new URLSearchParams();
-      params.set('paginated', '1');
-      params.set('filter', activeTab);
-      if (searchTerm.trim()) {
-        params.set('search', searchTerm.trim());
-      }
-      params.set('limit', '200');
-      params.set('offset', '0');
-      const res = await fetch(`/api/admin/users?${params.toString()}`, { credentials: 'include' });
-      if (res.ok) {
+      while (hasMore) {
+        const params = new URLSearchParams();
+        params.set('paginated', '1');
+        params.set('filter', activeTab);
+        if (searchTerm.trim()) {
+          params.set('search', searchTerm.trim());
+        }
+        params.set('limit', String(batchSize));
+        params.set('offset', String(currentOffset));
+
+        const res = await fetch(`/api/admin/users?${params.toString()}`, { credentials: 'include' });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `HTTP error ${res.status}`);
+        }
+
         const data = await res.json();
-        if (Array.isArray(data.users)) {
-          exportRowsSource = data.users;
+        const batch: UserAccount[] = Array.isArray(data.users) ? data.users : [];
+        allExportUsers = [...allExportUsers, ...batch];
+
+        const total = typeof data.total === 'number' ? data.total : allExportUsers.length;
+        if (batch.length < batchSize || allExportUsers.length >= total) {
+          hasMore = false;
+        } else {
+          currentOffset += batchSize;
         }
       }
-    } catch {
-      // Fall back to currently loaded rows
+    } catch (err: any) {
+      console.error('Failed to export complete user CSV:', err);
+      fetchError = err.message || 'Failed to fetch user export data';
+    } finally {
+      setIsLoadingUsers(false);
+    }
+
+    if (fetchError) {
+      addToast({
+        type: 'error',
+        title: 'Export Failed',
+        message: `Could not export user list: ${fetchError}`,
+      });
+      return;
+    }
+
+    if (allExportUsers.length === 0) {
+      addToast({
+        type: 'warning',
+        title: 'No Data to Export',
+        message: 'No users found matching current filters.',
+      });
+      return;
     }
 
     const headers = ['ID', 'Name', 'Email', 'Phone', 'Type', 'Status', 'KYC', 'City', 'Listings', 'Joined Date', 'Last IP'];
-    const rows = exportRowsSource.map((u) => [
+    const rows = allExportUsers.map((u) => [
       u.id,
       u.name,
       u.email,
@@ -185,7 +241,7 @@ export const UsersModule: React.FC<UsersModuleProps> = ({ initialTab = 'all' }) 
     addToast({
       type: 'success',
       title: 'Users Export Generated',
-      message: `Exported ${exportRowsSource.length} users to CSV.`,
+      message: `Exported ${allExportUsers.length} users across ${Math.ceil(allExportUsers.length / batchSize)} server batch(es) to CSV.`,
     });
   };
 

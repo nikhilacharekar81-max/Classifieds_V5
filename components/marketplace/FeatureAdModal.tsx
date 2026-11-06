@@ -110,6 +110,29 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
       }
 
       // Ordinary sellers cannot activate Featured without verified payment (#2B & #14).
+      // Create server-side order with purpose: 'featured_ad' and preserve pending request state
+      let pendingOrderId: string | undefined = undefined;
+      try {
+        const orderRes = await fetch('/api/listings/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            categoryId: listing.categoryId,
+            subcategoryId: listing.subcategoryId || undefined,
+            purpose: 'featured_ad',
+            listingId: listing.id,
+            amount: totalPayable,
+          }),
+        });
+        const orderData = await orderRes.json().catch(() => ({}));
+        if (orderRes.ok && (orderData.orderId || orderData.order?.orderId)) {
+          pendingOrderId = orderData.orderId || orderData.order?.orderId;
+        }
+      } catch (orderErr) {
+        console.warn('Could not create pending featured order record:', orderErr);
+      }
+
       // Save the pending featured request on the listing so it awaits verified payment.
       await updateListing({
         ...listing,
@@ -117,6 +140,7 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
           ...(listing.customAttributes || {}),
           requestedFeatured: true,
           featuredPaymentStatus: 'pending',
+          pendingFeaturedOrderId: pendingOrderId,
           requestedFeaturedPlanId: selectedPlan.id,
           requestedFeaturedDays: selectedPlan.days,
           requestedFeaturedPrice: selectedPlan.price,

@@ -765,8 +765,11 @@ export class ListingService {
     categoryId: string;
     subcategoryId?: string;
     userId: string;
+    purpose?: string;
+    listingId?: string;
+    amount?: number;
   }): Promise<{ success: boolean; order?: any; error?: string; status: number }> {
-    const { categoryId, subcategoryId, userId } = params;
+    const { categoryId, subcategoryId, userId, purpose = 'posting_fee', amount: reqAmount } = params;
     const category = await categoryRepository.findById(categoryId);
     if (!category) {
       return { success: false, error: 'Category not found', status: 404 };
@@ -799,31 +802,37 @@ export class ListingService {
       }
     }
 
-    const rawPostingFee =
-      subcategory?.postingFee ??
-      category.postingFee ??
-      parentCategoryFee ??
-      settings.paidFeatures?.extraListingFee ??
-      settings.extraListingFee ??
-      0;
-    const postingFee = Math.max(0, Number(rawPostingFee) || 0);
+    let postingFee = 0;
+    if (purpose === 'featured_ad') {
+      postingFee = Math.max(0, reqAmount !== undefined ? reqAmount : (settings.paidFeatures?.featuredAdPrice ?? 100));
+    } else {
+      const rawPostingFee =
+        subcategory?.postingFee ??
+        category.postingFee ??
+        parentCategoryFee ??
+        settings.paidFeatures?.extraListingFee ??
+        settings.extraListingFee ??
+        0;
+      postingFee = Math.max(0, Number(rawPostingFee) || 0);
+    }
 
-    if (postingFee <= 0) {
+    if (postingFee <= 0 && purpose === 'posting_fee') {
       return { success: false, error: 'No posting fee is required for this category', status: 400 };
     }
 
     const { db } = await import('@/src/db/index');
     const schema = await import('@/src/db/schema');
     const crypto = await import('node:crypto');
-    const orderId = `ORD-POST-${crypto.randomUUID()}`;
+    const prefix = purpose === 'featured_ad' ? 'ORD-FEAT-' : 'ORD-POST-';
+    const orderId = `${prefix}${crypto.randomUUID()}`;
 
     await db.insert(schema.postingOrders).values({
       orderId,
       userId,
-      categoryId,
+      categoryId: subcategoryId || categoryId,
       amount: String(postingFee),
       currency: 'INR',
-      purpose: 'posting_fee',
+      purpose,
       status: 'pending',
     });
 
@@ -833,7 +842,7 @@ export class ListingService {
         orderId,
         amount: postingFee,
         currency: 'INR',
-        purpose: 'posting_fee',
+        purpose,
       },
       status: 201,
     };

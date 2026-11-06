@@ -287,32 +287,65 @@ export class AdminService {
     }
 
     if (newSettings.listingDurationDays !== undefined) {
-      const val = Number(newSettings.listingDurationDays);
-      if (!Number.isInteger(val) || val < 1 || val > 365) {
+      const raw = newSettings.listingDurationDays;
+      const val = Number(raw);
+      if (
+        raw === null ||
+        typeof raw === 'boolean' ||
+        (typeof raw === 'string' && raw.trim() === '') ||
+        !Number.isInteger(val) ||
+        val < 1 ||
+        val > 365
+      ) {
         throw validationErr('Listing duration must be an integer between 1 and 365 days');
       }
       validated.listingDurationDays = val;
     }
 
     if (newSettings.extraListingFee !== undefined) {
-      const val = Number(newSettings.extraListingFee);
-      if (typeof newSettings.extraListingFee === 'boolean' || isNaN(val) || !isFinite(val) || val < 0 || val > 1000000) {
+      const raw = newSettings.extraListingFee;
+      const val = Number(raw);
+      if (
+        raw === null ||
+        typeof raw === 'boolean' ||
+        (typeof raw === 'string' && raw.trim() === '') ||
+        isNaN(val) ||
+        !isFinite(val) ||
+        val < 0 ||
+        val > 1000000
+      ) {
         throw validationErr('Extra listing fee must be a non-negative number');
       }
       validated.extraListingFee = Number(val.toFixed(2));
     }
 
     if (newSettings.freeListingsLimit !== undefined) {
-      const val = Number(newSettings.freeListingsLimit);
-      if (typeof newSettings.freeListingsLimit === 'boolean' || !Number.isInteger(val) || val < 0 || val > 10000) {
+      const raw = newSettings.freeListingsLimit;
+      const val = Number(raw);
+      if (
+        raw === null ||
+        typeof raw === 'boolean' ||
+        (typeof raw === 'string' && raw.trim() === '') ||
+        !Number.isInteger(val) ||
+        val < 0 ||
+        val > 10000
+      ) {
         throw validationErr('Free listings limit must be a non-negative integer');
       }
       validated.freeListingsLimit = val;
     }
 
     if (newSettings.maxPhotosPerListing !== undefined) {
-      const val = Number(newSettings.maxPhotosPerListing);
-      if (typeof newSettings.maxPhotosPerListing === 'boolean' || !Number.isInteger(val) || val < 1 || val > 20) {
+      const raw = newSettings.maxPhotosPerListing;
+      const val = Number(raw);
+      if (
+        raw === null ||
+        typeof raw === 'boolean' ||
+        (typeof raw === 'string' && raw.trim() === '') ||
+        !Number.isInteger(val) ||
+        val < 1 ||
+        val > 20
+      ) {
         throw validationErr('Max photos per listing must be an integer between 1 and 20');
       }
       validated.maxPhotosPerListing = val;

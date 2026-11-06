@@ -12,6 +12,9 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const categoryId = body.categoryId?.trim();
     const subcategoryId = body.subcategoryId ? String(body.subcategoryId).trim() : undefined;
+    const purpose = body.purpose ? String(body.purpose).trim() : 'posting_fee';
+    const listingId = body.listingId ? String(body.listingId).trim() : undefined;
+    const amount = body.amount !== undefined ? Number(body.amount) : undefined;
     if (!categoryId) {
       return NextResponse.json({ error: 'categoryId is required' }, { status: 400 });
     }
@@ -20,13 +23,16 @@ export async function POST(req: NextRequest) {
       categoryId,
       subcategoryId,
       userId: authContext.userId,
+      purpose,
+      listingId,
+      amount,
     });
 
     if (!result.success) {
       return NextResponse.json({ error: result.error }, { status: result.status });
     }
 
-    return NextResponse.json(result.order, { status: 201 });
+    return NextResponse.json({ success: true, order: result.order, orderId: result.order?.orderId }, { status: 201 });
   } catch (err: any) {
     console.error('API /api/listings/create-order error:', err);
     return NextResponse.json({ error: err.message || 'Error creating posting order' }, { status: 500 });
