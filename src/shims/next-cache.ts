@@ -16,47 +16,53 @@ interface CacheEntry {
 
 const dataCacheStore = new Map<string, CacheEntry>();
 const tagIndex = new Map<string, Set<string>>();
-const tagVersions = new Map<string, { version: number; loadedAt: number }>();
 
-const VERSION_CACHE_TTL_MS = 2000; // Cache versions for 2 seconds to reduce DB load while staying responsive
+// Batching mechanism for tag version fetches in the same execution tick
+let pendingTags = new Set<string>();
+let batchPromise: Promise<Record<string, number>> | null = null;
 
 async function getTagVersions(tags: string[]): Promise<Record<string, number>> {
-  const now = Date.now();
-  const results: Record<string, number> = {};
-  const tagsToFetch: string[] = [];
+  if (tags.length === 0) return {};
 
-  for (const tag of tags) {
-    const cached = tagVersions.get(tag);
-    if (cached && now - cached.loadedAt < VERSION_CACHE_TTL_MS) {
-      results[tag] = cached.version;
-    } else {
-      tagsToFetch.push(tag);
-    }
-  }
+  for (const tag of tags) pendingTags.add(tag);
 
-  if (tagsToFetch.length > 0) {
-    const dbVersions = await db
-      .select()
-      .from(schema.cacheVersions)
-      .where(inArray(schema.cacheVersions.tag, tagsToFetch));
+  if (!batchPromise) {
+    batchPromise = (async () => {
+      await new Promise(resolve => process.nextTick(resolve));
+      const tagsToFetch = Array.from(pendingTags);
+      pendingTags = new Set();
+      batchPromise = null;
 
-    const foundTags = new Set<string>();
-    for (const row of dbVersions) {
-      tagVersions.set(row.tag, { version: row.version, loadedAt: now });
-      results[row.tag] = row.version;
-      foundTags.add(row.tag);
-    }
+      const results: Record<string, number> = {};
+      if (tagsToFetch.length === 0) return results;
 
-    // Tags not in DB are treated as version 0
-    for (const tag of tagsToFetch) {
-      if (!foundTags.has(tag)) {
-        tagVersions.set(tag, { version: 0, loadedAt: now });
-        results[tag] = 0;
+      const dbVersions = await db
+        .select({ tag: schema.cacheVersions.tag, version: schema.cacheVersions.version })
+        .from(schema.cacheVersions)
+        .where(inArray(schema.cacheVersions.tag, tagsToFetch));
+
+      const foundTags = new Set<string>();
+      for (const row of dbVersions) {
+        results[row.tag] = row.version;
+        foundTags.add(row.tag);
       }
-    }
+
+      // Tags not in DB are treated as version 0. First revalidateTag will set to 1.
+      for (const tag of tagsToFetch) {
+        if (!foundTags.has(tag)) {
+          results[tag] = 0;
+        }
+      }
+      return results;
+    })();
   }
 
-  return results;
+  const allResults = await batchPromise;
+  const requestedResults: Record<string, number> = {};
+  for (const tag of tags) {
+    requestedResults[tag] = allResults[tag] ?? 0;
+  }
+  return requestedResults;
 }
 
 export function unstable_cache<T extends (...args: any[]) => Promise<any>>(
@@ -69,7 +75,9 @@ export function unstable_cache<T extends (...args: any[]) => Promise<any>>(
   const revalidateSeconds = options?.revalidate;
 
   const wrapped = async (...args: any[]) => {
+    // 1. Fetch current tag versions from DB (shared source of truth)
     const currentTagVersions = await getTagVersions(tags);
+    
     let serializedArgs = '';
     try {
       serializedArgs = JSON.stringify(args);
@@ -80,11 +88,13 @@ export function unstable_cache<T extends (...args: any[]) => Promise<any>>(
     const now = Date.now();
     const existing = dataCacheStore.get(cacheKey);
 
-    // Verify tag versions independently
+    // 2. Verify every tag's version independently
     let isStale = false;
     if (existing) {
       for (const tag of existing.tags) {
-        if ((currentTagVersions[tag] ?? 0) !== (existing.tagVersions[tag] ?? 0)) {
+        const currentVersion = currentTagVersions[tag] ?? 0;
+        const recordedVersion = existing.tagVersions[tag] ?? 0;
+        if (currentVersion !== recordedVersion) {
           isStale = true;
           break;
         }
@@ -124,7 +134,7 @@ export function unstable_cache<T extends (...args: any[]) => Promise<any>>(
 }
 
 export async function revalidateTag(tag: string): Promise<void> {
-  // Update version in DB: start at 1 if missing, or increment
+  // Update version in DB: start at 1 if missing (differs from initial 0), or increment
   await db
     .insert(schema.cacheVersions)
     .values({ tag, version: 1 })
@@ -133,10 +143,7 @@ export async function revalidateTag(tag: string): Promise<void> {
       set: { version: sql`cache_versions.version + 1`, updatedAt: new Date() }
     });
   
-  // Force refresh of local version next time it is read
-  tagVersions.delete(tag);
-
-  // Clear local cache
+  // Clear local cache entries
   const keys = tagIndex.get(tag);
   if (keys) {
     for (const key of keys) {
