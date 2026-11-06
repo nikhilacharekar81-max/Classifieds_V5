@@ -120,7 +120,12 @@ export const BoostAdModal: React.FC<BoostAdModalProps> = ({
 
     try {
       if (app?.boostListing) {
-        const result = await app.boostListing(listing.id, selectedPackage.id, paymentMethod);
+        const result = await app.boostListing(listing.id, selectedPackage.id, paymentMethod, {
+          paymentId: `placeholder_${Date.now()}`,
+          signature: 'placeholder_signature',
+          amount: totalPayable,
+          currency: 'INR'
+        });
         if (!result.success) {
           setErrorMessage(result.message);
           setIsProcessing(false);

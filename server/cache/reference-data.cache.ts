@@ -116,7 +116,7 @@ export async function recordDurableInvalidation(
     const performRecord = async () => {
       if (success) {
         const whereClause = eventId 
-            ? eq(cacheInvalidationOutbox.id, eventId)
+            ? and(eq(cacheInvalidationOutbox.id, eventId), eq(cacheInvalidationOutbox.status, 'processing'))
             : and(
               eq(cacheInvalidationOutbox.tag, tag),
               expectedGeneration !== undefined
