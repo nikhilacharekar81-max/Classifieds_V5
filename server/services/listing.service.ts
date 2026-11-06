@@ -445,7 +445,7 @@ export class ListingService {
 
     // Enforce Quota and Fees (Integrity check) with row-level locking to prevent parallel bypass
     const { db } = await import('@/src/db/index');
-    const { sql, eq, and, inArray } = await import('@/src/db/pg-orm');
+    const { sql, eq, or, and, inArray } = await import('@/src/db/pg-orm');
     const schema = await import('@/src/db/schema');
 
     let parentCategoryFee: number | undefined = undefined;
