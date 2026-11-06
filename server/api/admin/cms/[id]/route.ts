@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
-import { cmsRepository } from '@/server/repositories/cms.repository';
+import { adminService } from '@/server/services/admin.service';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 
 export async function PUT(
@@ -12,7 +12,7 @@ export async function PUT(
     if (!authContext) {
       return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
     }
-    if (!authContext.isAdmin && !authContext.isModerator) {
+    if (!authContext.isAdmin) {
       return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
     }
 
@@ -26,7 +26,11 @@ export async function PUT(
     if (body.status !== undefined) updateFields.isActive = body.status === 'published';
     if (body.isActive !== undefined) updateFields.isActive = Boolean(body.isActive);
 
-    const updated = await cmsRepository.updatePage(id, updateFields);
+    const updated = await adminService.updateCmsPage(
+      id, 
+      updateFields,
+      { id: authContext.userId, name: authContext.user.name, ipAddress: authContext.ipAddress }
+    );
 
     if (!updated) {
       return NextResponse.json({ error: 'CMS page not found' }, { status: 404 });
@@ -53,7 +57,10 @@ export async function DELETE(
       return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
     }
 
-    const success = await cmsRepository.deletePage(id);
+    const success = await adminService.deleteCmsPage(
+      id,
+      { id: authContext.userId, name: authContext.user.name, ipAddress: authContext.ipAddress }
+    );
     if (!success) {
       return NextResponse.json({ error: 'CMS page not found' }, { status: 404 });
     }

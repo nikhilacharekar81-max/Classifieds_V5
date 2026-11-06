@@ -128,7 +128,7 @@ export class EmailService {
       toName: data.toName || 'User',
       subject: data.subject,
       body: data.body,
-      type: data.type,
+      type: data.type as any,
       listingId: data.listingId,
       relatedUserId: data.relatedUserId,
     });

@@ -172,6 +172,11 @@ export class CategoryRepository {
     freeListingsQuota?: number;
   }): Promise<Category> {
     try {
+      if (data.parentId) {
+        const hasCycle = await this.isCycle(data.id, data.parentId);
+        if (hasCycle) throw new Error('Category hierarchy cycle detected');
+      }
+
       const inserted = await db
         .insert(schema.categories)
         .values({
@@ -199,6 +204,11 @@ export class CategoryRepository {
 
   public async update(id: string, data: Partial<typeof schema.categories.$inferInsert>): Promise<Category | null> {
     try {
+      if (data.parentId) {
+        const hasCycle = await this.isCycle(id, data.parentId);
+        if (hasCycle) throw new Error('Category hierarchy cycle detected');
+      }
+
       const updated = await db
         .update(schema.categories)
         .set(data)
@@ -206,20 +216,52 @@ export class CategoryRepository {
         .returning();
 
       return updated[0] ? this.mapRowToCategory(updated[0]) : null;
-    } catch (error) {
+    } catch (error: any) {
       console.error(`CategoryRepository.update error for ${id}:`, error);
-      throw new Error(`Failed to update category ${id}`, { cause: error });
+      throw new Error(error.message || `Failed to update category ${id}`, { cause: error });
     }
   }
 
   public async delete(id: string): Promise<boolean> {
     try {
+      const hasListings = await this.checkHasActiveListings(id);
+      if (hasListings) {
+        throw new Error('Cannot delete category with active listings');
+      }
+
       const res = await db.delete(schema.categories).where(eq(schema.categories.id, id)).returning({ id: schema.categories.id });
       return res.length > 0;
-    } catch (error) {
+    } catch (error: any) {
       console.error(`CategoryRepository.delete error for ${id}:`, error);
-      throw new Error(`Failed to delete category ${id}`, { cause: error });
+      throw new Error(error.message || `Failed to delete category ${id}`, { cause: error });
     }
+  }
+
+  public async checkHasActiveListings(categoryId: string): Promise<boolean> {
+    const rows = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.listings)
+      .where(
+        and(
+          or(eq(schema.listings.categoryId, categoryId), eq(schema.listings.subcategoryId, categoryId)),
+          eq(schema.listings.status, 'approved')
+        )
+      );
+    return (rows[0]?.count || 0) > 0;
+  }
+
+  public async isCycle(id: string, parentId: string): Promise<boolean> {
+    if (id === parentId) return true;
+    let currentId: string | null = parentId;
+    const visited = new Set<string>([id]);
+
+    while (currentId) {
+      if (visited.has(currentId)) return true;
+      visited.add(currentId);
+      const cat = await this.findById(currentId);
+      currentId = cat?.parentId || null;
+    }
+    return false;
   }
 
   // Custom Fields (EAV)

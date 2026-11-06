@@ -41,7 +41,10 @@ export class AdminService {
     return await categoryRepository.findAll();
   }
 
-  public async addCategory(catData: Omit<Category, 'id' | 'listingCount'>): Promise<Category> {
+  public async addCategory(
+    catData: Omit<Category, 'id' | 'listingCount'>,
+    actor?: { id?: string; name?: string; ipAddress?: string }
+  ): Promise<Category> {
     const id = `cat_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const category = await categoryRepository.create({
       id,
@@ -59,11 +62,24 @@ export class AdminService {
     });
 
     await invalidateCategoryReferenceCache();
-    await this.recordAudit('CATEGORY_CREATED', 'Categories', id, category.name, `Created category "${category.name}"`);
+    await this.recordAudit(
+      'CATEGORY_CREATED',
+      'Categories',
+      id,
+      category.name,
+      `Created category "${category.name}"`,
+      actor?.id,
+      actor?.name,
+      actor?.ipAddress
+    );
     return category;
   }
 
-  public async updateCategory(id: string, updatedData: Partial<Category>): Promise<Category | null> {
+  public async updateCategory(
+    id: string,
+    updatedData: Partial<Category>,
+    actor?: { id?: string; name?: string; ipAddress?: string }
+  ): Promise<Category | null> {
     const fields: any = {};
     if (updatedData.name !== undefined) fields.name = updatedData.name;
     if (updatedData.slug !== undefined) fields.slug = updatedData.slug;
@@ -80,18 +96,39 @@ export class AdminService {
     const updated = await categoryRepository.update(id, fields);
     if (updated) {
       await invalidateCategoryReferenceCache();
-      await this.recordAudit('CATEGORY_UPDATED', 'Categories', id, updated.name, `Updated category "${updated.name}"`);
+      await this.recordAudit(
+        'CATEGORY_UPDATED',
+        'Categories',
+        id,
+        updated.name,
+        `Updated category "${updated.name}"`,
+        actor?.id,
+        actor?.name,
+        actor?.ipAddress
+      );
     }
     return updated;
   }
 
-  public async deleteCategory(id: string): Promise<boolean> {
+  public async deleteCategory(
+    id: string,
+    actor?: { id?: string; name?: string; ipAddress?: string }
+  ): Promise<boolean> {
     const cat = await categoryRepository.findById(id);
     const success = await categoryRepository.delete(id);
     if (success) {
       await invalidateCategoryReferenceCache();
       if (cat) {
-        await this.recordAudit('CATEGORY_DELETED', 'Categories', id, cat.name, `Deleted category "${cat.name}"`);
+        await this.recordAudit(
+          'CATEGORY_DELETED',
+          'Categories',
+          id,
+          cat.name,
+          `Deleted category "${cat.name}"`,
+          actor?.id,
+          actor?.name,
+          actor?.ipAddress
+        );
       }
     }
     return success;
@@ -175,7 +212,52 @@ export class AdminService {
     newSettings: Partial<SystemSettings>,
     actor?: { id?: string; name?: string; ipAddress?: string }
   ): Promise<SystemSettings> {
-    const updated = await adminRepository.updateSystemSettings(newSettings);
+    const validated: Partial<SystemSettings> = {};
+    
+    if (newSettings.siteName !== undefined) {
+      const val = String(newSettings.siteName).trim();
+      if (val) validated.siteName = val;
+    }
+    
+    if (newSettings.listingDurationDays !== undefined) {
+      const val = parseInt(String(newSettings.listingDurationDays), 10);
+      if (!isNaN(val) && val >= 1 && val <= 365) {
+        validated.listingDurationDays = val;
+      } else {
+        throw new Error('Listing duration must be between 1 and 365 days');
+      }
+    }
+    
+    if (newSettings.extraListingFee !== undefined) {
+      const val = parseFloat(String(newSettings.extraListingFee));
+      if (!isNaN(val) && val >= 0) {
+        validated.extraListingFee = Number(val.toFixed(2));
+      } else {
+        throw new Error('Extra listing fee must be a non-negative number');
+      }
+    }
+
+    if (newSettings.freeListingsLimit !== undefined) {
+      const val = parseInt(String(newSettings.freeListingsLimit), 10);
+      if (!isNaN(val) && val >= 0) validated.freeListingsLimit = val;
+    }
+
+    if (newSettings.maxPhotosPerListing !== undefined) {
+      const val = parseInt(String(newSettings.maxPhotosPerListing), 10);
+      if (!isNaN(val) && val >= 1 && val <= 20) validated.maxPhotosPerListing = val;
+    }
+
+    if (newSettings.autoApproveVerifiedUsers !== undefined) validated.autoApproveVerifiedUsers = Boolean(newSettings.autoApproveVerifiedUsers);
+    if (newSettings.maintenanceMode !== undefined) validated.maintenanceMode = Boolean(newSettings.maintenanceMode);
+    if (newSettings.watermarkImages !== undefined) validated.watermarkImages = Boolean(newSettings.watermarkImages);
+    if (newSettings.aiSpamFilterEnabled !== undefined) validated.aiSpamFilterEnabled = Boolean(newSettings.aiSpamFilterEnabled);
+    if (newSettings.otpLoginEnabled !== undefined) validated.otpLoginEnabled = Boolean(newSettings.otpLoginEnabled);
+
+    if (Object.keys(validated).length === 0) {
+      return await this.getSettings();
+    }
+
+    const updated = await adminRepository.updateSystemSettings(validated);
     await invalidateSettingsReferenceCache();
     await this.recordAudit(
       'SETTINGS_UPDATED',
@@ -199,7 +281,11 @@ export class AdminService {
     return await cmsRepository.findBySlug(slug);
   }
 
-  public async updateCmsPage(id: string, updatedData: Partial<CmsPage>): Promise<CmsPage | null> {
+  public async updateCmsPage(
+    id: string, 
+    updatedData: Partial<CmsPage>,
+    actor?: { id?: string; name?: string; ipAddress?: string }
+  ): Promise<CmsPage | null> {
     const fields: any = {};
     if (updatedData.title !== undefined) fields.title = updatedData.title;
     if (updatedData.content !== undefined) fields.content = updatedData.content;
@@ -207,12 +293,28 @@ export class AdminService {
     if (updatedData.seoDescription !== undefined) fields.seoDescription = updatedData.seoDescription;
     if (updatedData.isActive !== undefined) fields.isActive = updatedData.isActive;
 
-    return await cmsRepository.updatePage(id, fields);
+    const updated = await cmsRepository.updatePage(id, fields);
+    if (updated) {
+      await this.recordAudit(
+        'CMS_PAGE_UPDATED',
+        'CMS',
+        id,
+        updated.title,
+        `Updated CMS page "${updated.title}"`,
+        actor?.id,
+        actor?.name,
+        actor?.ipAddress
+      );
+    }
+    return updated;
   }
 
-  public async addCmsPage(data: Omit<CmsPage, 'id' | 'updatedAt'>): Promise<CmsPage> {
+  public async addCmsPage(
+    data: Omit<CmsPage, 'id' | 'updatedAt'>,
+    actor?: { id?: string; name?: string; ipAddress?: string }
+  ): Promise<CmsPage> {
     const id = `p_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    return await cmsRepository.createPage({
+    const created = await cmsRepository.createPage({
       id,
       slug: data.slug,
       title: data.title,
@@ -220,10 +322,38 @@ export class AdminService {
       seoTitle: data.seoTitle,
       seoDescription: data.seoDescription,
     });
+    await this.recordAudit(
+      'CMS_PAGE_CREATED',
+      'CMS',
+      id,
+      created.title,
+      `Created CMS page "${created.title}"`,
+      actor?.id,
+      actor?.name,
+      actor?.ipAddress
+    );
+    return created;
   }
 
-  public async deleteCmsPage(id: string): Promise<boolean> {
-    return await cmsRepository.deletePage(id);
+  public async deleteCmsPage(
+    id: string,
+    actor?: { id?: string; name?: string; ipAddress?: string }
+  ): Promise<boolean> {
+    const page = await cmsRepository.findById(id);
+    const success = await cmsRepository.deletePage(id);
+    if (success && page) {
+      await this.recordAudit(
+        'CMS_PAGE_DELETED',
+        'CMS',
+        id,
+        page.title,
+        `Deleted CMS page "${page.title}"`,
+        actor?.id,
+        actor?.name,
+        actor?.ipAddress
+      );
+    }
+    return success;
   }
 
   // Audit Logging

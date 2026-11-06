@@ -2,11 +2,13 @@ import { NextRequest } from '@/src/shims/next-server';
 import { userRepository } from '@/server/repositories/user.repository';
 import { UserAccount } from '@/lib/types';
 
+import { AdminRole, ROLE_PERMISSIONS } from './roles';
+
 export interface AuthenticatedContext {
   user: UserAccount;
   userId: string;
   sessionId: string;
-  adminRole: string | null;
+  adminRole: AdminRole | null;
   isAdmin: boolean;
   isSuperAdmin: boolean;
   isModerator: boolean;
@@ -47,11 +49,6 @@ export function getRequestIp(req?: NextRequest | Request | null): string {
   return '127.0.0.1';
 }
 
-/**
- * Authoritative server-side authentication.
- * Authenticates strictly via verified PostgreSQL session token.
- * Never trusts caller-supplied user ID headers.
- */
 export async function getAuthenticatedUser(req: NextRequest): Promise<AuthenticatedContext | null> {
   const ipAddress = getRequestIp(req);
 
@@ -74,16 +71,18 @@ export async function getAuthenticatedUser(req: NextRequest): Promise<Authentica
   // Verify session against PostgreSQL user_sessions table
   const dbSession = await userRepository.findSession(token);
   if (dbSession && dbSession.user && dbSession.user.status === 'active') {
-    const role = dbSession.adminRole;
+    const role = dbSession.adminRole as AdminRole | null;
+    const perms = role ? ROLE_PERMISSIONS[role] : null;
+
     return {
       user: dbSession.user,
       userId: dbSession.user.id,
       sessionId: token,
-      adminRole: role || null,
-      isAdmin: role === 'admin' || role === 'super_admin' || role === 'support_agent' || role === 'content_manager',
+      adminRole: role,
+      isAdmin: perms?.canAccessAdmin ?? false,
       isSuperAdmin: role === 'super_admin',
-      isModerator: role === 'moderator' || role === 'super_admin',
-      isFinance: role === 'finance_user' || role === 'super_admin',
+      isModerator: perms?.canModerateListings ?? false,
+      isFinance: perms?.canManageFinance ?? false,
       ipAddress,
       impersonatedBy: dbSession.session.impersonatedBy || null,
     };

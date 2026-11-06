@@ -15,6 +15,7 @@ import {
   REFERENCE_CACHE_TAGS,
   isListingCacheBypassed,
 } from '@/server/cache/reference-data.cache';
+import { locationRepository } from '@/server/repositories/location.repository';
 import { Listing } from '@/lib/types';
 import { normalizeAdTitle, DUPLICATE_TITLE_ERROR_MESSAGE } from '@/lib/utils/adTitleValidation';
 
@@ -152,6 +153,21 @@ const fetchCachedPaginatedCatalogInternal = unstable_cache(
 );
 
 export class ListingService {
+  private async validateAndNormalizeCity(city?: string): Promise<string | undefined> {
+    if (!city || city === 'all' || city === 'all-india' || city === 'All India') {
+      return undefined;
+    }
+    const clean = city.trim();
+    if (!clean) return undefined;
+
+    const locations = await locationRepository.findAll();
+    const match = locations.find(l => 
+      l.type === 'city' && 
+      (l.name.toLowerCase() === clean.toLowerCase() || l.slug === clean.toLowerCase())
+    );
+    
+    return match ? match.slug : undefined;
+  }
   /**
    * Retrieves listings from PostgreSQL with full marketplace priority sorting:
    * Boosted Ads First -> Featured Ads -> Distance / Chronological
@@ -195,7 +211,7 @@ export class ListingService {
 
     const filterOptions: ListingFilterQuery = {
       status: 'approved',
-      city: params.city || q.city || undefined,
+      city: await this.validateAndNormalizeCity(params.city || q.city || undefined),
       category: params.category || q.category || undefined,
       subcategory: params.subcategory || q.subcategory || undefined,
       search: q.q || q.search || undefined,
@@ -248,10 +264,8 @@ export class ListingService {
   }
 
   public async getCachedLatestListings(city?: string, limit: number = 10): Promise<Listing[]> {
-    const cityKey =
-      city && city !== 'All India' && city !== 'all-india' && city !== 'all'
-        ? city.trim()
-        : '__ALL_INDIA__';
+    const validatedCity = await this.validateAndNormalizeCity(city);
+    const cityKey = validatedCity || '__ALL_INDIA__';
 
     if (isListingCacheBypassed()) {
       const res = await listingRepository.findMarketplaceListings({

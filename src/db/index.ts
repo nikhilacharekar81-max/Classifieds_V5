@@ -12,50 +12,75 @@ declare global {
   var _schemaAppliedPromise: Promise<void> | undefined;
 }
 
-const EMAIL_MIGRATION_SQL = `
-  ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "email_verified" boolean DEFAULT false NOT NULL;
-  ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "email_verified_at" timestamp with time zone;
-  ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "ban_reason" text;
+const MIGRATIONS: Record<string, string> = {
+  '001_email_verification': `
+    ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "email_verified" boolean DEFAULT false NOT NULL;
+    ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "email_verified_at" timestamp with time zone;
+    ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "ban_reason" text;
+    CREATE TABLE IF NOT EXISTS "email_verification_tokens" (
+        "id" varchar(64) PRIMARY KEY NOT NULL,
+        "user_id" varchar(64) NOT NULL REFERENCES "users"("id") ON DELETE cascade,
+        "token_hash" varchar(128) NOT NULL,
+        "expires_at" timestamp with time zone NOT NULL,
+        "used_at" timestamp with time zone,
+        "created_at" timestamp with time zone DEFAULT now() NOT NULL
+    );
+  `,
+  '002_ban_appeals_and_cache_versions': `
+    CREATE TABLE IF NOT EXISTS "ban_appeals" (
+        "id" varchar(64) PRIMARY KEY NOT NULL,
+        "user_id" varchar(64) NOT NULL REFERENCES "users"("id") ON DELETE cascade,
+        "user_email" varchar(255) NOT NULL,
+        "appeal_reason" text NOT NULL,
+        "status" varchar(32) DEFAULT 'pending' NOT NULL,
+        "reviewed_by" varchar(64),
+        "review_notes" text,
+        "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+        "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS "cache_versions" (
+        "tag" varchar(128) PRIMARY KEY NOT NULL,
+        "version" integer NOT NULL DEFAULT 1,
+        "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+    );
+  `,
+  '003_category_integrity': `
+    -- Add self-referencing foreign key for categories
+    ALTER TABLE "categories" DROP CONSTRAINT IF EXISTS "categories_parent_id_fk";
+    ALTER TABLE "categories" ADD CONSTRAINT "categories_parent_id_fk" FOREIGN KEY ("parent_id") REFERENCES "categories"("id") ON DELETE CASCADE;
+    
+    -- Ensure unique slugs
+    ALTER TABLE "categories" DROP CONSTRAINT IF EXISTS "categories_slug_unique";
+    ALTER TABLE "categories" ADD CONSTRAINT "categories_slug_unique" UNIQUE ("slug");
+  `,
+};
 
-  CREATE TABLE IF NOT EXISTS "email_verification_tokens" (
-      "id" varchar(64) PRIMARY KEY NOT NULL,
-      "user_id" varchar(64) NOT NULL REFERENCES "users"("id") ON DELETE cascade,
-      "token_hash" varchar(128) NOT NULL,
-      "expires_at" timestamp with time zone NOT NULL,
-      "used_at" timestamp with time zone,
-      "created_at" timestamp with time zone DEFAULT now() NOT NULL
-  );
+async function runMigrations(executor: { query: (sql: string, params?: any[]) => Promise<any> }) {
+  // 1. Ensure migration_logs table exists
+  await executor.query(`
+    CREATE TABLE IF NOT EXISTS "migration_logs" (
+      "id" varchar(128) PRIMARY KEY,
+      "applied_at" timestamp with time zone DEFAULT now() NOT NULL
+    )
+  `);
 
-  CREATE TABLE IF NOT EXISTS "ban_appeals" (
-      "id" varchar(64) PRIMARY KEY NOT NULL,
-      "user_id" varchar(64) NOT NULL REFERENCES "users"("id") ON DELETE cascade,
-      "user_email" varchar(255) NOT NULL,
-      "appeal_reason" text NOT NULL,
-      "status" varchar(32) DEFAULT 'pending' NOT NULL,
-      "reviewed_by" varchar(64),
-      "review_notes" text,
-      "created_at" timestamp with time zone DEFAULT now() NOT NULL,
-      "updated_at" timestamp with time zone DEFAULT now() NOT NULL
-  );
+  // 2. Fetch applied migrations
+  const appliedRes = await executor.query('SELECT id FROM migration_logs');
+  const applied = new Set(appliedRes.rows.map((r: any) => r.id));
 
-  CREATE TABLE IF NOT EXISTS "cache_versions" (
-      "tag" varchar(128) PRIMARY KEY NOT NULL,
-      "version" integer NOT NULL DEFAULT 1,
-      "updated_at" timestamp with time zone DEFAULT now() NOT NULL
-  );
-
-  UPDATE "listings" SET "status" = 'expired' WHERE "status" IN ('approved', 'pending') AND "expires_at" <= NOW();
-  DROP INDEX IF EXISTS "idx_unique_active_ad_title_per_seller";
-  CREATE UNIQUE INDEX IF NOT EXISTS "idx_unique_active_ad_title_per_seller" ON "listings" ("seller_id", LOWER(REGEXP_REPLACE(TRIM("title"), '\\s+', ' ', 'g'))) WHERE "status" IN ('approved', 'pending');
-`;
-
-async function applyEmailVerificationSchema(executor: { query: (sql: string, params?: any[]) => Promise<any> } | { exec: (sql: string) => Promise<any> }) {
-  const statements = EMAIL_MIGRATION_SQL.split(';').map(s => s.trim()).filter(Boolean);
-  for (const stmt of statements) {
-    if ('query' in executor) {
-      await executor.query(stmt);
-    } else {
-      await executor.exec(stmt);
+  // 3. Run pending migrations in order
+  const sortedKeys = Object.keys(MIGRATIONS).sort();
+  for (const key of sortedKeys) {
+    if (!applied.has(key)) {
+      console.log(`[Migration] Applying ${key}...`);
+      const statements = MIGRATIONS[key].split(';').map(s => s.trim()).filter(Boolean);
+      
+      // Run as individual statements to handle errors gracefully if needed
+      for (const stmt of statements) {
+        await executor.query(stmt);
+      }
+      
+      await executor.query('INSERT INTO migration_logs (id) VALUES ($1)', [key]);
     }
   }
 }
@@ -85,8 +110,8 @@ async function getInitializedPglite(): Promise<PGlite> {
           }
         }
       }
-      // Apply migration
-      await applyEmailVerificationSchema(pg);
+      // Apply migrations
+      await runMigrations(pg);
       
       try {
         await pg.exec('ALTER TABLE "listings" ALTER COLUMN "price" DROP NOT NULL;');
@@ -309,8 +334,8 @@ export async function ensurePgSchemaApplied(): Promise<void> {
         await seedEssentialProductionData(adminDb);
       }
 
-      // Safe migration for existing databases
-      await applyEmailVerificationSchema(adminPool);
+      // Safe migrations for existing databases
+      await runMigrations(adminPool);
 
       if (process.env.SQL_USER && process.env.SQL_USER !== adminUser) {
         await adminPool.query(`GRANT USAGE ON SCHEMA public TO "${process.env.SQL_USER}";`);

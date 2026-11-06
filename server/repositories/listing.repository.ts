@@ -818,7 +818,7 @@ export class ListingRepository {
         sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW()`
       );
 
-      if (fields.title) {
+      if (fields.title && typeof fields.title === 'string') {
         const normalized = normalizeAdTitle(fields.title);
         const conditions = [
           eq(schema.listings.sellerId, sellerId),

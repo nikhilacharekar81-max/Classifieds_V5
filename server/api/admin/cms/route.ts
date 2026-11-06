@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
-import { cmsRepository } from '@/server/repositories/cms.repository';
+import { adminService } from '@/server/services/admin.service';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 
 export async function GET(req: NextRequest) {
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     if (!authContext) {
       return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
     }
-    if (!authContext.isAdmin && !authContext.isModerator) {
+    if (!authContext.isAdmin) {
       return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
     }
 
@@ -31,17 +31,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Title and content are required' }, { status: 400 });
     }
 
-    const slug = body.slug || body.title.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-');
-    const id = body.id || `p_${Date.now().toString(36)}`;
-
-    const created = await cmsRepository.createPage({
-      id,
-      slug,
-      title: body.title,
-      content: body.content,
-      seoTitle: body.seoTitle || undefined,
-      seoDescription: body.seoDescription || undefined,
-    });
+    const created = await adminService.addCmsPage(
+      {
+        slug: body.slug || body.title.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-'),
+        title: body.title,
+        content: body.content,
+        seoTitle: body.seoTitle || undefined,
+        seoDescription: body.seoDescription || undefined,
+        isActive: body.isActive ?? true,
+      },
+      { id: authContext.userId, name: authContext.user.name, ipAddress: authContext.ipAddress }
+    );
 
     return NextResponse.json(created, { status: 201 });
   } catch (error: any) {

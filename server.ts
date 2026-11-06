@@ -4,6 +4,8 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { createServer as createViteServer, ViteDevServer } from 'vite';
 import { createExpressRouteHandler } from './src/shims/next-server.ts';
+import rateLimit from 'express-rate-limit';
+import { getAuthenticatedUser } from './lib/auth/session.ts';
 import { ensurePgSchemaApplied, db } from './src/db/index.ts';
 import { ensureDatabaseSeeded } from './server/seed-postgres.ts';
 import { categoryRepository } from './server/repositories/category.repository.ts';
@@ -99,6 +101,37 @@ async function startServer() {
       },
     })
   );
+
+  // Rate Limiting for public listing/search
+  const publicApiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // limit each IP to 100 requests per windowMs
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests, please try again later.' },
+    skip: (req) => req.path === '/api/health',
+  });
+
+  app.use('/api/listings', publicApiLimiter);
+
+  // Admin Guard Middleware
+  const adminGuard = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    try {
+      const auth = await getAuthenticatedUser(req as any);
+      if (!auth) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+      if (!auth.isAdmin) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      (req as any).auth = auth;
+      next();
+    } catch (err) {
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  };
+
+  app.use('/api/admin', adminGuard);
 
   // Health Check
   app.get('/api/health', async (_req, res) => {

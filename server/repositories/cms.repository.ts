@@ -16,6 +16,16 @@ export class CmsRepository {
     };
   }
 
+  public async findById(id: string): Promise<CmsPage | null> {
+    try {
+      const rows = await db.select().from(schema.cmsPages).where(eq(schema.cmsPages.id, id)).limit(1);
+      return rows[0] ? this.mapRowToPage(rows[0]) : null;
+    } catch (error) {
+      console.error(`CmsRepository.findById error for ${id}:`, error);
+      return null;
+    }
+  }
+
   public async findAllPages(): Promise<CmsPage[]> {
     try {
       const rows = await db.select().from(schema.cmsPages);

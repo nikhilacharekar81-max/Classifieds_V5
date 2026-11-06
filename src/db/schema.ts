@@ -102,9 +102,9 @@ export const kycDocuments = pgTable('kyc_documents', {
 export const categories = pgTable('categories', {
   id: varchar('id', { length: 64 }).primaryKey(),
   name: varchar('name', { length: 255 }).notNull(),
-  slug: varchar('slug', { length: 255 }).notNull(),
+  slug: varchar('slug', { length: 255 }).notNull().unique(),
   icon: varchar('icon', { length: 64 }).notNull().default('Package'),
-  parentId: varchar('parent_id', { length: 64 }),
+  parentId: varchar('parent_id', { length: 64 }).references(() => categories.id, { onDelete: 'cascade' }),
   orderIndex: integer('order_index').notNull().default(0),
   isActive: boolean('is_active').notNull().default(true),
   seoTitle: text('seo_title'),

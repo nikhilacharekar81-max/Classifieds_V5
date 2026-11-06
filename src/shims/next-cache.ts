@@ -14,8 +14,16 @@ interface CacheEntry {
   tagVersions: Record<string, number>;
 }
 
-const dataCacheStore = new Map<string, CacheEntry>();
-const tagIndex = new Map<string, Set<string>>();
+import { LRUCache } from 'lru-cache';
+
+const dataCacheStore = new LRUCache<string, CacheEntry>({
+  max: 5000,
+  ttl: 1000 * 60 * 60, // 1 hour default TTL
+});
+
+const tagIndex = new LRUCache<string, Set<string>>({
+  max: 1000,
+});
 
 // Batching mechanism for tag version fetches in the same execution tick
 let pendingTags = new Set<string>();

@@ -243,6 +243,9 @@ export function sql<T = any>(strings: TemplateStringsArray, ...values: any[]): S
 }
 
 export function eq(left: any, right: any): SqlExpr<boolean> {
+  if (right === undefined) {
+    throw new Error(`ORM Safety: eq() received undefined. Use isNull() or be explicit.`);
+  }
   return new SqlExpr<boolean>((params, opts) => {
     if (right === null) {
       return `${renderOperand(left, params, opts)} IS NULL`;
@@ -690,11 +693,16 @@ class UpdateQueryBuilder<TTable extends PgTableWithColumns<any>, TReturn = TTabl
 
     let sqlText = `UPDATE "${this.table._tableName}" SET ${setParts.join(', ')}`;
 
+    if (!this._where) {
+      throw new Error(`ORM Safety: UPDATE query missing .where(). Use .where(sql\`1=1\`) if intentional.`);
+    }
+
     if (this._where) {
       const whereSql = this._where.toSql(params);
-      if (whereSql && whereSql !== '1 = 1') {
-        sqlText += ` WHERE ${whereSql}`;
+      if (!whereSql || whereSql === '1 = 1') {
+        throw new Error(`ORM Safety: UPDATE query has unrestricted .where(). Use .where(sql\`1=1\`) if intentional.`);
       }
+      sqlText += ` WHERE ${whereSql}`;
     }
 
     if (this._hasReturning) {
@@ -758,11 +766,16 @@ class DeleteQueryBuilder<TTable extends PgTableWithColumns<any>, TReturn = TTabl
     const params: any[] = [];
     let sqlText = `DELETE FROM "${this.table._tableName}"`;
 
+    if (!this._where) {
+      throw new Error(`ORM Safety: DELETE query missing .where(). Use .where(sql\`1=1\`) if intentional.`);
+    }
+
     if (this._where) {
       const whereSql = this._where.toSql(params);
-      if (whereSql && whereSql !== '1 = 1') {
-        sqlText += ` WHERE ${whereSql}`;
+      if (!whereSql || whereSql === '1 = 1') {
+        throw new Error(`ORM Safety: DELETE query has unrestricted .where(). Use .where(sql\`1=1\`) if intentional.`);
       }
+      sqlText += ` WHERE ${whereSql}`;
     }
 
     if (this._hasReturning) {

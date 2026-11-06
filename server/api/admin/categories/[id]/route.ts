@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
-import { categoryRepository } from '@/server/repositories/category.repository';
-import { invalidateCategoryReferenceCache } from '@/server/cache/reference-data.cache';
+import { adminService } from '@/server/services/admin.service';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 
 export async function PUT(
@@ -13,7 +12,7 @@ export async function PUT(
     if (!authContext) {
       return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
     }
-    if (!authContext.isAdmin && !authContext.isModerator) {
+    if (!authContext.isAdmin) {
       return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
     }
 
@@ -31,12 +30,11 @@ export async function PUT(
     if (body.postingFee !== undefined) updateData.postingFee = String(body.postingFee);
     if (body.freeListingsQuota !== undefined) updateData.freeListingsQuota = body.freeListingsQuota;
 
-    const updated = await categoryRepository.update(id, updateData);
-    if (!updated) {
-      return NextResponse.json({ error: 'Category not found' }, { status: 404 });
-    }
-
-    await invalidateCategoryReferenceCache();
+    const updated = await adminService.updateCategory(
+      id, 
+      updateData,
+      { id: authContext.userId, name: authContext.user.name, ipAddress: authContext.ipAddress }
+    );
 
     return NextResponse.json(updated);
   } catch (error: any) {
@@ -59,12 +57,10 @@ export async function DELETE(
       return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
     }
 
-    const success = await categoryRepository.delete(id);
-    if (!success) {
-      return NextResponse.json({ error: 'Category not found' }, { status: 404 });
-    }
-
-    await invalidateCategoryReferenceCache();
+    const success = await adminService.deleteCategory(
+      id,
+      { id: authContext.userId, name: authContext.user.name, ipAddress: authContext.ipAddress }
+    );
 
     return NextResponse.json({ success: true, message: 'Category deleted' });
   } catch (error: any) {
