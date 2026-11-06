@@ -99,7 +99,7 @@ export async function enqueueDurableInvalidation(
 
 /**
  * Records or completes a durable cache invalidation entry in PostgreSQL.
- * Generation-aware: never overwrites a newer pending invalidation or a leased worker claim.
+ * Generation and lease-aware: never overwrites a newer invalidation or a claimed worker event.
  */
 export async function recordDurableInvalidation(
   tag: string,
@@ -107,77 +107,77 @@ export async function recordDurableInvalidation(
   errMessage?: string,
   tx?: DbExecutor,
   expectedGeneration?: number,
-  eventId?: string
+  eventId?: string,
+  leaseToken?: string
 ): Promise<void> {
   try {
     const now = new Date();
     const executor = tx ?? db;
 
     const performRecord = async () => {
+      if (!eventId) {
+        if (!success) {
+           await executor
+            .insert(cacheInvalidationOutbox)
+            .values({
+              id: `outbox_${tag}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+              tag,
+              status: 'pending',
+              attempts: 1,
+              lastError: errMessage || 'Failed to revalidate cache tag',
+              nextRetryAt: new Date(Date.now() + 30000),
+            });
+        }
+        return;
+      }
+
       if (success) {
-        const updated = await executor
+        const conditions = [
+          eq(cacheInvalidationOutbox.id, eventId),
+          expectedGeneration !== undefined ? eq(cacheInvalidationOutbox.attempts, expectedGeneration) : sql`TRUE`,
+        ];
+
+        if (leaseToken) {
+          conditions.push(eq(cacheInvalidationOutbox.status, 'processing'));
+          conditions.push(eq(cacheInvalidationOutbox.lastError, leaseToken));
+        } else {
+          conditions.push(eq(cacheInvalidationOutbox.status, 'pending'));
+        }
+
+        await executor
           .update(cacheInvalidationOutbox)
           .set({
             status: 'completed',
             lastError: null,
             completedAt: now,
           })
-          .where(
-            and(
-              eq(cacheInvalidationOutbox.id, eventId),
-              inArray(cacheInvalidationOutbox.status, ['pending', 'processing']),
-              expectedGeneration !== undefined ? eq(cacheInvalidationOutbox.attempts, expectedGeneration) : sql`TRUE`
-            )
-          );
+          .where(and(...conditions));
+      } else {
+        // Failure path: increment attempts and set to pending for retry
+        const conditions = [
+          eq(cacheInvalidationOutbox.id, eventId),
+          expectedGeneration !== undefined ? eq(cacheInvalidationOutbox.attempts, expectedGeneration) : sql`TRUE`,
+        ];
 
-        if (updated.length === 0) {
-          // If no pending/processing event found to update, insert as completed if ID exists
-          if (eventId) {
-              await executor
-                .insert(cacheInvalidationOutbox)
-                .values({
-                  id: eventId,
-                  tag,
-                  status: 'completed',
-                  attempts: expectedGeneration || 1,
-                  lastError: null,
-                  nextRetryAt: now,
-                  completedAt: now,
-                })
-                .onConflictDoUpdate({
-                  target: cacheInvalidationOutbox.id,
-                  set: { status: 'completed', completedAt: now, lastError: null }
-                });
-          }
+        if (leaseToken) {
+          conditions.push(eq(cacheInvalidationOutbox.status, 'processing'));
+          conditions.push(eq(cacheInvalidationOutbox.lastError, leaseToken));
+        } else {
+          conditions.push(eq(cacheInvalidationOutbox.status, 'pending'));
         }
-      } else if (eventId) {
-        // Failure path: only update if still owned by 'processing' lease
+
+        const nextAttempts = (expectedGeneration ?? 1) + 1;
+        const backoffMs = Math.min(300000, Math.pow(2, Math.min(nextAttempts, 6)) * 5000);
+
         await executor
           .update(cacheInvalidationOutbox)
           .set({
             status: 'pending',
             attempts: sql`${cacheInvalidationOutbox.attempts} + 1`,
             lastError: errMessage || 'Failed to revalidate cache tag',
-            nextRetryAt: new Date(Date.now() + 30000),
+            nextRetryAt: new Date(Date.now() + backoffMs),
           })
-          .where(
-            and(
-                eq(cacheInvalidationOutbox.id, eventId),
-                eq(cacheInvalidationOutbox.status, 'processing'),
-                expectedGeneration !== undefined ? eq(cacheInvalidationOutbox.attempts, expectedGeneration) : sql`TRUE`
-            )
-          );
-      } else {
-        await executor
-          .insert(cacheInvalidationOutbox)
-          .values({
-            id: `outbox_${tag}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-            tag,
-            status: 'pending',
-            attempts: 1,
-            lastError: errMessage || 'Failed to revalidate cache tag',
-            nextRetryAt: new Date(Date.now() + 30000),
-          });
+          .where(and(...conditions));
       }
     };
 
@@ -266,44 +266,25 @@ export async function processPendingInvalidations(): Promise<void> {
         await revalidateTag(entry.tag);
         failedInvalidationTags.delete(entry.tag);
 
-        await withDbRetry(() =>
-          db
-            .update(cacheInvalidationOutbox)
-            .set({
-              status: 'completed',
-              lastError: null,
-              completedAt: new Date(),
-            })
-            .where(
-              and(
-                eq(cacheInvalidationOutbox.id, entry.id),
-                eq(cacheInvalidationOutbox.status, 'processing'),
-                eq(cacheInvalidationOutbox.attempts, currentAttempts),
-                eq(cacheInvalidationOutbox.lastError, claimToken)
-              )
-            )
+        await recordDurableInvalidation(
+          entry.tag,
+          true,
+          undefined,
+          undefined,
+          currentAttempts,
+          entry.id,
+          claimToken
         );
       } catch (err: any) {
-        const nextAttempts = currentAttempts + 1;
-        const backoffMs = Math.min(300000, Math.pow(2, Math.min(nextAttempts, 6)) * 5000);
         failedInvalidationTags.add(entry.tag);
-
-        await withDbRetry(() =>
-          db
-            .update(cacheInvalidationOutbox)
-            .set({
-              status: 'pending',
-              attempts: nextAttempts,
-              lastError: String(err?.message || err),
-              nextRetryAt: new Date(Date.now() + backoffMs),
-            })
-            .where(
-              and(
-                eq(cacheInvalidationOutbox.id, entry.id),
-                eq(cacheInvalidationOutbox.status, 'processing'),
-                eq(cacheInvalidationOutbox.lastError, claimToken)
-              )
-            )
+        await recordDurableInvalidation(
+          entry.tag,
+          false,
+          String(err?.message || err),
+          undefined,
+          currentAttempts,
+          entry.id,
+          claimToken
         );
       }
     }
