@@ -1,4 +1,4 @@
-export type AdminRole = 'super_admin' | 'admin' | 'moderator' | 'finance_user';
+export type AdminRole = 'super_admin' | 'admin' | 'moderator' | 'support_agent' | 'finance_user' | 'content_manager' | 'marketing_manager';
 
 export interface RolePermissions {
   canAccessAdmin: boolean;
@@ -32,10 +32,19 @@ export const ROLE_PERMISSIONS: Record<AdminRole, RolePermissions> = {
   moderator: {
     canAccessAdmin: true,
     canManageSettings: false,
-    canManageCategories: false, // Viewing only is handled in route
+    canManageCategories: false,
     canManageCms: false,
     canManageUsers: false,
     canModerateListings: true,
+    canManageFinance: false,
+  },
+  support_agent: {
+    canAccessAdmin: true,
+    canManageSettings: false,
+    canManageCategories: false,
+    canManageCms: false,
+    canManageUsers: true,
+    canModerateListings: false,
     canManageFinance: false,
   },
   finance_user: {
@@ -46,6 +55,24 @@ export const ROLE_PERMISSIONS: Record<AdminRole, RolePermissions> = {
     canManageUsers: false,
     canModerateListings: false,
     canManageFinance: true,
+  },
+  content_manager: {
+    canAccessAdmin: true,
+    canManageSettings: false,
+    canManageCategories: true,
+    canManageCms: true,
+    canManageUsers: false,
+    canModerateListings: false,
+    canManageFinance: false,
+  },
+  marketing_manager: {
+    canAccessAdmin: true,
+    canManageSettings: false,
+    canManageCategories: false,
+    canManageCms: false,
+    canManageUsers: false,
+    canModerateListings: false,
+    canManageFinance: false,
   },
 };
 
@@ -60,6 +87,9 @@ export function getRoleLabel(role: string | null | undefined): string {
     case 'admin': return 'Admin';
     case 'moderator': return 'Moderator';
     case 'finance_user': return 'Finance User';
+    case 'support_agent': return 'Support Agent';
+    case 'content_manager': return 'Content Manager';
+    case 'marketing_manager': return 'Marketing Manager';
     default: return 'User';
   }
 }

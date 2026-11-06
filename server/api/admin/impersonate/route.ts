@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { userRepository } from '@/server/repositories/user.repository';
 import { adminRepository } from '@/server/repositories/admin.repository';
-import { getAuthenticatedUser } from '@/lib/auth/session';
 import { db } from '@/src/db/index';
 import * as schema from '@/src/db/schema';
 import { eq } from '@/src/db/pg-orm';
@@ -10,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
-    const authContext = await getAuthenticatedUser(req);
+    const authContext = req.auth;
     if (!authContext) {
       return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
@@ -19,10 +18,6 @@ export async function POST(req: NextRequest) {
     const { action, userId } = body;
 
     if (action === 'start') {
-      if (!authContext.isAdmin && !authContext.isSuperAdmin) {
-        return NextResponse.json({ error: 'Forbidden: Admin access required to impersonate users' }, { status: 403 });
-      }
-
       if (!userId || typeof userId !== 'string') {
         return NextResponse.json({ error: 'Target userId is required' }, { status: 400 });
       }

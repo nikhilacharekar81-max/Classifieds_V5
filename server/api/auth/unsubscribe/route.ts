@@ -37,6 +37,11 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const authContext = req.auth;
+    if (!authContext) {
+      return NextResponse.json({ error: 'Authentication required to unsubscribe via UI.' }, { status: 401 });
+    }
+
     const body = await req.json();
     const email = body.email?.toLowerCase().trim();
     
@@ -45,11 +50,21 @@ export async function POST(req: NextRequest) {
     }
 
     const user = await userRepository.findByEmail(email);
-    if (user) {
-      await db.update(schema.users)
-        .set({ emailSubscribed: false, emailUnsubscribedAt: new Date() })
-        .where(eq(schema.users.id, user.id));
+    if (!user) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
+
+    // Authorization: User can unsubscribe themselves, or an admin/moderator can unsubscribe anyone
+    const isOwner = authContext.user.id === user.id;
+    const isPrivileged = authContext.role.canManageUsers || authContext.role.canModerateListings;
+
+    if (!isOwner && !isPrivileged) {
+      return NextResponse.json({ error: 'Forbidden: You can only unsubscribe your own account.' }, { status: 403 });
+    }
+
+    await db.update(schema.users)
+      .set({ emailSubscribed: false, emailUnsubscribedAt: new Date() })
+      .where(eq(schema.users.id, user.id));
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

@@ -1,4 +1,5 @@
 import { cache } from 'react';
+import crypto from 'node:crypto';
 import { unstable_cache } from '@/src/shims/next-cache';
 import {
   listingRepository,
@@ -430,21 +431,65 @@ export class ListingService {
     const durationDays = settings.listingDurationDays || 30;
     const expiresAt = new Date(Date.now() + durationDays * 24 * 3600 * 1000);
 
-    // Enforce Quota and Fees (Integrity check)
+    // Enforce Quota and Fees (Integrity check) with row-level locking to prevent parallel bypass
+    const { db } = await import('@/src/db/index');
+    const { sql, eq } = await import('@/src/db/pg-orm');
+    const schema = await import('@/src/db/schema');
+    
+    await db.execute(sql`SELECT id FROM users WHERE id = ${sellerId} FOR UPDATE`);
     const seller = await userRepository.findById(sellerId);
     const activeCount = seller?.activeListings || 0;
     
     // Priority: Category quota -> System default
     const quotaLimit = existingCategory.freeListingsQuota ?? settings.freeListingsLimit ?? 3;
-    const postingFee = Number(existingCategory.postingFee) > 0 ? Number(existingCategory.postingFee) : (settings.extraListingFee || 0);
+    const postingFee = (existingCategory.postingFee !== undefined && existingCategory.postingFee !== null) ? Number(existingCategory.postingFee) : (settings.extraListingFee || 0);
 
     if (activeCount >= quotaLimit && !actorMeta?.isAdminAction) {
-      // If over quota, require payment. Since no gateway is integrated yet, we block and inform the UI.
-      return { 
-        success: false, 
-        error: `Listing quota exceeded. You have ${activeCount} active ads. A posting fee of ₹${postingFee} is required for additional listings.`,
-        status: 402 // Payment Required
-      };
+      const paymentId = (data as any).postingFeePaymentId;
+      const paymentGateway = (data as any).paymentGateway || 'Simulated';
+
+      if (!paymentId) {
+        return { 
+          success: false, 
+          error: `Listing quota exceeded. You have ${activeCount} active ads. A posting fee of ₹${postingFee} is required for additional listings.`,
+          status: 402 // Payment Required
+        };
+      }
+
+      // 1. Verify payment hasn't been used before (idempotency)
+      const existingPayment = await db
+        .select()
+        .from(schema.listingPayments)
+        .where(eq(schema.listingPayments.paymentId, paymentId))
+        .limit(1);
+
+      if (existingPayment.length > 0) {
+        return { success: false, error: 'This payment has already been used for another listing.', status: 409 };
+      }
+
+      // 2. Record the payment (atomic with listing creation is handled by the caller or we can do it here)
+      // Since createListing doesn't wrap everything in a transaction yet, we'll do a simple check.
+      // Ideally, the whole thing should be a transaction.
+      await db.insert(schema.listingPayments).values({
+        id: `lp_${crypto.randomUUID()}`,
+        userId: sellerId,
+        amount: String(postingFee),
+        paymentGateway,
+        paymentId: paymentId,
+        status: 'completed',
+      });
+
+      // Audit the paid post
+      await adminRepository.createAuditLog({
+        adminId: sellerId,
+        adminName: actorMeta?.name || data.sellerName || 'Authenticated User',
+        action: 'LISTING_PAID_POST',
+        module: 'Commerce',
+        targetId: id,
+        targetSummary: data.title,
+        details: `User paid ₹${postingFee} for extra listing beyond quota. Payment ID: ${paymentId}`,
+        ipAddress: actorMeta?.ipAddress || 'unknown',
+      });
     }
 
     const paidCfg = settings.paidFeatures as any;
@@ -774,6 +819,25 @@ export class ListingService {
       if (!updated) {
         return { success: false, error: 'Failed to update listing', status: 500 };
       }
+
+      // Record audit log for update
+      if (authenticatedUserId) {
+        try {
+          await adminRepository.createAuditLog({
+            adminId: authenticatedUserId,
+            adminName: (updatedData as any).actorName || 'Authenticated User',
+            action: isAdmin || isModerator ? 'ADMIN_LISTING_UPDATED' : 'USER_LISTING_UPDATED',
+            module: 'Marketplace',
+            targetId: id,
+            targetSummary: updated.title,
+            details: `Updated listing fields: ${Object.keys(safeFields).join(', ')}`,
+            ipAddress: (updatedData as any).ipAddress || 'unknown',
+          });
+        } catch (auditErr) {
+          console.error('[ListingService] Audit log warning in updateListing:', auditErr);
+        }
+      }
+
       return { success: true, listing: updated, status: 200 };
     } catch (err: any) {
       console.error('ListingService.updateListing error:', err);

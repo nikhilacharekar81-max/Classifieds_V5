@@ -25,10 +25,22 @@ export class UserService {
     return await userRepository.findById(id);
   }
 
-  public async updateUser(id: string, updatedData: Partial<UserAccount>): Promise<UserAccount | null> {
+  public async updateUser(
+    id: string, 
+    updatedData: Partial<UserAccount & { adminRole?: string | null }>,
+    actor?: { id: string; name: string; ipAddress?: string }
+  ): Promise<UserAccount | null> {
     const fields: any = {};
     if (updatedData.name !== undefined) fields.name = updatedData.name;
+    if (updatedData.email !== undefined) fields.email = updatedData.email;
     if (updatedData.phone !== undefined) fields.phone = updatedData.phone;
+    if (updatedData.status !== undefined) fields.status = updatedData.status;
+    if (updatedData.type !== undefined) fields.type = updatedData.type;
+    if (updatedData.adminRole !== undefined) fields.adminRole = updatedData.adminRole;
+    if (updatedData.emailSubscribed !== undefined) fields.emailSubscribed = updatedData.emailSubscribed;
+    if (updatedData.emailVerified !== undefined) fields.emailVerified = updatedData.emailVerified;
+    if (updatedData.emailVerifiedAt !== undefined) fields.emailVerifiedAt = updatedData.emailVerifiedAt;
+    
     const anyData = updatedData as any;
     if (updatedData.businessDetails?.companyName !== undefined || anyData.businessName !== undefined) {
       fields.businessName = updatedData.businessDetails?.companyName ?? anyData.businessName;
@@ -44,7 +56,20 @@ export class UserService {
       if (updatedData.location.state) fields.state = updatedData.location.state;
     }
 
-    return await userRepository.update(id, fields);
+    const updated = await userRepository.update(id, fields);
+    if (updated && actor) {
+      await adminRepository.createAuditLog({
+        adminId: actor.id,
+        adminName: actor.name,
+        action: 'USER_UPDATED',
+        module: 'Users',
+        targetId: id,
+        targetSummary: updated.name,
+        details: `Updated user fields: ${Object.keys(fields).join(', ')}`,
+        ipAddress: actor.ipAddress || 'unknown',
+      });
+    }
+    return updated;
   }
 
   public async banUser(
@@ -59,7 +84,7 @@ export class UserService {
 
     await adminRepository.createAuditLog({
       adminId: actor?.id || 'system',
-      adminName: actor?.name || 'Administrator',
+      adminName: actor?.name || 'System',
       action: 'USER_BANNED',
       module: 'Users',
       targetId: userId,
@@ -82,7 +107,7 @@ export class UserService {
 
     await adminRepository.createAuditLog({
       adminId: actor?.id || 'system',
-      adminName: actor?.name || 'Administrator',
+      adminName: actor?.name || 'System',
       action: 'USER_UNBANNED',
       module: 'Users',
       targetId: userId,
@@ -107,7 +132,7 @@ export class UserService {
 
     await adminRepository.createAuditLog({
       adminId: actor?.id || 'system',
-      adminName: actor?.name || 'Administrator',
+      adminName: actor?.name || 'System',
       action: status === 'verified' ? 'KYC_APPROVED' : 'KYC_REJECTED',
       module: 'Users',
       targetId: userId,

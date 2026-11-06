@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { adminService } from '@/server/services/admin.service';
-import { getAuthenticatedUser } from '@/lib/auth/session';
 
 export async function PUT(
   req: NextRequest,
@@ -8,12 +7,9 @@ export async function PUT(
 ) {
   const { id } = await params;
   try {
-    const authContext = await getAuthenticatedUser(req);
+    const authContext = req.auth;
     if (!authContext) {
       return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
-    }
-    if (!authContext.isAdmin) {
-      return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
     }
 
     const body = await req.json();
@@ -49,12 +45,9 @@ export async function DELETE(
 ) {
   const { id } = await params;
   try {
-    const authContext = await getAuthenticatedUser(req);
+    const authContext = req.auth;
     if (!authContext) {
       return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
-    }
-    if (!authContext.isAdmin) {
-      return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
     }
 
     const success = await adminService.deleteCmsPage(

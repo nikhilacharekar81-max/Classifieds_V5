@@ -273,6 +273,17 @@ CREATE TABLE "payment_webhook_events" (
 	"processed_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "listing_payments" (
+	"id" varchar(64) PRIMARY KEY NOT NULL,
+	"user_id" varchar(64) NOT NULL,
+	"amount" numeric(10, 2) NOT NULL,
+	"payment_gateway" varchar(64) NOT NULL,
+	"payment_id" varchar(128) NOT NULL,
+	"status" varchar(32) DEFAULT 'completed' NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "listing_payments_payment_id_unique" UNIQUE("payment_id")
+);
+--> statement-breakpoint
 CREATE TABLE "system_settings" (
 	"id" varchar(32) PRIMARY KEY DEFAULT 'primary' NOT NULL,
 	"site_name" varchar(255) DEFAULT 'Chillyads' NOT NULL,

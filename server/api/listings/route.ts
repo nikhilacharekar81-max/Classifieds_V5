@@ -189,6 +189,8 @@ export async function POST(req: NextRequest) {
       status: authContext.isAdmin || authContext.isModerator || authContext.isSuperAdmin ? (body.status || 'approved') : 'pending',
       isFeatured: (authContext.isAdmin || authContext.isModerator || authContext.isSuperAdmin) ? !!body.isFeatured : false,
       isBoosted: (authContext.isAdmin || authContext.isModerator || authContext.isSuperAdmin) ? !!body.isBoosted : false,
+      postingFeePaymentId: body.postingFeePaymentId,
+      paymentGateway: body.paymentGateway,
     };
 
     const result = await listingService.createListing(safePayload, authContext.userId, {

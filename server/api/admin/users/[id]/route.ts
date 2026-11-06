@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { userRepository } from '@/server/repositories/user.repository';
-import { getAuthenticatedUser } from '@/lib/auth/session';
 import { emailService } from '@/server/services/email.service';
+import { userService } from '@/server/services/user.service';
 import crypto from 'node:crypto';
 
 export async function PUT(
@@ -10,7 +10,7 @@ export async function PUT(
 ) {
   const { id } = await params;
   try {
-    const authContext = await getAuthenticatedUser(req);
+    const authContext = req.auth;
     if (!authContext) {
       return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
     }
@@ -171,7 +171,11 @@ export async function PUT(
       allowedFields.adminRole = body.adminRole || null;
     }
 
-    const updated = await userRepository.update(id, allowedFields);
+    const updated = await userService.updateUser(
+      id, 
+      allowedFields,
+      { id: authContext.userId, name: authContext.user.name, ipAddress: authContext.ipAddress }
+    );
     if (!updated) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }

@@ -122,8 +122,11 @@ async function startServer() {
 
   app.use('/api/listings', publicApiLimiter);
 
-  // Admin Guard Middleware
-  const adminGuard = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const { hasPermission } = await import('./lib/auth/roles.ts');
+  type RolePermissions = import('./lib/auth/roles.ts').RolePermissions;
+
+  // Admin Guard Middleware Factory
+  const adminGuard = (requiredPermission?: keyof RolePermissions) => async (req: express.Request, res: express.Response, next: express.NextFunction) => {
     try {
       const auth = await getAuthenticatedUser(req as any);
       if (!auth) {
@@ -132,6 +135,9 @@ async function startServer() {
       if (!auth.isAdmin) {
         return res.status(403).json({ error: 'Forbidden' });
       }
+      if (requiredPermission && !hasPermission(auth.adminRole, requiredPermission)) {
+        return res.status(403).json({ error: 'Forbidden: Insufficient permissions' });
+      }
       (req as any).auth = auth;
       next();
     } catch (err) {
@@ -139,7 +145,27 @@ async function startServer() {
     }
   };
 
-  app.use('/api/admin', adminGuard);
+  // Admin Console Routes with granular RBAC
+  app.all('/api/admin/metrics', adminGuard(), createExpressRouteHandler(adminMetricsRoute));
+  app.all('/api/admin/categories/:id', adminGuard('canManageCategories'), createExpressRouteHandler(adminCategoryByIdRoute));
+  app.all('/api/admin/categories', adminGuard('canManageCategories'), createExpressRouteHandler(adminCategoriesRoute));
+  app.all('/api/admin/locations/:id', adminGuard('canManageSettings'), createExpressRouteHandler(adminLocationByIdRoute));
+  app.all('/api/admin/locations', adminGuard('canManageSettings'), createExpressRouteHandler(adminLocationsRoute));
+  app.all('/api/admin/users/:id', adminGuard('canManageUsers'), createExpressRouteHandler(adminUserByIdRoute));
+  app.all('/api/admin/users', adminGuard('canManageUsers'), createExpressRouteHandler(adminUsersRoute));
+  app.all('/api/admin/moderation', adminGuard('canModerateListings'), createExpressRouteHandler(adminModerationRoute));
+  app.all('/api/admin/settings', adminGuard('canManageSettings'), createExpressRouteHandler(adminSettingsRoute));
+  app.all('/api/admin/cms/:id', adminGuard('canManageCms'), createExpressRouteHandler(adminCmsByIdRoute));
+  app.all('/api/admin/cms', adminGuard('canManageCms'), createExpressRouteHandler(adminCmsRoute));
+  app.all('/api/admin/impersonate', adminGuard('canManageUsers'), createExpressRouteHandler(adminImpersonateRoute));
+  
+  // Email Management Routes
+  app.all('/api/admin/email/templates', adminGuard('canManageSettings'), createExpressRouteHandler(adminEmailTemplatesRoute));
+  app.all('/api/admin/email/logs', adminGuard('canManageSettings'), createExpressRouteHandler(adminEmailLogsRoute));
+  app.all('/api/admin/email/newsletters/:id/send', adminGuard('canManageSettings'), createExpressRouteHandler(adminEmailNewsletterSendRoute));
+  app.all('/api/admin/email/newsletters', adminGuard('canManageSettings'), createExpressRouteHandler(adminEmailNewslettersRoute));
+  app.all('/api/admin/email/test-smtp', adminGuard('canManageSettings'), createExpressRouteHandler(adminEmailTestSmtpRoute));
+  app.all('/api/admin/email/custom-send', adminGuard('canManageSettings'), createExpressRouteHandler(adminEmailCustomSendRoute));
 
   // Health Check
   app.get('/api/health', async (_req, res) => {
@@ -183,30 +209,9 @@ async function startServer() {
   app.all('/api/boost/analytics', createExpressRouteHandler(boostAnalyticsRoute));
   app.all('/api/boost/cleanup-expired', createExpressRouteHandler(boostCleanupExpiredRoute));
 
-  // Admin Console Routes
-  app.all('/api/admin/metrics', createExpressRouteHandler(adminMetricsRoute));
-  app.all('/api/admin/categories/:id', createExpressRouteHandler(adminCategoryByIdRoute));
-  app.all('/api/admin/categories', createExpressRouteHandler(adminCategoriesRoute));
-  app.all('/api/admin/locations/:id', createExpressRouteHandler(adminLocationByIdRoute));
-  app.all('/api/admin/locations', createExpressRouteHandler(adminLocationsRoute));
-  app.all('/api/admin/users/:id', createExpressRouteHandler(adminUserByIdRoute));
-  app.all('/api/admin/users', createExpressRouteHandler(adminUsersRoute));
-  app.all('/api/admin/moderation', createExpressRouteHandler(adminModerationRoute));
-  app.all('/api/admin/settings', createExpressRouteHandler(adminSettingsRoute));
-  app.all('/api/admin/cms/:id', createExpressRouteHandler(adminCmsByIdRoute));
-  app.all('/api/admin/cms', createExpressRouteHandler(adminCmsRoute));
   app.all('/api/chat', createExpressRouteHandler(chatRoute));
   app.all('/api/reports', createExpressRouteHandler(reportsRoute));
   app.all('/api/user/kyc', createExpressRouteHandler(userKycRoute));
-  app.all('/api/admin/impersonate', createExpressRouteHandler(adminImpersonateRoute));
-  
-  // Email Management Routes
-  app.all('/api/admin/email/templates', createExpressRouteHandler(adminEmailTemplatesRoute));
-  app.all('/api/admin/email/logs', createExpressRouteHandler(adminEmailLogsRoute));
-  app.all('/api/admin/email/newsletters/:id/send', createExpressRouteHandler(adminEmailNewsletterSendRoute));
-  app.all('/api/admin/email/newsletters', createExpressRouteHandler(adminEmailNewslettersRoute));
-  app.all('/api/admin/email/test-smtp', createExpressRouteHandler(adminEmailTestSmtpRoute));
-  app.all('/api/admin/email/custom-send', createExpressRouteHandler(adminEmailCustomSendRoute));
 
   // SEO robots.txt
   app.get('/robots.txt', (req, res) => {

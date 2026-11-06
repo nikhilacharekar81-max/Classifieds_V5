@@ -58,7 +58,7 @@ export class ModerationService {
 
     await adminRepository.createAuditLog({
       adminId: actor?.id || 'system',
-      adminName: actor?.name || 'Moderator',
+      adminName: actor?.name || 'System',
       action: actionType === 'actioned' ? 'REPORT_ACTIONED' : 'REPORT_DISMISSED',
       module: 'Moderation',
       targetId: reportId,
@@ -91,7 +91,7 @@ export class ModerationService {
 
     await adminRepository.createAuditLog({
       adminId: actor?.id || 'system',
-      adminName: actor?.name || 'Moderator',
+      adminName: actor?.name || 'System',
       action: 'RULE_CREATED',
       module: 'Moderation',
       targetId: id,
@@ -164,8 +164,8 @@ export class ModerationService {
         }
 
         await adminRepository.createAuditLog({
-          adminId: actor?.id || 'staff',
-          adminName: actor?.name || 'Moderator',
+          adminId: actor?.id || 'system',
+          adminName: actor?.name || 'System',
           action: 'BAN_APPEAL_REVIEWED',
           module: 'Moderation',
           targetId: appealId,

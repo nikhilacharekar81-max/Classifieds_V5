@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { userService } from '@/server/services/user.service';
-import { getAuthenticatedUser } from '@/lib/auth/session';
 
 export async function GET(req: NextRequest) {
   try {
-    const authContext = await getAuthenticatedUser(req);
-    if (!authContext?.isAdmin) {
-      return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
+    const authContext = req.auth;
+    if (!authContext) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const { searchParams } = new URL(req.url);
@@ -21,9 +20,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const authContext = await getAuthenticatedUser(req);
-    if (!authContext?.isAdmin) {
-      return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
+    const authContext = req.auth;
+    if (!authContext) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const { action, userId, reason, status, notes } = await req.json();

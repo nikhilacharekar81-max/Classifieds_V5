@@ -466,7 +466,18 @@ export const cacheVersions = pgTable('cache_versions', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-// 24. Ban Appeals
+// 24. Listing Payments
+export const listingPayments = pgTable('listing_payments', {
+  id: varchar('id', { length: 64 }).primaryKey(),
+  userId: varchar('user_id', { length: 64 }).notNull().references(() => users.id),
+  amount: numeric('amount', { precision: 10, scale: 2 }).notNull(),
+  paymentGateway: varchar('payment_gateway', { length: 64 }).notNull(),
+  paymentId: varchar('payment_id', { length: 128 }).notNull().unique(),
+  status: varchar('status', { length: 32 }).notNull().default('completed'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// 25. Ban Appeals
 export const banAppeals = pgTable('ban_appeals', {
   id: varchar('id', { length: 64 }).primaryKey(),
   userId: varchar('user_id', { length: 64 }).notNull().references(() => users.id, { onDelete: 'cascade' }),

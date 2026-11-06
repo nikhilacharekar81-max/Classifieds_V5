@@ -1,15 +1,11 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { emailService } from '@/server/services/email.service';
-import { getAuthenticatedUser } from '@/lib/auth/session';
 
 export async function GET(req: NextRequest) {
   try {
-    const authContext = await getAuthenticatedUser(req);
+    const authContext = req.auth;
     if (!authContext) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    if (!authContext.isAdmin) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     const campaigns = await emailService.getNewsletters();
@@ -22,12 +18,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const authContext = await getAuthenticatedUser(req);
+    const authContext = req.auth;
     if (!authContext) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    if (!authContext.isAdmin) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     const body = await req.json();

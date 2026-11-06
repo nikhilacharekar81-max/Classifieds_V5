@@ -20,7 +20,11 @@ export class EmailService {
     return await emailRepository.findTemplateById(id);
   }
 
-  public async updateTemplate(id: string, updatedData: Partial<EmailTemplate>): Promise<EmailTemplate | null> {
+  public async updateTemplate(
+    id: string, 
+    updatedData: Partial<EmailTemplate>,
+    actor?: { id: string; name: string; ipAddress?: string }
+  ): Promise<EmailTemplate | null> {
     const fields: any = {};
     if (updatedData.name !== undefined) fields.name = updatedData.name;
     if (updatedData.subject !== undefined) fields.subject = updatedData.subject;
@@ -33,14 +37,14 @@ export class EmailService {
     const updated = await emailRepository.updateTemplate(id, fields);
     if (updated) {
       await adminRepository.createAuditLog({
-        adminId: 'system',
-        adminName: 'Administrator',
+        adminId: actor?.id || 'system',
+        adminName: actor?.name || 'System',
         action: 'EMAIL_TEMPLATE_UPDATED',
         module: 'Email',
         targetId: id,
         targetSummary: updated.name,
         details: `Updated template ${updated.name}`,
-        ipAddress: 'unknown',
+        ipAddress: actor?.ipAddress || 'unknown',
       });
     }
     return updated;
@@ -181,7 +185,10 @@ export class EmailService {
     });
   }
 
-  public async sendNewsletterCampaign(campaignId: string): Promise<{ success: boolean; recipientCount: number; message: string }> {
+  public async sendNewsletterCampaign(
+    campaignId: string,
+    actor?: { id: string; name: string; ipAddress?: string }
+  ): Promise<{ success: boolean; recipientCount: number; message: string }> {
     const campaigns = await emailRepository.findAllCampaigns();
     const campaign = campaigns.find((c) => c.id === campaignId);
     if (!campaign) {
@@ -218,14 +225,14 @@ export class EmailService {
     }
 
     await adminRepository.createAuditLog({
-      adminId: 'system',
-      adminName: 'Administrator',
+      adminId: actor?.id || 'system',
+      adminName: actor?.name || 'System',
       action: 'CAMPAIGN_SENT',
       module: 'Email',
       targetId: campaignId,
       targetSummary: campaign.subject,
       details: `Broadcast sent to ${count} users`,
-      ipAddress: 'unknown',
+      ipAddress: actor?.ipAddress || 'unknown',
     });
 
     return {

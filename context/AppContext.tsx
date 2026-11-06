@@ -400,11 +400,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode; initialServerDat
   }, [initialServerData]);
 
   const switchAdminRole = (role: Role) => {
-    console.warn('switchAdminRole is a demo capability and does not affect server-side permissions.');
+    if (!currentAdmin) return;
+    setCurrentAdmin({ ...currentAdmin, role });
     addToast({
       type: 'info',
-      title: `Role Switch Simulated (${role})`,
-      message: 'This is a demo capability. Server-side permissions remain unchanged.',
+      title: `Role Switched to ${role}`,
+      message: 'UI updated. Server-side permissions are still enforced based on your session.',
     });
   };
 

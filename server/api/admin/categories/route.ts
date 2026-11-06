@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { adminService } from '@/server/services/admin.service';
-import { getAuthenticatedUser } from '@/lib/auth/session';
+import { categoryRepository } from '@/server/repositories/category.repository';
 
 export async function GET() {
   try {
@@ -15,12 +15,9 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const authContext = await getAuthenticatedUser(req);
+    const authContext = req.auth;
     if (!authContext) {
       return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
-    }
-    if (!authContext.isAdmin) {
-      return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
     }
 
     const body = await req.json();

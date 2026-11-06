@@ -21,7 +21,7 @@ test('Optional Price and Photos — Creating ad with no price and no photos', as
     // price omitted / undefined
   });
 
-  assert.equal(res.success, true, 'Listing creation should succeed without price or photos');
+  assert.equal(res.success, true, `Listing creation should succeed without price or photos. Error: ${res.error}`);
   assert.ok(res.listing, 'Created listing data should be returned');
   assert.equal(res.listing?.price, null, 'Unspecified price should be stored as null');
   assert.deepEqual(res.listing?.images, [], 'No photos should yield an empty array');

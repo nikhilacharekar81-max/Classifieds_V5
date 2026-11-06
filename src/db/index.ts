@@ -53,6 +53,17 @@ const MIGRATIONS: Record<string, string> = {
     ALTER TABLE "categories" DROP CONSTRAINT IF EXISTS "categories_slug_unique";
     ALTER TABLE "categories" ADD CONSTRAINT "categories_slug_unique" UNIQUE ("slug");
   `,
+  '004_listing_payments': `
+    CREATE TABLE IF NOT EXISTS "listing_payments" (
+        "id" varchar(64) PRIMARY KEY NOT NULL,
+        "user_id" varchar(64) NOT NULL REFERENCES "users"("id"),
+        "amount" numeric(10, 2) NOT NULL,
+        "payment_gateway" varchar(64) NOT NULL,
+        "payment_id" varchar(128) NOT NULL UNIQUE,
+        "status" varchar(32) DEFAULT 'completed' NOT NULL,
+        "created_at" timestamp with time zone DEFAULT now() NOT NULL
+    );
+  `,
 };
 
 async function runMigrations(executor: { query: (sql: string, params?: any[]) => Promise<any> }) {

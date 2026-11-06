@@ -48,15 +48,17 @@ function serializeSetCookie(name: string, value: string, opts: CookieOption = {}
 }
 
 export class NextRequest extends Request {
-  public readonly nextUrl: URL;
-  private readonly _cookies: Map<string, string>;
+  public auth?: any;
+  public nextUrl: URL;
+  private _cookies: Map<string, string>;
 
-  constructor(input: string | URL | Request, init?: RequestInit) {
+  constructor(input: string | URL | Request, init?: RequestInit & { auth?: any }) {
     const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     const resolvedUrl = urlStr.startsWith('http') ? urlStr : `http://localhost:3000${urlStr.startsWith('/') ? '' : '/'}${urlStr}`;
     super(resolvedUrl, init);
     this.nextUrl = new URL(resolvedUrl);
     this._cookies = parseCookieHeader(this.headers.get('cookie'));
+    this.auth = init?.auth;
   }
 
   public get cookies() {
@@ -152,6 +154,7 @@ export function createExpressRouteHandler(routeModule: Record<string, any>) {
         method,
         headers,
         body: bodyInit,
+        auth: (req as any).auth,
       });
 
       const context = {

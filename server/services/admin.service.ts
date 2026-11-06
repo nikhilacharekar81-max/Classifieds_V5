@@ -142,13 +142,25 @@ export class AdminService {
     return await categoryRepository.findAllCustomFields();
   }
 
-  public async addCustomField(fieldData: Omit<CustomFieldDefinition, 'id'>): Promise<CustomFieldDefinition> {
+  public async addCustomField(
+    fieldData: Omit<CustomFieldDefinition, 'id'>,
+    actor?: { id: string; name: string; ipAddress?: string }
+  ): Promise<CustomFieldDefinition> {
     const id = `fld_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const field = await categoryRepository.createCustomField({
       ...fieldData,
       id,
     });
-    await this.recordAudit('ATTRIBUTE_CREATED', 'Attributes', id, field.label, `Added attribute "${field.label}"`);
+    await this.recordAudit(
+      'ATTRIBUTE_CREATED', 
+      'Attributes', 
+      id, 
+      field.label, 
+      `Added attribute "${field.label}"`,
+      actor?.id,
+      actor?.name,
+      actor?.ipAddress
+    );
     return field;
   }
 
@@ -157,7 +169,10 @@ export class AdminService {
     return await locationRepository.findAll();
   }
 
-  public async addLocation(locData: Omit<LocationItem, 'id' | 'listingCount'>): Promise<LocationItem> {
+  public async addLocation(
+    locData: Omit<LocationItem, 'id' | 'listingCount'>,
+    actor?: { id: string; name: string; ipAddress?: string }
+  ): Promise<LocationItem> {
     const id = `loc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const created = await locationRepository.create({
       id,
@@ -173,10 +188,24 @@ export class AdminService {
       orderIndex: locData.orderIndex || 0,
     });
     await invalidateLocationReferenceCache();
+    await this.recordAudit(
+      'LOCATION_CREATED',
+      'Locations',
+      id,
+      created.name,
+      `Added location "${created.name}"`,
+      actor?.id,
+      actor?.name,
+      actor?.ipAddress
+    );
     return created;
   }
 
-  public async updateLocation(id: string, updatedData: Partial<LocationItem>): Promise<LocationItem | null> {
+  public async updateLocation(
+    id: string, 
+    updatedData: Partial<LocationItem>,
+    actor?: { id: string; name: string; ipAddress?: string }
+  ): Promise<LocationItem | null> {
     const fields: any = {};
     if (updatedData.name !== undefined) fields.name = updatedData.name;
     if (updatedData.slug !== undefined) fields.slug = updatedData.slug;
@@ -191,14 +220,40 @@ export class AdminService {
     const updated = await locationRepository.update(id, fields);
     if (updated) {
       await invalidateLocationReferenceCache();
+      await this.recordAudit(
+        'LOCATION_UPDATED',
+        'Locations',
+        id,
+        updated.name,
+        `Updated location "${updated.name}"`,
+        actor?.id,
+        actor?.name,
+        actor?.ipAddress
+      );
     }
     return updated;
   }
 
-  public async deleteLocation(id: string): Promise<boolean> {
+  public async deleteLocation(
+    id: string,
+    actor?: { id: string; name: string; ipAddress?: string }
+  ): Promise<boolean> {
+    const loc = await locationRepository.findAll().then(all => all.find(l => l.id === id));
     const success = await locationRepository.delete(id);
     if (success) {
       await invalidateLocationReferenceCache();
+      if (loc) {
+        await this.recordAudit(
+          'LOCATION_DELETED',
+          'Locations',
+          id,
+          loc.name,
+          `Deleted location "${loc.name}"`,
+          actor?.id,
+          actor?.name,
+          actor?.ipAddress
+        );
+      }
     }
     return success;
   }
@@ -363,19 +418,19 @@ export class AdminService {
     targetId: string,
     targetSummary: string,
     details: string,
-    adminId = 'system',
-    adminName = 'Administrator',
-    ipAddress = 'unknown'
+    adminId?: string,
+    adminName?: string,
+    ipAddress?: string
   ): Promise<AuditLog> {
     return await adminRepository.createAuditLog({
-      adminId,
-      adminName,
+      adminId: adminId || 'system',
+      adminName: adminName || 'System',
       action,
       module,
       targetId,
       targetSummary,
       details,
-      ipAddress,
+      ipAddress: ipAddress || 'unknown',
     });
   }
 

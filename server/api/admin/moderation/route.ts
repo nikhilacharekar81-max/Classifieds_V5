@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { moderationService } from '@/server/services/moderation.service';
-import { getAuthenticatedUser } from '@/lib/auth/session';
 
 export async function GET(req: NextRequest) {
   try {
-    const authContext = await getAuthenticatedUser(req);
-    if (!authContext?.isModerator && !authContext?.isAdmin) {
-      return NextResponse.json({ error: 'Forbidden: Moderator access required' }, { status: 403 });
+    const authContext = req.auth;
+    if (!authContext) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const { searchParams } = new URL(req.url);
@@ -24,9 +23,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const authContext = await getAuthenticatedUser(req);
-    if (!authContext?.isModerator && !authContext?.isAdmin) {
-      return NextResponse.json({ error: 'Forbidden: Moderator access required' }, { status: 403 });
+    const authContext = req.auth;
+    if (!authContext) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const { action, reportId, note, actionType, targetListingId, ruleData, appealId, decision, reviewNotes, unbanUser } = await req.json();

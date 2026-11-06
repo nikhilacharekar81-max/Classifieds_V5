@@ -8,6 +8,7 @@ export interface RouteInfo {
   params: Record<string, string>;
   search: string;
   query: Record<string, string>;
+  hash: string;
 }
 
 export interface NavigationFeedbackState {
@@ -36,27 +37,37 @@ function emitNavFeedbackChange() {
 export function normalizeInternalUrl(rawUrl: string): string {
   if (!rawUrl) return '/';
   let clean = rawUrl.trim();
-  if (clean.includes('#')) {
-    clean = clean.split('#')[0];
+  
+  let fragment = '';
+  const hashIndex = clean.indexOf('#');
+  if (hashIndex !== -1) {
+    fragment = clean.substring(hashIndex);
+    clean = clean.substring(0, hashIndex);
   }
+
   if (!clean.startsWith('/')) {
     clean = '/' + clean;
   }
   const [pathPart, queryPart] = clean.split('?');
   const normalizedPath =
     pathPart && pathPart.length > 1 ? pathPart.replace(/\/+$/, '') : pathPart || '/';
-  if (!queryPart) {
-    return normalizedPath;
+  
+  let result = normalizedPath;
+  if (queryPart) {
+    const params = new URLSearchParams(queryPart);
+    params.sort();
+    const qs = params.toString();
+    if (qs) {
+      result = `${normalizedPath}?${qs}`;
+    }
   }
-  const params = new URLSearchParams(queryPart);
-  params.sort();
-  const qs = params.toString();
-  return qs ? `${normalizedPath}?${qs}` : normalizedPath;
+  
+  return result + fragment;
 }
 
 export function getCurrentNormalizedBrowserUrl(): string {
   if (typeof window === 'undefined') return '/';
-  return normalizeInternalUrl(window.location.pathname + window.location.search);
+  return normalizeInternalUrl(window.location.pathname + window.location.search + window.location.hash);
 }
 
 export function startNavigationFeedback(
@@ -180,18 +191,23 @@ export function useNavigationFeedback() {
   };
 }
 
-export function parsePath(rawPathAndSearch?: string): { path: string; query: Record<string, string> } {
+export function parsePath(rawPathAndSearch?: string): { path: string; query: Record<string, string>; hash: string } {
   let raw = rawPathAndSearch;
   if (!raw) {
     if (typeof window !== 'undefined') {
-      raw = window.location.pathname + window.location.search;
+      raw = window.location.pathname + window.location.search + window.location.hash;
     } else {
       raw = '/';
     }
   }
-  if (raw.includes('#')) {
-    raw = raw.split('#')[0];
+  
+  let hash = '';
+  const hashIndex = raw.indexOf('#');
+  if (hashIndex !== -1) {
+    hash = raw.substring(hashIndex);
+    raw = raw.substring(0, hashIndex);
   }
+
   if (!raw.startsWith('/')) {
     raw = '/' + raw;
   }
@@ -206,7 +222,7 @@ export function parsePath(rawPathAndSearch?: string): { path: string; query: Rec
     });
   }
 
-  return { path: pathPart || '/', query };
+  return { path: pathPart || '/', query, hash };
 }
 
 export function navigateTo(targetUrl: string, linkId?: string) {
@@ -267,14 +283,14 @@ export function useRouter(initialPath?: string, initialQuery?: Record<string, st
     };
   }, [nextPathname, initialPath]);
 
-  const { path, query } = useMemo(() => {
+  const { path, query, hash } = useMemo(() => {
     if (clientLocation !== null) {
       return parsePath(clientLocation);
     }
     const basePath = initialPath || nextPathname || '/';
     const parsed = parsePath(basePath);
     if (initialQuery !== undefined) {
-      return { path: parsed.path, query: initialQuery };
+      return { path: parsed.path, query: initialQuery, hash: parsed.hash };
     }
     return parsed;
   }, [clientLocation, initialPath, nextPathname, initialQuery]);
@@ -286,6 +302,7 @@ export function useRouter(initialPath?: string, initialQuery?: Record<string, st
   return {
     path,
     query,
+    hash,
     navigate,
     navigateTo,
   };
