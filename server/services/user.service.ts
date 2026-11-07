@@ -98,6 +98,12 @@ export class UserService {
 
     const updated = await userRepository.update(id, fields);
     if (updated) {
+      if (fields.email !== undefined) {
+        // Rule 4: Invalidate sessions & emailVerified=false
+        await userRepository.update(id, { emailVerified: false, emailVerifiedAt: null });
+        await userRepository.invalidateUserSessions(id);
+      }
+      
       if (fields.name !== undefined || fields.phone !== undefined) {
         const { db } = await import('@/src/db/index');
         const schema = await import('@/src/db/schema');
@@ -116,7 +122,7 @@ export class UserService {
           module: 'Users',
           targetId: id,
           targetSummary: updated.name,
-          details: `Updated user fields: ${Object.keys(fields).join(', ')}`,
+          details: `Updated user fields: ${Object.keys(fields).join(', ')}${fields.email ? ' (Email changed)' : ''}`,
           ipAddress: actor.ipAddress || 'unknown',
         });
       }

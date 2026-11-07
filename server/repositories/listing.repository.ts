@@ -1,6 +1,6 @@
 import { db, withDbRetry } from '@/src/db/index';
 import * as schema from '@/src/db/schema';
-import { eq, and, notInArray, sql, desc, asc, or, ilike, gte, lte, inArray } from '@/src/db/pg-orm';
+import { eq, and, notInArray, sql, desc, asc, or, ilike, gte, lte, inArray, isNull } from '@/src/db/pg-orm';
 import { Listing } from '@/lib/types';
 import { normalizeAdTitle, DUPLICATE_TITLE_ERROR_MESSAGE } from '@/lib/utils/adTitleValidation';
 import {
@@ -159,6 +159,7 @@ export class ListingRepository {
       spamScore: row.spamScore,
       createdAt: row.createdAt.toISOString(),
       expiresAt: row.expiresAt.toISOString(),
+      deletedAt: row.deletedAt ? row.deletedAt.toISOString() : undefined,
     };
   }
 
@@ -171,7 +172,7 @@ export class ListingRepository {
         db
           .select()
           .from(schema.listings)
-          .where(eq(schema.listings.id, cleanId))
+          .where(and(eq(schema.listings.id, cleanId), isNull(schema.listings.deletedAt)))
           .limit(1)
       );
 
@@ -187,7 +188,7 @@ export class ListingRepository {
           db
             .select()
             .from(schema.listings)
-            .where(sql`${schema.listings.id} LIKE ${'%' + suffix}`)
+            .where(and(sql`${schema.listings.id} LIKE ${'%' + suffix}`, isNull(schema.listings.deletedAt)))
             .limit(1)
         );
         return suffixRows.length > 0 ? this.mapRowToListing(suffixRows[0]) : null;
@@ -214,7 +215,7 @@ export class ListingRepository {
       // 1. Atomically update any date-expired listings for this seller so status='expired' in database,
       // freeing the PostgreSQL partial unique index from blocking reposts after expiry.
       await db.execute(
-        sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW()`
+        sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW() AND deleted_at IS NULL`
       );
 
       const conditions = [
@@ -222,6 +223,7 @@ export class ListingRepository {
         sql`LOWER(REGEXP_REPLACE(TRIM(${schema.listings.title}), '\\s+', ' ', 'g')) = ${normalized}`,
         inArray(schema.listings.status, ['approved', 'pending']),
         gte(schema.listings.expiresAt, new Date()),
+        isNull(schema.listings.deletedAt),
       ];
 
       if (excludeListingId) {
@@ -258,15 +260,17 @@ export class ListingRepository {
       // 0. Update date-expired listings in PostgreSQL so status='expired'
       if (options.sellerId) {
         await db.execute(
-          sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${options.sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW()`
+          sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${options.sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW() AND deleted_at IS NULL`
         ).catch(() => {});
       } else {
         await db.execute(
-          sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE status IN ('approved', 'pending') AND expires_at <= NOW()`
+          sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE status IN ('approved', 'pending') AND expires_at <= NOW() AND deleted_at IS NULL`
         ).catch(() => {});
       }
 
       const conditions: any[] = [];
+      // Always exclude soft-deleted listings from public view
+      conditions.push(isNull(schema.listings.deletedAt));
 
       // Status & Expiration filtering: Public marketplace shows ONLY non-expired approved listings
       if (options.status && options.status !== 'all') {
@@ -582,15 +586,22 @@ export class ListingRepository {
 
   public async delete(id: string): Promise<boolean> {
     try {
-      const res = await db
-        .delete(schema.listings)
-        .where(eq(schema.listings.id, id))
-        .returning({ id: schema.listings.id });
+      return await db.transaction(async (tx) => {
+        const res = await tx
+          .update(schema.listings)
+          .set({ 
+            status: 'deleted',
+            deletedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(and(eq(schema.listings.id, id), isNull(schema.listings.deletedAt)))
+          .returning({ id: schema.listings.id });
 
-      if (res.length > 0) {
-        await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS).catch(() => {});
-      }
-      return res.length > 0;
+        if (res.length > 0) {
+          await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS, tx).catch(() => {});
+        }
+        return res.length > 0;
+      });
     } catch (error) {
       console.error(`ListingRepository.delete error for ${id}:`, error);
       throw new Error(`Failed to delete listing ${id}`, { cause: error });
@@ -633,18 +644,22 @@ export class ListingRepository {
 
   public async bulkDelete(ids: string[]): Promise<{ deletedCount: number }> {
     try {
-      await db.delete(schema.boostTransactions).where(inArray(schema.boostTransactions.listingId, ids));
-      await db.delete(schema.boostOrders).where(inArray(schema.boostOrders.listingId, ids));
+      return await db.transaction(async (tx) => {
+        const res = await tx
+          .update(schema.listings)
+          .set({ 
+            status: 'deleted',
+            deletedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(and(inArray(schema.listings.id, ids), isNull(schema.listings.deletedAt)))
+          .returning({ id: schema.listings.id });
 
-      const res = await db
-        .delete(schema.listings)
-        .where(inArray(schema.listings.id, ids))
-        .returning({ id: schema.listings.id });
-
-      if (res.length > 0) {
-        await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS).catch(() => {});
-      }
-      return { deletedCount: res.length };
+        if (res.length > 0) {
+          await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS, tx).catch(() => {});
+        }
+        return { deletedCount: res.length };
+      });
     } catch (error) {
       console.error('ListingRepository.bulkDelete error:', error);
       throw new Error('Bulk delete failed in PostgreSQL', { cause: error });
@@ -671,7 +686,7 @@ export class ListingRepository {
     };
     try {
       await db.execute(
-        sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW()`
+        sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW() AND deleted_at IS NULL`
       ).catch(() => {});
 
       const [rows, activeQuotaRes] = await Promise.all([
@@ -682,7 +697,7 @@ export class ListingRepository {
               count: sql<number>`count(*)::int`,
             })
             .from(schema.listings)
-            .where(eq(schema.listings.sellerId, sellerId))
+            .where(and(eq(schema.listings.sellerId, sellerId), isNull(schema.listings.deletedAt)))
             .groupBy(schema.listings.status)
         ),
         withDbRetry(() =>
@@ -695,7 +710,8 @@ export class ListingRepository {
               and(
                 eq(schema.listings.sellerId, sellerId),
                 inArray(schema.listings.status, ['approved', 'pending']),
-                sql`${schema.listings.expiresAt} >= NOW()`
+                sql`${schema.listings.expiresAt} >= NOW()`,
+                isNull(schema.listings.deletedAt)
               )
             )
         ),
@@ -817,6 +833,7 @@ export class ListingRepository {
         sql`LOWER(REGEXP_REPLACE(TRIM(${schema.listings.title}), '\\s+', ' ', 'g')) = ${normalized}`,
         inArray(schema.listings.status, ['approved', 'pending']),
         gte(schema.listings.expiresAt, new Date()),
+        isNull(schema.listings.deletedAt),
       ];
       const conflicts = await tx
         .select({ id: schema.listings.id })
@@ -871,7 +888,7 @@ export class ListingRepository {
   ): Promise<Listing | null> {
     const updatedRow = await db.transaction(async (tx) => {
       await tx.execute(
-        sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW()`
+        sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW() AND deleted_at IS NULL`
       );
 
       if (fields.title && typeof fields.title === 'string') {
@@ -882,6 +899,7 @@ export class ListingRepository {
           inArray(schema.listings.status, ['approved', 'pending']),
           gte(schema.listings.expiresAt, new Date()),
           sql`${schema.listings.id} != ${id}`,
+          isNull(schema.listings.deletedAt),
         ];
         const conflicts = await tx
           .select({ id: schema.listings.id })

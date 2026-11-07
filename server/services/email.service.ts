@@ -1,4 +1,5 @@
 import { emailRepository } from '@/server/repositories/email.repository';
+import { getPublicBaseUrl } from '@/lib/publicUrl';
 import { userRepository } from '@/server/repositories/user.repository';
 import { adminRepository } from '@/server/repositories/admin.repository';
 import {
@@ -193,7 +194,7 @@ export class EmailService {
       };
     }
 
-    const baseUrl = process.env.APP_URL || 'http://localhost:3000';
+    const baseUrl = getPublicBaseUrl();
     const batchSize = 100;
     let offset = 0;
     let count = 0;

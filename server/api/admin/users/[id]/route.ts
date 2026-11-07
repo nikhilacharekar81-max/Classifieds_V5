@@ -3,7 +3,7 @@ import { userRepository } from '@/server/repositories/user.repository';
 import { emailService } from '@/server/services/email.service';
 import { userService } from '@/server/services/user.service';
 import { getAuthenticatedUser } from '@/lib/auth/session';
-import { hasPermission } from '@/lib/auth/roles';
+import { hasPermission, canModifyTarget } from '@/lib/auth/roles';
 import crypto from 'node:crypto';
 
 export async function GET(
@@ -67,16 +67,42 @@ export async function PUT(
 
     const isSelf = authContext.userId === id;
 
+    const body = await req.json();
+
     // Role Hierarchy: Non-admins cannot edit Admin or Super Admin accounts
-    const targetRow = await userRepository.findByEmail(targetUser.email);
-    if (!isSelf && !isActualAdmin && targetRow?.adminRole) {
+    // Enforce hierarchy: actorRank > targetRank, or super_admin acting on anyone (except super_admin acting on super_admin, which needs special care)
+    
+    // Check if actor can modify target
+    if (authContext.userId !== id && !canModifyTarget(role, targetUser.adminRole || 'user')) {
       return NextResponse.json(
-        { error: 'Forbidden: Staff cannot modify administrator accounts' },
+        { error: 'Forbidden: Insufficient rank to modify this account' },
         { status: 403 }
       );
     }
-
-    const body = await req.json();
+    
+    // Cannot act on self for status/role changes (ban/role/status already checked separately)
+    if (authContext.userId === id && (body.status !== undefined || body.adminRole !== undefined)) {
+        return NextResponse.json(
+            { error: 'Forbidden: Cannot modify your own status or role' },
+            { status: 403 }
+        );
+    }
+    
+    // Block removing/banning last active super_admin
+    if (targetUser.adminRole === 'super_admin' && targetUser.status === 'active') {
+        const isDemoting = body.adminRole !== undefined && body.adminRole !== 'super_admin';
+        const isBanning = body.status !== undefined && body.status !== 'active';
+        
+        if (isDemoting || isBanning) {
+            const superAdminCount = await userRepository.countSuperAdmins();
+            if (superAdminCount <= 1) {
+                return NextResponse.json(
+                    { error: 'Forbidden: Cannot demote or ban the last active super administrator' },
+                    { status: 403 }
+                );
+            }
+        }
+    }
     const allowedFields: any = {};
 
     if (body.name !== undefined) {
@@ -206,6 +232,16 @@ export async function PUT(
         );
       }
       allowedFields.adminRole = body.adminRole || null;
+    }
+    
+    // Rule 4: Only super_admin may change the email of any staff/admin account
+    if (allowedFields.email !== undefined && targetUser.adminRole) {
+        if (!isSuperAdmin) {
+            return NextResponse.json(
+                { error: 'Forbidden: Only super administrators can modify administrator emails' },
+                { status: 403 }
+            );
+        }
     }
 
     const updated = await userService.updateUser(

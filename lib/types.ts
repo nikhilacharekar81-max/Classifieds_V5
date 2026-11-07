@@ -125,6 +125,7 @@ export interface Listing {
   customAttributes: Record<string, string | number | boolean>;
   createdAt: string;
   expiresAt: string;
+  deletedAt?: string;
   spamScore?: number; // 0 to 100
   isDuplicate?: boolean;
 }

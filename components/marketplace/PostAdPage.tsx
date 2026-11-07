@@ -91,17 +91,20 @@ export const PostAdPage: React.FC = () => {
           body: formData,
         });
 
-        if (!res.ok) throw new Error('Upload failed');
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Upload failed');
+        }
 
         const { url } = await res.json();
         setPostForm((prev) => ({
           ...prev,
           images: [...prev.images, url],
         }));
-      } catch (err) {
+      } catch (err: any) {
         addToast({
           title: 'Upload Failed',
-          message: `Failed to upload ${file.name}.`,
+          message: err.message || `Failed to upload ${file.name}.`,
           type: 'error',
         });
       }
@@ -392,37 +395,20 @@ export const PostAdPage: React.FC = () => {
         const rzpOrderId = orderData.providerOrderId || orderData.orderId;
 
         // Open genuine payment provider checkout (Razorpay SDK) if key and provider order ID are returned
-        if (typeof window !== 'undefined' && (window as any).Razorpay && rzpKey && orderData.providerOrderId) {
-          const razorpayPayment = await new Promise<{
-            paymentId: string;
-            orderId: string;
-            signature: string;
-          }>((resolve, reject) => {
-            const rzp = new (window as any).Razorpay({
-              key: rzpKey,
-              amount: Math.round((orderData.amount || mandatoryPostingFee) * 100),
-              currency: orderData.currency || 'INR',
-              name: 'Chillyads Classifieds',
-              description: `Posting Fee for ${postForm.title.substring(0, 30)}`,
-              order_id: rzpOrderId,
-              handler: function (response: any) {
-                if (response.razorpay_payment_id && response.razorpay_signature) {
-                  resolve({
-                    paymentId: response.razorpay_payment_id,
-                    orderId: response.razorpay_order_id || rzpOrderId,
-                    signature: response.razorpay_signature,
-                  });
-                } else {
-                  reject(new Error('Invalid response received from Razorpay payment checkout.'));
-                }
-              },
-              modal: {
-                ondismiss: function () {
-                  reject(new Error('Payment checkout was cancelled. Your ad details and photos remain preserved.'));
-                },
-              },
-            });
-            rzp.open();
+        if (typeof window !== 'undefined' && rzpKey && orderData.providerOrderId) {
+          const { openRazorpayCheckout } = await import('@/lib/utils/razorpay');
+          const razorpayPayment = await openRazorpayCheckout({
+            key: rzpKey,
+            amount: Math.round((orderData.amount || mandatoryPostingFee) * 100),
+            currency: orderData.currency || 'INR',
+            name: settings?.siteName || 'Chillyads Classifieds',
+            description: `Posting Fee for ${postForm.title.substring(0, 30)}`,
+            order_id: rzpOrderId,
+            prefill: {
+              name: currentUser?.name,
+              email: currentUser?.email,
+              contact: currentUser?.phone,
+            }
           });
 
           postingFeePaymentId = razorpayPayment.paymentId;

@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
 import { createServer as createViteServer, ViteDevServer } from 'vite';
@@ -31,7 +32,6 @@ import * as authLogoutAllRoute from './server/api/auth/logout-all/route.ts';
 import * as authUnsubscribeRoute from './server/api/auth/unsubscribe/route.ts';
 import * as listingsRoute from './server/api/listings/route.ts';
 import * as listingsCreateOrderRoute from './server/api/listings/create-order/route.ts';
-import * as listingsUploadRoute from './server/api/listings/upload/route.ts';
 import * as listingsByIdRoute from './server/api/listings/[id]/route.ts';
 import * as listingsRevealPhoneRoute from './server/api/listings/[id]/reveal-phone/route.ts';
 import * as listingsCheckDuplicateRoute from './server/api/listings/check-duplicate/route.ts';
@@ -97,13 +97,29 @@ async function initializePostgreSQL() {
   }
 }
 
+import { getPublicBaseUrl } from './lib/publicUrl';
+import { uploadImage } from './lib/storage';
+
+// ... (existing imports)
+
 async function startServer() {
+  const isProd = process.env.NODE_ENV === 'production';
+  if (isProd && (!process.env.APP_URL || process.env.APP_URL.includes('localhost'))) {
+    console.error('Fatal: APP_URL must be configured in production and cannot be localhost.');
+    process.exit(1);
+  }
+
   await initializePostgreSQL();
 
   const app = express();
   app.use(compression()); // Added compression
   app.set('trust proxy', 1);
   const PORT = Number(process.env.PORT) || 3000;
+
+  const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  });
 
   // Per-request AsyncLocalStorage cache context
   app.use((_req, _res, next) => runWithRequestCache(() => next()));
@@ -203,7 +219,45 @@ async function startServer() {
 
   // Listings Routes (Sensitive)
   app.all('/api/listings/create-order', createExpressRouteHandler(listingsCreateOrderRoute));
-  app.all('/api/listings/upload', createExpressRouteHandler(listingsUploadRoute));
+  
+  app.post('/api/listings/upload',
+    publicApiLimiter,
+    async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      try {
+        const authContext = await getAuthenticatedUser(req as any);
+        if (!authContext) {
+          return res.status(401).json({ error: 'Unauthorized' });
+        }
+        (req as any).auth = authContext;
+        next();
+      } catch (err) {
+        res.status(500).json({ error: 'Internal Server Error' });
+      }
+    },
+    upload.single('file'),
+    (err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+        if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(413).json({ error: 'File too large' });
+        }
+        next(err);
+    },
+    async (req: express.Request, res: express.Response) => {
+      if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+      }
+      if (!req.file.mimetype.startsWith('image/')) {
+        return res.status(400).json({ error: 'Only image files allowed' });
+      }
+
+      try {
+        const url = await uploadImage({ buffer: req.file.buffer, size: req.file.size });
+        return res.json({ url });
+      } catch (err: any) {
+        return res.status(500).json({ error: err.message || 'Upload failed' });
+      }
+    }
+  );
+  
   app.all('/api/listings/check-duplicate', createExpressRouteHandler(listingsCheckDuplicateRoute));
   app.all('/api/listings/bulk-action', createExpressRouteHandler(listingsBulkActionRoute));
   app.all('/api/listings/:id/reveal-phone', createExpressRouteHandler(listingsRevealPhoneRoute));
@@ -236,7 +290,7 @@ async function startServer() {
 
   // SEO robots.txt
   app.get('/robots.txt', (req, res) => {
-    const baseUrl = process.env.APP_URL || `${req.protocol}://${req.get('host') || 'localhost:3000'}`;
+    const baseUrl = getPublicBaseUrl();
     const body = [
       'User-agent: *',
       'Allow: /',
@@ -251,7 +305,7 @@ async function startServer() {
   // SEO sitemap.xml backed by PostgreSQL
   app.get('/sitemap.xml', async (req, res) => {
     try {
-      const baseUrl = (process.env.APP_URL || 'https://www.chillyads.in').replace(/\/$/, '');
+      const baseUrl = getPublicBaseUrl();
       const [categories, locations, listingsRes] = await Promise.all([
         categoryRepository.findAll(),
         locationRepository.findAll(),
@@ -350,7 +404,7 @@ ${urlEntries
         }
       }
 
-      const origin = process.env.APP_URL || `${req.protocol}://${req.get('host') || 'localhost:3000'}`;
+      const origin = getPublicBaseUrl();
 
       let templateHtml: string;
       if (vite) {

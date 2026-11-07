@@ -3,17 +3,15 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 
-export async function uploadImage(file: File): Promise<string> {
-  if (!file) {
+export async function uploadImage(data: { buffer: Buffer; size: number }): Promise<string> {
+  const { buffer, size } = data;
+  if (!buffer || size === 0) {
     throw new Error('No file provided');
   }
 
-  if (file.size > 5 * 1024 * 1024) {
+  if (size > 5 * 1024 * 1024) {
     throw new Error('File size exceeds 5MB limit');
   }
-
-  const arrayBuffer = await file.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
 
   // Validate magic bytes (MIME sniffing)
   const isJpeg = buffer.length > 2 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
@@ -37,9 +35,10 @@ export async function uploadImage(file: File): Promise<string> {
 
   const filename = `${crypto.randomUUID()}_${Date.now()}.${ext}`;
 
-  if (process.env.S3_BUCKET_NAME && process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+  if (process.env.STORAGE_PROVIDER === 's3' && process.env.S3_BUCKET_NAME && process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
     const s3Client = new S3Client({
       region: process.env.AWS_REGION || 'us-east-1',
+      endpoint: process.env.S3_ENDPOINT,
       credentials: {
         accessKeyId: process.env.AWS_ACCESS_KEY_ID,
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
@@ -54,15 +53,20 @@ export async function uploadImage(file: File): Promise<string> {
         ContentType: contentType,
       })
     );
+    if (process.env.S3_PUBLIC_URL) {
+        return `${process.env.S3_PUBLIC_URL}/${key}`;
+    }
     return `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${key}`;
   } else {
-    const uploadDir = path.resolve(process.cwd(), 'public', 'uploads');
+    if (process.env.STORAGE_PROVIDER === 'local') {
+        console.warn('Startup Warning: STORAGE_PROVIDER=local is set. Files will be lost on redeploy unless UPLOAD_DIR is a persistent volume.');
+    }
+    const uploadDir = path.resolve(process.cwd(), process.env.UPLOAD_DIR || 'public/uploads');
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
     const filePath = path.join(uploadDir, filename);
     fs.writeFileSync(filePath, buffer);
-    const baseUrl = process.env.APP_URL || 'http://localhost:3000';
-    return `${baseUrl.replace(/\/$/, '')}/uploads/${filename}`;
+    return `/uploads/${filename}`;
   }
 }

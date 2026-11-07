@@ -31,54 +31,53 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
   onClose,
   onSuccess,
 }) => {
-  const { featureListing, updateListing, currentUser, addToast, settings } = useApp();
+  const { featureListing, updateListing, currentUser, addToast, settings, packages } = useApp();
 
-  const [selectedPlan, setSelectedPlan] = useState<{
-    id: string;
-    title: string;
-    days: number;
-    price: number;
-    popular?: boolean;
-    badge?: string;
-  }>({
-    id: 'feature_15',
-    title: '15 Days Pro Feature',
-    days: 15,
-    price: 99,
-    popular: true,
-    badge: 'MOST POPULAR',
-  });
+  const sourcePackages = packages && packages.length > 0 ? packages : [];
+  const featurePackages = sourcePackages.filter(p => p.type === 'feature' && p.isActive);
+
+  // Map packages to plans, or fallback to defaults if none found in settings
+  const plans = featurePackages.length > 0 
+    ? featurePackages.map(p => ({
+        id: p.id,
+        title: p.name,
+        days: p.durationDays,
+        price: p.price,
+        popular: p.badge === 'MOST POPULAR',
+        badge: p.badge,
+      }))
+    : [
+        {
+          id: 'feature_7',
+          title: '7 Days Starter',
+          days: 7,
+          price: settings.paidFeatures?.featuredAdPrice ? Math.round(settings.paidFeatures.featuredAdPrice * 0.5) : 49,
+          badge: 'QUICK BOOST',
+        },
+        {
+          id: 'feature_15',
+          title: '15 Days Pro Feature',
+          days: 15,
+          price: settings.paidFeatures?.featuredAdPrice ? Math.round(settings.paidFeatures.featuredAdPrice * 0.8) : 99,
+          popular: true,
+          badge: 'MOST POPULAR',
+        },
+        {
+          id: 'feature_30',
+          title: '30 Days Max Exposure',
+          days: 30,
+          price: settings.paidFeatures?.featuredAdPrice || 149,
+          badge: 'BEST VALUE',
+        },
+      ];
+
+  const [selectedPlan, setSelectedPlan] = useState(plans[1] || plans[0]);
 
   const [paymentMethod, setPaymentMethod] = useState<'upi' | 'card' | 'netbanking'>('upi');
   const [upiId, setUpiId] = useState('user@upi');
   const [isProcessing, setIsProcessing] = useState(false);
 
   if (!isOpen || !listing) return null;
-
-  const plans = [
-    {
-      id: 'feature_7',
-      title: '7 Days Starter',
-      days: 7,
-      price: 49,
-      badge: 'QUICK BOOST',
-    },
-    {
-      id: 'feature_15',
-      title: '15 Days Pro Feature',
-      days: 15,
-      price: 99,
-      popular: true,
-      badge: 'MOST POPULAR',
-    },
-    {
-      id: 'feature_30',
-      title: '30 Days Max Exposure',
-      days: 30,
-      price: 149,
-      badge: 'BEST VALUE',
-    },
-  ];
 
   const currencySymbol = settings.currencySymbol || '₹';
   const paymentGatewayConfigured = Boolean(settings.paymentGatewayConfigured);
@@ -95,7 +94,8 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
         futureDate.setDate(futureDate.getDate() + selectedPlan.days);
         const formattedUntil = futureDate.toISOString().split('T')[0];
 
-        featureListing(listing.id, true);
+        // Fix: pass selectedPlan.days to the service (#4)
+        await featureListing(listing.id, true, selectedPlan.days);
 
         setIsProcessing(false);
         addToast({
@@ -112,6 +112,9 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
       // Ordinary sellers cannot activate Featured without verified payment (#2B & #14).
       // Create server-side order with purpose: 'featured_ad' and preserve pending request state
       let pendingOrderId: string | undefined = undefined;
+      let signature: string | undefined = undefined;
+      let paymentId: string | undefined = undefined;
+
       try {
         const orderRes = await fetch('/api/listings/create-order', {
           method: 'POST',
@@ -122,14 +125,46 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
             subcategoryId: listing.subcategoryId || undefined,
             purpose: 'featured_ad',
             listingId: listing.id,
-            amount: totalPayable,
+            amount: selectedPlan.price, // Base price from selected plan
           }),
         });
         const orderData = await orderRes.json().catch(() => ({}));
-        if (orderRes.ok && (orderData.orderId || orderData.order?.orderId)) {
-          pendingOrderId = orderData.orderId || orderData.order?.orderId;
+        if (!orderRes.ok) {
+           throw new Error(orderData.error || 'Failed to create payment order');
         }
-      } catch (orderErr) {
+        
+        pendingOrderId = orderData.orderId || orderData.order?.orderId;
+        const rzpKey = orderData.keyId;
+        const rzpOrderId = orderData.providerOrderId || pendingOrderId;
+
+        // Genuine Checkout Integration (#2B)
+        if (paymentGatewayConfigured && typeof window !== 'undefined' && rzpKey && orderData.providerOrderId) {
+          const { openRazorpayCheckout } = await import('@/lib/utils/razorpay');
+          const payment = await openRazorpayCheckout({
+            key: rzpKey,
+            amount: Math.round(totalPayable * 100),
+            currency: 'INR',
+            name: settings.siteName || 'Chillyads',
+            description: `${selectedPlan.days}-Day Featured Upgrade`,
+            order_id: rzpOrderId,
+            prefill: {
+              name: currentUser?.name,
+              email: currentUser?.email,
+              contact: currentUser?.phone,
+            }
+          });
+          
+          paymentId = payment.paymentId;
+          signature = payment.signature;
+
+          // If payment successful, we can try to verify it immediately if the backend supports it
+          // or just save it as pending and let the server verify.
+          // For featured ads, the server-side updateListing handler verifies signature if present.
+        }
+      } catch (orderErr: any) {
+        if (paymentGatewayConfigured) {
+          throw orderErr; // Re-throw to show error toast
+        }
         console.warn('Could not create pending featured order record:', orderErr);
       }
 
@@ -139,21 +174,25 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
         customAttributes: {
           ...(listing.customAttributes || {}),
           requestedFeatured: true,
-          featuredPaymentStatus: 'pending',
+          featuredPaymentStatus: paymentId ? 'verifying' : 'pending',
           pendingFeaturedOrderId: pendingOrderId,
           requestedFeaturedPlanId: selectedPlan.id,
           requestedFeaturedDays: selectedPlan.days,
           requestedFeaturedPrice: selectedPlan.price,
+          featuredPaymentId: paymentId,
+          featuredSignature: signature,
         },
       });
 
       setIsProcessing(false);
       addToast({
-        type: 'warning',
-        title: 'Featured Request Saved (Pending Payment)',
-        message: paymentGatewayConfigured
-          ? `Your ${selectedPlan.days}-day Featured upgrade request (${currencySymbol}${totalPayable}) has been recorded and requires verified payment before activation.`
-          : `Your ${selectedPlan.days}-day Featured upgrade request (${currencySymbol}${totalPayable}) has been saved as pending because the online payment gateway is not configured.`,
+        type: paymentId ? 'success' : 'warning',
+        title: paymentId ? 'Payment Successful' : 'Featured Request Saved (Pending Payment)',
+        message: paymentId 
+          ? `Your ${selectedPlan.days}-day Featured upgrade is being activated.`
+          : paymentGatewayConfigured
+            ? `Your ${selectedPlan.days}-day Featured upgrade request (${currencySymbol}${totalPayable}) has been recorded and requires verified payment before activation.`
+            : `Your ${selectedPlan.days}-day Featured upgrade request (${currencySymbol}${totalPayable}) has been saved as pending because the online payment gateway is not configured.`,
       });
 
       if (onSuccess) onSuccess();
@@ -162,8 +201,8 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
       setIsProcessing(false);
       addToast({
         type: 'error',
-        title: 'Unable to Save Featured Request',
-        message: err?.message || 'An unexpected error occurred while saving your request.',
+        title: 'Unable to Complete Request',
+        message: err?.message || 'An unexpected error occurred while processing your payment.',
       });
     }
   };

@@ -4,6 +4,15 @@ import { userRepository } from '@/server/repositories/user.repository';
 import { safeErrorResponse, addSecurityHeaders } from '@/lib/auth/security';
 import { emailService } from '@/server/services/email.service';
 import crypto from 'node:crypto';
+import { getPublicBaseUrl } from '@/lib/publicUrl';
+
+function escapeHtml(str: string): string {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -46,12 +55,13 @@ export async function POST(req: NextRequest) {
 
       await userRepository.createEmailVerificationToken(tokenId, userRow.id, tokenHash, expiresAt);
 
-      const verifyUrl = `${req.nextUrl.origin}/verify-email?token=${rawToken}`;
+      const verifyUrl = `${getPublicBaseUrl()}/verify-email?token=${rawToken}`;
+      const escapedName = escapeHtml(userRow.name || 'User');
       const emailResult = await emailService.sendCustomEmail({
         toEmail: cleanEmail,
         toName: userRow.name || 'User',
         subject: 'Verify Your Email Address - Chillyads',
-        body: `<p>Hello ${userRow.name},</p><p>Please verify your email address by clicking the link below:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>This link expires in 24 hours.</p>`,
+        body: `<p>Hello ${escapedName},</p><p>Please verify your email address by clicking the link below:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>This link expires in 24 hours.</p>`,
         type: 'email_verification',
       });
 

@@ -97,3 +97,32 @@ export function getRoleLabel(role: string | null | undefined): string {
     default: return 'User';
   }
 }
+export const ROLE_RANKS: Record<AdminRole | 'user', number> = {
+  super_admin: 3,
+  admin: 2,
+  moderator: 1,
+  support_agent: 1,
+  finance_user: 1,
+  content_manager: 1,
+  marketing_manager: 1,
+  user: 0,
+};
+
+export function getRoleRank(role: string | null | undefined): number {
+  if (!role || !(role in ROLE_RANKS)) return 0;
+  return ROLE_RANKS[role as keyof typeof ROLE_RANKS];
+}
+
+export function canModifyTarget(actorRole: string | null | undefined, targetRole: string | null | undefined): boolean {
+  const actorRank = getRoleRank(actorRole);
+  const targetRank = getRoleRank(targetRole);
+
+  // Nobody acts on super_admin except another super_admin (excluding self - handled in controller)
+  if (targetRole === 'super_admin' && actorRole !== 'super_admin') return false;
+  
+  // super_admin acting on super_admin is allowed (e.g. updating profile) - restriction is on self
+  if (actorRole === 'super_admin' && targetRole === 'super_admin') return true;
+
+  // Otherwise, actor must have strictly higher rank
+  return actorRank > targetRank;
+}

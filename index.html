@@ -39,6 +39,35 @@
       }
     }
     </script>
+    <!-- Functional CMP Gate for Third-Party Tracking -->
+    <script>
+      (function() {
+        window.initializeTracking = function(prefs) {
+          if (prefs.analytics) {
+            console.log('[CMP] Initializing Analytics (Mock)...');
+            // Real GA code would go here
+          }
+          if (prefs.advertising) {
+            console.log('[CMP] Initializing Advertising/AdSense (Mock)...');
+            // Real AdSense code would go here
+          }
+        };
+
+        const saved = localStorage.getItem('chilly_cmp_consent');
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            if (parsed.categories) window.initializeTracking(parsed.categories);
+          } catch(e) {}
+        }
+
+        window.addEventListener('cmp_consent_updated', function(e) {
+          if (e.detail && e.detail.categories) {
+            window.initializeTracking(e.detail.categories);
+          }
+        });
+      })();
+    </script>
   </head>
   <body class="bg-slate-50 text-slate-900 antialiased selection:bg-indigo-600 selection:text-white">
     <div id="root"></div>

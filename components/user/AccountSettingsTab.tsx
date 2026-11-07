@@ -1,6 +1,6 @@
 'use client';
 import React, { useState } from 'react';
-import { Building, ShieldCheck, Lock, Mail, LogOut, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Building, ShieldCheck, Lock, Mail, LogOut, Loader2, CheckCircle2, AlertCircle, SlidersHorizontal, ShieldAlert } from 'lucide-react';
 import { UserAccount } from '@/lib/types';
 import { dispatchPublicToast } from '@/components/common/ChunkErrorRecovery';
 import { useAppOptional } from '@/context/AppContextInstance';
@@ -503,6 +503,39 @@ export const AccountSettingsTab: React.FC<AccountSettingsTabProps> = ({
             Submit / Update KYC Documents
           </button>
         </div>
+
+        {/* Privacy & Data Choices Card */}
+        {app?.settings?.enablePrivacyChoices && (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-3 text-xs">
+            <div className="flex items-center gap-2 text-slate-900 dark:text-white font-extrabold text-sm">
+              <Lock className="w-5 h-5 text-purple-500" />
+              <span>Privacy &amp; Data Choices</span>
+            </div>
+            <p className="text-slate-500 dark:text-slate-400 text-[11px]">
+              Manage your tracking preferences, cookie consent, and exercise your data rights.
+            </p>
+
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={() => app.openCmpModal()}
+                className="w-full py-2 bg-purple-50 dark:bg-purple-950/30 hover:bg-purple-100 text-purple-700 dark:text-purple-300 font-bold rounded-xl text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+                <span>Manage Cookie Preferences</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => app.openUsPrivacyModal()}
+                className="w-full py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <ShieldAlert className="w-3.5 h-3.5" />
+                <span>Do Not Sell or Share My Info</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Global Session Logout Card */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-3 text-xs">

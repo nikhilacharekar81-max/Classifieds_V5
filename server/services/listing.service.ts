@@ -37,6 +37,8 @@ export function isValidListingImageUrl(url: unknown): boolean {
     return /^data:image\/(jpeg|jpg|png|webp|gif|svg\+xml);base64,[A-Za-z0-9+/=]+$/.test(trimmed);
   }
 
+  if (trimmed.startsWith('/uploads/')) return true;
+
   try {
     const parsed = new URL(trimmed);
     return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && Boolean(parsed.hostname);
@@ -1256,10 +1258,6 @@ export class ListingService {
       throw new Error('Unauthorized: You do not own this listing');
     }
 
-    // Delete related boost transactions first to avoid FK violations
-    await db.delete(schema.boostTransactions).where(eq(schema.boostTransactions.listingId, id));
-    await db.delete(schema.boostOrders).where(eq(schema.boostOrders.listingId, id));
-
     const deleted = await listingRepository.delete(id);
     if (deleted) {
       await invalidateLiveListingCountsCache();
@@ -1486,7 +1484,7 @@ export const listingService = new ListingService();
  */
 export function isListingPubliclyAccessible(listing: Listing | null | undefined): listing is Listing {
   if (!listing) return false;
-  if (listing.status !== 'approved') return false;
+  if (listing.status !== 'approved' || listing.deletedAt) return false;
   if (listing.expiresAt) {
     const expTime = new Date(listing.expiresAt).getTime();
     if (!isNaN(expTime) && expTime <= Date.now()) {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from '@/src/shims/next-server';
 import { userService } from '@/server/services/user.service';
 import { getAuthenticatedUser } from '@/lib/auth/session';
-import { hasPermission } from '@/lib/auth/roles';
+import { hasPermission, canModifyTarget } from '@/lib/auth/roles';
 
 export async function GET(req: NextRequest) {
   try {
@@ -112,6 +112,20 @@ export async function POST(req: NextRequest) {
       name: authContext.user.name,
       ipAddress: authContext.ipAddress,
     };
+    
+    // Fetch target user for rank check
+    const targetUser = await userService.getUserById(userId);
+    if (!targetUser) {
+        return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+    
+    // Role Hierarchy check
+    if (authContext.userId === userId || !canModifyTarget(role, targetUser.adminRole || 'user')) {
+        return NextResponse.json(
+            { error: 'Forbidden: Insufficient rank to modify this account' },
+            { status: 403 }
+        );
+    }
 
     if (action === 'ban' && userId) {
       if (!isActualAdmin) {
@@ -120,6 +134,18 @@ export async function POST(req: NextRequest) {
           { status: 403 }
         );
       }
+      
+      // Block banning last active super_admin
+      if (targetUser.adminRole === 'super_admin' && targetUser.status === 'active') {
+          const superAdminCount = await import('@/server/repositories/user.repository').then(m => m.userRepository.countSuperAdmins());
+          if (superAdminCount <= 1) {
+              return NextResponse.json(
+                  { error: 'Forbidden: Cannot ban the last active super administrator' },
+                  { status: 403 }
+              );
+          }
+      }
+      
       const success = await userService.banUser(userId, reason || 'Violated terms of service', actor);
       return NextResponse.json({ success });
     }

@@ -4,6 +4,15 @@ import { getRequestIp } from '@/lib/auth/session';
 import { safeErrorResponse, addSecurityHeaders } from '@/lib/auth/security';
 import { emailService } from '@/server/services/email.service';
 import crypto from 'node:crypto';
+import { getPublicBaseUrl } from '@/lib/publicUrl';
+
+function escapeHtml(str: string): string {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -46,12 +55,13 @@ export async function POST(req: NextRequest) {
 
       // Attempt to send email via emailService
       try {
-        const resetUrl = `${req.nextUrl.origin}/my-account?tab=reset-password&token=${rawToken}`;
+        const resetUrl = `${getPublicBaseUrl()}/my-account?tab=reset-password&token=${rawToken}`;
+        const escapedName = escapeHtml(userRow.name || 'User');
         await emailService.sendCustomEmail({
           toEmail: cleanEmail,
           toName: userRow.name || 'User',
           subject: 'Reset Your Chillyads Password',
-          body: `<p>Hello ${userRow.name},</p><p>You requested a password reset. Click the link below or copy it to reset your password:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>This link expires in 1 hour.</p>`,
+          body: `<p>Hello ${escapedName},</p><p>You requested a password reset. Click the link below or copy it to reset your password:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>This link expires in 1 hour.</p>`,
           type: 'password_reset',
         });
       } catch (emailErr) {

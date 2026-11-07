@@ -4,7 +4,16 @@ import { emailService } from '@/server/services/email.service';
 import { hashPassword } from '@/lib/auth/password';
 import { getRequestIp } from '@/lib/auth/session';
 import { safeErrorResponse, addSecurityHeaders } from '@/lib/auth/security';
+import { getPublicBaseUrl } from '@/lib/publicUrl';
 import crypto from 'node:crypto';
+
+function escapeHtml(str: string): string {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -100,12 +109,12 @@ export async function POST(req: NextRequest) {
     await userRepository.createEmailVerificationToken(`vet_${crypto.randomUUID()}`, userId, tokenHash, expiresAt);
 
     // Send email
-    const verificationUrl = `${req.nextUrl.origin}/verify-email?token=${token}`;
+    const verificationUrl = `${getPublicBaseUrl()}/verify-email?token=${token}`;
     const emailResult = await emailService.sendCustomEmail({
       toEmail: cleanEmail,
       toName: userObj.name,
       subject: 'Verify your Chillyads account',
-      body: `Welcome to Chillyads! Please click the link below to verify your email address:\n\n${verificationUrl}`,
+      body: `Welcome to ${escapeHtml(userObj.name || 'User')}! Please click the link below to verify your email address:\n\n${verificationUrl}`,
       type: 'verify_email',
       relatedUserId: userId,
     });

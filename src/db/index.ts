@@ -82,6 +82,10 @@ const MIGRATIONS: Record<string, string> = {
   '007_posting_orders_provider_order_id': `
     ALTER TABLE "posting_orders" ADD COLUMN IF NOT EXISTS "provider_order_id" varchar(128);
   `,
+  '008_listing_soft_delete': `
+    ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "deleted_at" timestamp with time zone;
+    CREATE INDEX IF NOT EXISTS "idx_listings_deleted_at" ON "listings" ("deleted_at") WHERE "deleted_at" IS NULL;
+  `,
 };
 
 async function runMigrations(executor: { query: (sql: string, params?: any[]) => Promise<any> }) {

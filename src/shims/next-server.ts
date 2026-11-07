@@ -1,4 +1,5 @@
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
+import { getPublicBaseUrl } from '@/lib/publicUrl';
 
 export interface CookieOption {
   httpOnly?: boolean;
@@ -128,9 +129,7 @@ export function createExpressRouteHandler(routeModule: Record<string, any>) {
         return;
       }
 
-      const protocol = req.protocol || 'http';
-      const host = req.get('host') || 'localhost:3000';
-      const fullUrl = `${protocol}://${host}${req.originalUrl || req.url}`;
+      const fullUrl = `${getPublicBaseUrl()}${req.originalUrl || req.url}`;
 
       const headers = new Headers();
       for (const [k, v] of Object.entries(req.headers)) {

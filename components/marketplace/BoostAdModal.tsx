@@ -161,10 +161,40 @@ export const BoostAdModal: React.FC<BoostAdModalProps> = ({
         }),
       });
       const orderData = await orderRes.json().catch(() => ({}));
-      if (!orderRes.ok || !orderData.success || !orderData.orderId) {
+      if (!orderRes.ok || !orderData.orderId) {
         setErrorMessage(orderData.error || 'Failed to create boost order.');
         setIsProcessing(false);
         return;
+      }
+
+      let signature: string | undefined = undefined;
+      let paymentId: string | undefined = undefined;
+      const rzpKey = orderData.keyId;
+      const rzpOrderId = orderData.providerOrderId || orderData.orderId;
+
+      if (typeof window !== 'undefined' && rzpKey && orderData.providerOrderId) {
+        const { openRazorpayCheckout } = await import('@/lib/utils/razorpay');
+        try {
+          const payment = await openRazorpayCheckout({
+            key: rzpKey,
+            amount: Math.round(totalPayable * 100),
+            currency: 'INR',
+            name: app?.settings?.siteName || 'Chillyads',
+            description: `${selectedPackage.name} Boost`,
+            order_id: rzpOrderId,
+            prefill: {
+              name: app?.currentUser?.name,
+              email: app?.currentUser?.email,
+              contact: app?.currentUser?.phone,
+            }
+          });
+          paymentId = payment.paymentId;
+          signature = payment.signature;
+        } catch (checkoutErr: any) {
+          setErrorMessage(checkoutErr.message || 'Payment checkout cancelled.');
+          setIsProcessing(false);
+          return;
+        }
       }
 
       const verifyRes = await fetch('/api/boost/verify-payment', {
@@ -173,7 +203,9 @@ export const BoostAdModal: React.FC<BoostAdModalProps> = ({
         credentials: 'include',
         body: JSON.stringify({
           orderId: orderData.orderId,
-          paymentGateway: paymentMethod,
+          paymentId,
+          paymentGateway: 'Razorpay',
+          signature,
           amount: totalPayable,
           currency: 'INR',
         }),

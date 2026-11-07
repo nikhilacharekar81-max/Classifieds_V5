@@ -682,6 +682,31 @@ export class UserRepository {
     }
   }
 
+  public async countSuperAdmins(): Promise<number> {
+    try {
+      const rows = await withDbRetry(() =>
+        db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(schema.users)
+          .where(and(eq(schema.users.adminRole, 'super_admin'), eq(schema.users.status, 'active')))
+      );
+      return Number((rows as any[])[0]?.count) || 0;
+    } catch (error) {
+      console.error('UserRepository.countSuperAdmins error:', error);
+      return 0;
+    }
+  }
+
+  public async invalidateUserSessions(userId: string): Promise<boolean> {
+    try {
+      await db.delete(schema.userSessions).where(eq(schema.userSessions.userId, userId));
+      return true;
+    } catch (error) {
+      console.error('UserRepository.invalidateUserSessions error:', error);
+      return false;
+    }
+  }
+
   public async deleteUserSessions(userId: string): Promise<boolean> {
     try {
       await db.delete(schema.userSessions).where(eq(schema.userSessions.userId, userId));

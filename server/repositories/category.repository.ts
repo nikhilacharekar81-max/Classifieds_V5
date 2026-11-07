@@ -1,6 +1,6 @@
 import { db, withDbRetry } from '@/src/db/index';
 import * as schema from '@/src/db/schema';
-import { eq, asc, and, or, inArray, gte, ilike, sql } from '@/src/db/pg-orm';
+import { eq, asc, and, or, inArray, gte, ilike, sql, isNull } from '@/src/db/pg-orm';
 import { Category, CustomFieldDefinition } from '@/lib/types';
 import { ensureDatabaseSeeded, isDatabaseInitialized } from '@/server/seed-postgres';
 import { getCategoriesWithLiveCounts } from '@/server/cache/reference-data.cache';
@@ -65,6 +65,7 @@ export class CategoryRepository {
       const conditions: any[] = [
         eq(schema.listings.status, 'approved'),
         gte(schema.listings.expiresAt, now),
+        isNull(schema.listings.deletedAt),
       ];
 
       if (city && city !== 'All India' && city !== 'all-india' && city !== 'all') {
@@ -251,9 +252,12 @@ export class CategoryRepository {
       .select({ count: sql<number>`count(*)::int` })
       .from(schema.listings)
       .where(
-        or(
-          inArray(schema.listings.categoryId, ids),
-          inArray(schema.listings.subcategoryId, ids)
+        and(
+          or(
+            inArray(schema.listings.categoryId, ids),
+            inArray(schema.listings.subcategoryId, ids)
+          ),
+          isNull(schema.listings.deletedAt)
         )
       );
     return (rows[0]?.count || 0) > 0;

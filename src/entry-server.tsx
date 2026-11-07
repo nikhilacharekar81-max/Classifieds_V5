@@ -22,6 +22,7 @@ import {
   getCityGeoId,
 } from '@/lib/utils/seoAndUrlHelper';
 import type { Category, Listing } from '@/lib/types';
+import { getPublicBaseUrl } from '@/lib/publicUrl';
 
 function escapeHtmlAttr(str: string): string {
   return String(str || '')
@@ -68,7 +69,7 @@ import { runWithRequestCache } from '@/src/shims/next-cache';
 export async function renderSsrPage(
   urlPath: string,
   queryObj: Record<string, string> = {},
-  origin = 'http://localhost:3000'
+  origin = getPublicBaseUrl()
 ): Promise<SsrRenderResult> {
   return runWithRequestCache(async () => {
     const [baseCategories, locations, settings] = await Promise.all([
