@@ -67,7 +67,6 @@ export function toPublicListingCard(listing: Listing): Listing {
     boostStartedAt: undefined,
     boostPrice: undefined,
     boostDurationHours: undefined,
-    featuredUntil: undefined,
     spamScore: 0,
   };
 }

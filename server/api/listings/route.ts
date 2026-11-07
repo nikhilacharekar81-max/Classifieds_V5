@@ -8,121 +8,126 @@ import { toPublicListingDTO } from '@/lib/utils/seoAndUrlHelper';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const city = searchParams.get('city') || undefined;
-  const category = searchParams.get('category') || undefined;
-  const subcategory = searchParams.get('subcategory') || undefined;
-  const search = searchParams.get('search') || undefined;
-  const requestedStatus = searchParams.get('status') || undefined;
-  const sellerId = searchParams.get('sellerId') || undefined;
-  const includeCategories =
-    searchParams.get('includeCategories') === '1' ||
-    searchParams.get('includeCategories') === 'true';
-
-  const sort = searchParams.get('sort') || undefined;
-  const propertyType = searchParams.get('propertyType') || undefined;
-  const configuration = searchParams.get('configuration') || undefined;
-  const propertyStatus = searchParams.get('propertyStatus') || undefined;
-  const listedBy = searchParams.get('listedBy') || undefined;
-  const furnishing = searchParams.get('furnishing') || undefined;
-  const brokerage = searchParams.get('brokerage') || undefined;
-  const tenantPreference = searchParams.get('tenantPreference') || undefined;
-  const availableFrom = searchParams.get('availableFrom') || undefined;
-  const petsAllowed = searchParams.get('petsAllowed') || undefined;
-
-  // Validate and clamp numeric bounds
-  const parsePos = (raw: string | null) =>
-    raw !== null && raw !== '' && !isNaN(Number(raw)) && isFinite(Number(raw)) && Number(raw) >= 0 ? Number(raw) : undefined;
-
-  const minPrice = parsePos(searchParams.get('minPrice'));
-  const maxPrice = parsePos(searchParams.get('maxPrice'));
-  const minArea = parsePos(searchParams.get('minArea'));
-  const maxArea = parsePos(searchParams.get('maxArea'));
-  const maxDeposit = parsePos(searchParams.get('maxDeposit'));
-
-  const rawLimit = searchParams.get('limit');
-  const limit = rawLimit !== null && !isNaN(Number(rawLimit)) ? Math.min(Math.max(Number(rawLimit) || 50, 1), 500) : 50;
-
-  const rawOffset = searchParams.get('offset');
-  const offset = rawOffset !== null && !isNaN(Number(rawOffset)) ? Math.max(Number(rawOffset) || 0, 0) : 0;
-
-  const authContext = await getAuthenticatedUser(req);
-  const isActualAdmin = Boolean(
-    authContext?.isSuperAdmin ||
-    authContext?.adminRole === 'admin' ||
-    authContext?.adminRole === 'super_admin'
-  );
-  const isModerator = Boolean(
-    authContext?.isModerator ||
-    authContext?.adminRole === 'moderator'
-  );
-  const isOwner = Boolean(authContext?.userId && sellerId && sellerId === authContext.userId);
-
-  // Security Gate: Only actual administrators, moderators, and listing owners querying their own ads can view non-approved statuses
-  let effectiveStatus: string | undefined = 'approved';
-  if (isActualAdmin || isModerator || isOwner) {
-    effectiveStatus = requestedStatus || 'all';
-  } else {
-    effectiveStatus = 'approved';
-  }
-
-  const [result, categories, statusCounts] = await Promise.all([
-    listingService.getMarketplaceListings({
-      city,
-      category,
-      subcategory,
-      search,
-      status: effectiveStatus,
-      sellerId,
-      minPrice,
-      maxPrice,
-      propertyType,
-      configuration,
-      propertyStatus,
-      listedBy,
-      furnishing,
-      minArea,
-      maxArea,
-      maxDeposit,
-      brokerage,
-      tenantPreference,
-      availableFrom,
-      petsAllowed,
-      sort,
-      limit,
-      offset,
-    }),
-    includeCategories ? getCategoriesWithLiveCounts(city) : Promise.resolve(undefined),
-    sellerId && (isOwner || isActualAdmin || isModerator) ? listingRepository.getSellerStatusCounts(sellerId) : Promise.resolve(undefined),
-  ]);
-
   const noCacheHeaders = {
     'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
     Pragma: 'no-cache',
     Expires: '0',
   };
 
-  // Strip administrator-only/internal fields unless requested by the listing owner or an actual administrator (admin / super_admin)
-  if (!isActualAdmin && !isOwner) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const city = searchParams.get('city') || undefined;
+    const category = searchParams.get('category') || undefined;
+    const subcategory = searchParams.get('subcategory') || undefined;
+    const search = searchParams.get('search') || undefined;
+    const requestedStatus = searchParams.get('status') || undefined;
+    const sellerId = searchParams.get('sellerId') || undefined;
+    const includeCategories =
+      searchParams.get('includeCategories') === '1' ||
+      searchParams.get('includeCategories') === 'true';
+
+    const sort = searchParams.get('sort') || undefined;
+    const propertyType = searchParams.get('propertyType') || undefined;
+    const configuration = searchParams.get('configuration') || undefined;
+    const propertyStatus = searchParams.get('propertyStatus') || undefined;
+    const listedBy = searchParams.get('listedBy') || undefined;
+    const furnishing = searchParams.get('furnishing') || undefined;
+    const brokerage = searchParams.get('brokerage') || undefined;
+    const tenantPreference = searchParams.get('tenantPreference') || undefined;
+    const availableFrom = searchParams.get('availableFrom') || undefined;
+    const petsAllowed = searchParams.get('petsAllowed') || undefined;
+
+    // Validate and clamp numeric bounds
+    const parsePos = (raw: string | null) =>
+      raw !== null && raw !== '' && !isNaN(Number(raw)) && isFinite(Number(raw)) && Number(raw) >= 0 ? Number(raw) : undefined;
+
+    const minPrice = parsePos(searchParams.get('minPrice'));
+    const maxPrice = parsePos(searchParams.get('maxPrice'));
+    const minArea = parsePos(searchParams.get('minArea'));
+    const maxArea = parsePos(searchParams.get('maxArea'));
+    const maxDeposit = parsePos(searchParams.get('maxDeposit'));
+
+    const rawLimit = searchParams.get('limit');
+    const limit = rawLimit !== null && !isNaN(Number(rawLimit)) ? Math.min(Math.max(Number(rawLimit) || 50, 1), 500) : 50;
+
+    const rawOffset = searchParams.get('offset');
+    const offset = rawOffset !== null && !isNaN(Number(rawOffset)) ? Math.max(Number(rawOffset) || 0, 0) : 0;
+
+    const authContext = await getAuthenticatedUser(req);
+    const isActualAdmin = Boolean(
+      authContext?.isSuperAdmin ||
+      authContext?.adminRole === 'admin' ||
+      authContext?.adminRole === 'super_admin'
+    );
+    const isModerator = Boolean(
+      authContext?.isModerator ||
+      authContext?.adminRole === 'moderator'
+    );
+    const isOwner = Boolean(authContext?.userId && sellerId && sellerId === authContext.userId);
+
+    // Security Gate: Only actual administrators, moderators, and listing owners querying their own ads can view non-approved statuses
+    let effectiveStatus: string | undefined = 'approved';
+    if (isActualAdmin || isModerator || isOwner) {
+      effectiveStatus = requestedStatus || 'all';
+    } else {
+      effectiveStatus = 'approved';
+    }
+
+    const [result, categories, statusCounts] = await Promise.all([
+      listingService.getMarketplaceListings({
+        city,
+        category,
+        subcategory,
+        search,
+        status: effectiveStatus,
+        sellerId,
+        minPrice,
+        maxPrice,
+        propertyType,
+        configuration,
+        propertyStatus,
+        listedBy,
+        furnishing,
+        minArea,
+        maxArea,
+        maxDeposit,
+        brokerage,
+        tenantPreference,
+        availableFrom,
+        petsAllowed,
+        sort,
+        limit,
+        offset,
+      }),
+      includeCategories ? getCategoriesWithLiveCounts(city) : Promise.resolve(undefined),
+      sellerId && (isOwner || isActualAdmin || isModerator) ? listingRepository.getSellerStatusCounts(sellerId) : Promise.resolve(undefined),
+    ]);
+
+    // Strip administrator-only/internal fields unless requested by the listing owner or an actual administrator (admin / super_admin)
+    if (!isActualAdmin && !isOwner) {
+      return NextResponse.json(
+        {
+          items: result.items.map((item) => toPublicListingDTO(item)),
+          total: result.total,
+          ...(categories ? { categories } : {}),
+          ...(statusCounts ? { statusCounts } : {}),
+        },
+        { headers: noCacheHeaders }
+      );
+    }
+
     return NextResponse.json(
       {
-        items: result.items.map((item) => toPublicListingDTO(item)),
-        total: result.total,
+        ...result,
         ...(categories ? { categories } : {}),
         ...(statusCounts ? { statusCounts } : {}),
       },
       { headers: noCacheHeaders }
     );
+  } catch (err: any) {
+    console.error('API /api/listings GET error:', err);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500, headers: noCacheHeaders });
   }
-
-  return NextResponse.json(
-    {
-      ...result,
-      ...(categories ? { categories } : {}),
-      ...(statusCounts ? { statusCounts } : {}),
-    },
-    { headers: noCacheHeaders }
-  );
 }
 
 export async function POST(req: NextRequest) {

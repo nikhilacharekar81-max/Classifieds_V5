@@ -42,11 +42,11 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
         id: p.id,
         title: p.name,
         days: p.durationDays,
-        price: p.price,
+        price: Number(p.price),
         popular: p.badge === 'MOST POPULAR',
         badge: p.badge,
       }))
-    : [
+    : (settings.paidFeaturesConfig?.featurePlans || [
         {
           id: 'feature_7',
           title: '7 Days Starter',
@@ -69,7 +69,7 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
           price: settings.paidFeatures?.featuredAdPrice || 149,
           badge: 'BEST VALUE',
         },
-      ];
+      ]);
 
   const [selectedPlan, setSelectedPlan] = useState(plans[1] || plans[0]);
 
@@ -82,7 +82,8 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
   const currencySymbol = settings.currencySymbol || '₹';
   const paymentGatewayConfigured = Boolean(settings.paymentGatewayConfigured);
   const isActualAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
-  const taxAmount = Math.round(selectedPlan.price * 0.18);
+  const gstRate = settings.paidFeaturesConfig?.gstRate ?? 0.18;
+  const taxAmount = Math.round(selectedPlan.price * gstRate);
   const totalPayable = selectedPlan.price + taxAmount;
 
   const handleActivateFeature = async () => {
@@ -179,8 +180,8 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
           requestedFeaturedPlanId: selectedPlan.id,
           requestedFeaturedDays: selectedPlan.days,
           requestedFeaturedPrice: selectedPlan.price,
-          featuredPaymentId: paymentId,
-          featuredSignature: signature,
+          featuredPaymentId: paymentId || '',
+          featuredSignature: signature || '',
         },
       });
 
@@ -254,7 +255,7 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
               {listing.title}
             </h3>
             <div className="text-xs font-black text-blue-600 dark:text-blue-400">
-              {currencySymbol}{listing.price.toLocaleString('en-IN')}
+              {currencySymbol}{listing.price ? listing.price.toLocaleString('en-IN') : '0'}
             </div>
           </div>
         </div>
@@ -281,7 +282,7 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
             Choose Featured Duration Plan:
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {plans.map((plan) => {
+            {plans.map((plan: any) => {
               const isSelected = selectedPlan.id === plan.id;
               return (
                 <button

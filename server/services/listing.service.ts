@@ -1312,8 +1312,10 @@ export class ListingService {
     return updated !== null;
   }
 
-  public async featureListing(id: string, isFeatured: boolean, days: number = 30): Promise<boolean> {
-    const until = isFeatured ? new Date(Date.now() + days * 24 * 3600 * 1000) : null;
+  public async featureListing(id: string, isFeatured: boolean, days?: number): Promise<boolean> {
+    const settings = await getCachedSystemSettings();
+    const durationDays = days ?? settings.paidFeatures?.featuredAdDurationDays ?? 30;
+    const until = isFeatured ? new Date(Date.now() + durationDays * 24 * 3600 * 1000) : null;
     const updated = await listingRepository.update(id, {
       isFeatured,
       featuredUntil: until,

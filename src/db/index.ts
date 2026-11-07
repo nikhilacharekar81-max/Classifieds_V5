@@ -86,6 +86,21 @@ const MIGRATIONS: Record<string, string> = {
     ALTER TABLE "listings" ADD COLUMN IF NOT EXISTS "deleted_at" timestamp with time zone;
     CREATE INDEX IF NOT EXISTS "idx_listings_deleted_at" ON "listings" ("deleted_at") WHERE "deleted_at" IS NULL;
   `,
+  '009_missing_indexes_and_fks': `
+    -- Fix foreign keys in boost_transactions to allow deletion
+    ALTER TABLE "boost_transactions" DROP CONSTRAINT IF EXISTS "boost_transactions_order_id_boost_orders_order_id_fk";
+    ALTER TABLE "boost_transactions" ADD CONSTRAINT "boost_transactions_order_id_boost_orders_order_id_fk" FOREIGN KEY ("order_id") REFERENCES "boost_orders"("order_id") ON DELETE CASCADE;
+
+    ALTER TABLE "boost_transactions" DROP CONSTRAINT IF EXISTS "boost_transactions_listing_id_listings_id_fk";
+    ALTER TABLE "boost_transactions" ADD CONSTRAINT "boost_transactions_listing_id_listings_id_fk" FOREIGN KEY ("listing_id") REFERENCES "listings"("id") ON DELETE CASCADE;
+
+    -- Add missing indexes that schema.ts expects and for general performance
+    CREATE INDEX IF NOT EXISTS "idx_listings_status_city_cat_created" ON "listings" ("status", "city", "category_id", "subcategory_id", "created_at");
+    CREATE INDEX IF NOT EXISTS "idx_listings_status_expires" ON "listings" ("status", "expires_at");
+    CREATE INDEX IF NOT EXISTS "idx_audit_logs_target_id" ON "audit_logs" ("target_id");
+    CREATE INDEX IF NOT EXISTS "idx_email_logs_listing_id" ON "email_logs" ("listing_id");
+    CREATE INDEX IF NOT EXISTS "idx_boost_orders_status" ON "boost_orders" ("status");
+  `,
 };
 
 async function runMigrations(executor: { query: (sql: string, params?: any[]) => Promise<any> }) {
@@ -250,9 +265,42 @@ function createPglitePoolAdapter(): Pool {
 
 export const createPool = (): Pool => {
   if (!global._postgresPool) {
-    if (!process.env.SQL_HOST) {
+    const isProd = process.env.NODE_ENV === 'production';
+    const host = process.env.SQL_HOST;
+    const dbName = process.env.SQL_DB_NAME;
+    const user = process.env.SQL_USER || process.env.SQL_ADMIN_USER;
+    const pass = process.env.SQL_PASSWORD || process.env.SQL_ADMIN_PASSWORD;
+
+    if (!host) {
+      if (isProd) {
+        if (process.env.ALLOW_PGLITE === 'true') {
+          console.warn('⚠️  LOUD WARNING: Using in-memory PGlite in PRODUCTION mode.');
+          console.warn('⚠️  Data will be LOST on every restart or deployment.');
+          global._postgresPool = createPglitePoolAdapter();
+          return global._postgresPool;
+        } else {
+          console.error('\x1b[31m%s\x1b[0m', 'FATAL ERROR: SQL_HOST is missing in production environment.');
+          console.error('A persistent PostgreSQL database is REQUIRED for production.');
+          console.error('To ignore this and use in-memory storage (NOT RECOMMENDED), set ALLOW_PGLITE=true.');
+          process.exit(1);
+        }
+      }
+      console.log('Using in-memory PGlite (data is NOT persisted)');
       global._postgresPool = createPglitePoolAdapter();
       return global._postgresPool;
+    }
+
+    if (isProd) {
+      const missing = [];
+      if (!dbName) missing.push('SQL_DB_NAME');
+      if (!user) missing.push('SQL_USER or SQL_ADMIN_USER');
+      if (!pass) missing.push('SQL_PASSWORD or SQL_ADMIN_PASSWORD');
+      
+      if (missing.length > 0) {
+        console.error('\x1b[31m%s\x1b[0m', `FATAL ERROR: Missing database configuration: ${missing.join(', ')}`);
+        console.error('These variables are REQUIRED when SQL_HOST is provided in production.');
+        process.exit(1);
+      }
     }
 
     const isSslEnabled =
@@ -265,10 +313,10 @@ export const createPool = (): Pool => {
     );
 
     global._postgresPool = new Pool({
-      host: process.env.SQL_HOST,
-      user: process.env.SQL_USER || process.env.SQL_ADMIN_USER,
-      password: process.env.SQL_PASSWORD || process.env.SQL_ADMIN_PASSWORD,
-      database: process.env.SQL_DB_NAME,
+      host,
+      user,
+      password: pass,
+      database: dbName,
       max: 10,
       connectionTimeoutMillis: 15000,
       statement_timeout: statementTimeoutMs,
@@ -277,6 +325,8 @@ export const createPool = (): Pool => {
         ? { rejectUnauthorized: process.env.SQL_SSL_REJECT_UNAUTHORIZED !== 'false' }
         : undefined,
     });
+
+    console.log(`[Database] Active Mode: PostgreSQL @ ${host}/${dbName} (User: ${user})`);
 
     global._postgresPool.on('error', (err) => {
       const msg = String(err?.message || '');

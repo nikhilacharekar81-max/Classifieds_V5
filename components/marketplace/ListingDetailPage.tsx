@@ -292,7 +292,7 @@ export const ListingDetailPage: React.FC<ListingDetailPageProps> = ({
               locality={listing.location.locality}
               state={listing.location.state}
               title={listing.title}
-              priceFormatted={`₹${listing.price.toLocaleString('en-IN')}`}
+              priceFormatted={`₹${listing.price ? listing.price.toLocaleString('en-IN') : '0'}`}
             />
 
             <BuyerSafetyBanner />
