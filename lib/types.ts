@@ -443,7 +443,19 @@ export interface SystemSettings {
   otpLoginEnabled: boolean;
   enablePrivacyChoices?: boolean;
   paidFeatures?: PaidFeaturesConfig;
+  paidFeaturesConfig?: {
+    featurePlans?: Array<{
+      id: string;
+      title: string;
+      days: number;
+      price: number;
+      badge: string;
+      popular?: boolean;
+    }>;
+    gstRate?: number;
+  };
   paymentGatewayConfigured?: boolean;
+  boostEnabled?: boolean;
 }
 
 export interface UserGeoLocation {

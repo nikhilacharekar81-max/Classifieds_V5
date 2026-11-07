@@ -217,7 +217,7 @@ export class BoostRepository {
             eq(schema.boostOrders.status, 'pending')
           )
         )
-        .returning({ id: schema.boostOrders.id });
+        .returning({ orderId: schema.boostOrders.orderId });
       return res.length > 0;
     } catch (error) {
       console.error(`BoostRepository.cancelOrder error for ${orderId}:`, error);

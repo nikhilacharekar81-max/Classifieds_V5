@@ -353,7 +353,7 @@ export const PostAdPage: React.FC = () => {
     }
 
     const listingDurationDays = settings.listingDurationDays || 30;
-    const isAdminActor = currentUser.role === 'admin' || currentUser.role === 'super_admin';
+    const isAdminActor = currentUser.adminRole === 'admin' || currentUser.adminRole === 'super_admin';
 
     let createdOrderId: string | undefined = undefined;
     let postingFeePaymentId: string | undefined = undefined;
@@ -433,7 +433,7 @@ export const PostAdPage: React.FC = () => {
       }
     }
 
-    const { listing: newAd, error, code } = await addListing({
+    const result = (await addListing({
       title: postForm.title,
       categoryId: postForm.categoryId,
       subcategoryId: postForm.subcategoryId || undefined,
@@ -471,7 +471,9 @@ export const PostAdPage: React.FC = () => {
           : {}),
       },
       expiresAt: new Date(Date.now() + listingDurationDays * 86400000).toISOString().split('T')[0],
-    } as any);
+    } as any)) as any;
+
+    const { listing: newAd, error, code } = result || {};
 
     if (!newAd) {
       if (code === 'DUPLICATE_TITLE') {
@@ -713,6 +715,7 @@ export const PostAdPage: React.FC = () => {
                   }
                 }}
                 onSelectPaymentMethod={setPaymentMethod}
+                boostEnabled={settings.boostEnabled}
               />
 
               {/* Submit Actions Bar */}

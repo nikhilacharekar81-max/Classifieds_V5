@@ -100,6 +100,8 @@ export const BoostAdModal: React.FC<BoostAdModalProps> = ({
   const price = selectedPackage?.price || 0;
   const taxAmount = Math.round(price * 0.18);
   const totalPayable = price + taxAmount;
+  const boostEnabled = app?.settings?.boostEnabled ?? false;
+  if (!boostEnabled) return null;
 
   const isAlreadyBoosted = isListingBoosted(listing);
 
@@ -364,7 +366,7 @@ export const BoostAdModal: React.FC<BoostAdModalProps> = ({
                   </h4>
                   <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                     <span className="font-black text-slate-900 dark:text-white">
-                      ₹{listing.price.toLocaleString('en-IN')}
+                      ₹{(listing.price ?? 0).toLocaleString('en-IN')}
                     </span>
                     <span>• {listing.location.locality || listing.location.city}</span>
                   </div>

@@ -91,6 +91,9 @@ export class BoostService {
     packageId: string;
     userId: string;
   }): Promise<{ success: boolean; order?: any; error?: string; status: number }> {
+    if (process.env.BOOST_ENABLED !== 'true') {
+      return { success: false, error: 'Boost and Featured ads are currently disabled', status: 503 };
+    }
     const { listingId, packageId, userId } = params;
 
     // 1. Verify listing exists
@@ -129,6 +132,10 @@ export class BoostService {
     // 5. Check for existing pending order on this listing to prevent concurrent pending orders
     // Use FOR UPDATE to lock the listing row and prevent concurrent checkouts
     await db.execute(sql`SELECT id FROM listings WHERE id = ${listingId} FOR UPDATE`);
+    
+    // Automatically expire any "pending" boost order for this listing that is older than 30 minutes
+    await boostRepository.expireStalePendingOrdersForListing(listingId, 30 * 60 * 1000);
+
     const existingPending = await boostRepository.findPendingOrderByListingId(listingId);
     if (existingPending) {
       return {
@@ -248,6 +255,9 @@ export class BoostService {
     userName?: string;
     ipAddress?: string;
   }): Promise<{ success: boolean; listingId?: string; invoiceNumber?: string; error?: string; status: number }> {
+    if (process.env.BOOST_ENABLED !== 'true') {
+      return { success: false, error: 'Boost and Featured ads are currently disabled', status: 503 };
+    }
     const { orderId, paymentId, paymentGateway, signature, amount, currency, userId, userName, ipAddress } = params;
 
     // 1. Fail closed if no real payment gateway is configured
@@ -866,6 +876,18 @@ export class BoostService {
 
   public async getAllTransactions(limit = 500, offset = 0): Promise<OrderTransaction[]> {
     return await boostRepository.findAllTransactions(limit, offset);
+  }
+
+  public async cancelBoostOrder(orderId: string, userId: string): Promise<{ success: boolean; error?: string; status: number }> {
+    const success = await boostRepository.cancelOrder(orderId, userId);
+    if (!success) {
+      return {
+        success: false,
+        error: 'Could not cancel order. It may have already been processed or does not belong to you.',
+        status: 400,
+      };
+    }
+    return { success: true, status: 200 };
   }
 }
 

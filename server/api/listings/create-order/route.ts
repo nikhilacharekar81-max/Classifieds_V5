@@ -15,6 +15,10 @@ export async function POST(req: NextRequest) {
     const purpose = body.purpose ? String(body.purpose).trim() : 'posting_fee';
     const listingId = body.listingId ? String(body.listingId).trim() : undefined;
     const amount = body.amount !== undefined ? Number(body.amount) : undefined;
+    
+    if (purpose === 'featured_ad' && process.env.BOOST_ENABLED !== 'true') {
+      return NextResponse.json({ error: 'Boost and Featured ads are currently disabled' }, { status: 503 });
+    }
     if (!categoryId) {
       return NextResponse.json({ error: 'categoryId is required' }, { status: 400 });
     }

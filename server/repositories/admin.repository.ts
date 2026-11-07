@@ -95,6 +95,7 @@ export class AdminRepository {
           enablePrivacyChoices: true,
           paidFeatures: { ...DEFAULT_PAID_FEATURES_CONFIG },
           paymentGatewayConfigured,
+          boostEnabled: process.env.BOOST_ENABLED === 'true',
         };
       }
       const r = rows[0];
@@ -169,6 +170,7 @@ export class AdminRepository {
         enablePrivacyChoices: resolvedEnablePrivacyChoices,
         paidFeatures: mergedPaidFeatures,
         paymentGatewayConfigured,
+        boostEnabled: process.env.BOOST_ENABLED === 'true',
       };
     } catch (error) {
       console.error('AdminRepository.getSystemSettingsDirect error:', error);

@@ -26,6 +26,7 @@ import { Listing } from '@/lib/types';
 import { Badge } from '@/components/common/Badge';
 import { navigateTo } from '@/lib/router/useRouter';
 import { isListingBoosted, formatBoostTimeRemaining } from '@/lib/utils/boostHelper';
+import { useApp } from '@/context/AppContext';
 
 interface MyAdsTabProps {
   userListings: Listing[];
@@ -89,7 +90,9 @@ export const MyAdsTab: React.FC<MyAdsTabProps> = ({
   isLoading = false,
   statusCounts,
 }) => {
+  const { settings } = useApp();
   const isQuotaLoading = quotaStatus === 'loading';
+  const boostEnabled = settings.boostEnabled ?? false;
   const isQuotaUnavailable =
     quotaStatus === 'unavailable' || activeUserApprovedListingsCount === null;
 
@@ -350,43 +353,47 @@ export const MyAdsTab: React.FC<MyAdsTabProps> = ({
                     <span>Mark Sold</span>
                   </button>
                 )}
+                
+                {boostEnabled && (
+                  <>
+                    {listing.isFeatured ? (
+                      <button
+                        onClick={() => onFeatureListingModal(listing)}
+                        className="px-3.5 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-950 dark:bg-amber-950/80 dark:text-amber-200 dark:hover:bg-amber-900 border border-amber-300 dark:border-amber-700 rounded-lg text-xs font-black flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                        title="Ad is Featured - Click to extend featured duration"
+                      >
+                        <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-600" />
+                        <span>⭐ Featured (Extend)</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => onFeatureListingModal(listing)}
+                        className="px-3.5 py-1.5 bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-400 hover:from-amber-500 hover:to-yellow-500 text-slate-950 rounded-lg text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs hover:shadow-md hover:scale-102"
+                        title="Feature your ad at top search positions for up to 10x buyer leads"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 fill-slate-950" />
+                        <span>⭐ Feature Ad</span>
+                      </button>
+                    )}
 
-                {listing.isFeatured ? (
-                  <button
-                    onClick={() => onFeatureListingModal(listing)}
-                    className="px-3.5 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-950 dark:bg-amber-950/80 dark:text-amber-200 dark:hover:bg-amber-900 border border-amber-300 dark:border-amber-700 rounded-lg text-xs font-black flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-                    title="Ad is Featured - Click to extend featured duration"
-                  >
-                    <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-600" />
-                    <span>⭐ Featured (Extend)</span>
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => onFeatureListingModal(listing)}
-                    className="px-3.5 py-1.5 bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-400 hover:from-amber-500 hover:to-yellow-500 text-slate-950 rounded-lg text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs hover:shadow-md hover:scale-102"
-                    title="Feature your ad at top search positions for up to 10x buyer leads"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 fill-slate-950" />
-                    <span>⭐ Feature Ad</span>
-                  </button>
+                    {listing.status === 'approved' &&
+                      (isListingBoosted(listing) ? (
+                        <div className="px-3 py-1.5 bg-violet-50 dark:bg-violet-950/40 border border-violet-200 dark:border-violet-800 text-violet-700 dark:text-violet-300 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs">
+                          <Rocket className="w-3.5 h-3.5 text-violet-600 animate-pulse" />
+                          <span>Boost Active</span>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => onBoostListingModal(listing)}
+                          className="px-3 py-1.5 bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 hover:from-violet-700 hover:to-blue-700 text-white rounded-lg text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-md hover:shadow-lg"
+                          title="Boost ad to appear near the top of relevant listings"
+                        >
+                          <Rocket className="w-3.5 h-3.5 text-amber-300" />
+                          <span>Boost to Top</span>
+                        </button>
+                      ))}
+                  </>
                 )}
-
-                {listing.status === 'approved' &&
-                  (isListingBoosted(listing) ? (
-                    <div className="px-3 py-1.5 bg-violet-50 dark:bg-violet-950/40 border border-violet-200 dark:border-violet-800 text-violet-700 dark:text-violet-300 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs">
-                      <Rocket className="w-3.5 h-3.5 text-violet-600 animate-pulse" />
-                      <span>Boost Active</span>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => onBoostListingModal(listing)}
-                      className="px-3 py-1.5 bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 hover:from-violet-700 hover:to-blue-700 text-white rounded-lg text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-md hover:shadow-lg"
-                      title="Boost ad to appear near the top of relevant listings"
-                    >
-                      <Rocket className="w-3.5 h-3.5 text-amber-300" />
-                      <span>Boost to Top</span>
-                    </button>
-                  ))}
 
                 <button
                   onClick={() => onDeleteListing(listing.id)}

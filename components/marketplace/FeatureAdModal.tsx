@@ -77,11 +77,12 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
   const [upiId, setUpiId] = useState('user@upi');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  if (!isOpen || !listing) return null;
+  const boostEnabled = settings.boostEnabled ?? false;
+  if (!isOpen || !listing || !boostEnabled) return null;
 
   const currencySymbol = settings.currencySymbol || '₹';
   const paymentGatewayConfigured = Boolean(settings.paymentGatewayConfigured);
-  const isActualAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+  const isActualAdmin = currentUser?.adminRole === 'admin' || currentUser?.adminRole === 'super_admin';
   const gstRate = settings.paidFeaturesConfig?.gstRate ?? 0.18;
   const taxAmount = Math.round(selectedPlan.price * gstRate);
   const totalPayable = selectedPlan.price + taxAmount;
@@ -176,8 +177,8 @@ export const FeatureAdModal: React.FC<FeatureAdModalProps> = ({
           ...(listing.customAttributes || {}),
           requestedFeatured: true,
           featuredPaymentStatus: paymentId ? 'verifying' : 'pending',
-          pendingFeaturedOrderId: pendingOrderId,
-          requestedFeaturedPlanId: selectedPlan.id,
+          pendingFeaturedOrderId: pendingOrderId || '',
+          requestedFeaturedPlanId: selectedPlan.id || '',
           requestedFeaturedDays: selectedPlan.days,
           requestedFeaturedPrice: selectedPlan.price,
           featuredPaymentId: paymentId || '',

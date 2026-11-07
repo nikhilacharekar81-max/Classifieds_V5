@@ -16,6 +16,7 @@ import { buildChillyUrl, serializeJsonLd } from './lib/utils/seoAndUrlHelper.ts'
 import { renderSsrPage } from './src/entry-server.tsx';
 import { runWithRequestCache } from './src/shims/next-cache.ts';
 import compression from 'compression';
+import { sql } from './src/db/pg-orm.ts';
 
 // Route Modules
 import * as bootstrapRoute from './server/api/bootstrap/route.ts';
@@ -99,6 +100,32 @@ async function initializePostgreSQL() {
 
 import { getPublicBaseUrl } from './lib/publicUrl';
 import { uploadImage } from './lib/storage';
+
+/**
+ * Background task to expire ads past their end date.
+ * Uses a Postgres advisory lock to ensure only one instance runs the sweep.
+ */
+async function runExpirySweep() {
+  try {
+    // Unique 64-bit bigint ID for this specific distributed lock
+    const sweepLockId = 771239845; 
+    const lockRes = await db.execute(sql`SELECT pg_try_advisory_lock(${sweepLockId}) as locked`);
+    const isLocked = lockRes.rows[0]?.locked;
+
+    if (!isLocked) {
+      // Another instance is already running the sweep
+      return;
+    }
+
+    try {
+      await listingRepository.expireDueListings();
+    } finally {
+      await db.execute(sql`SELECT pg_advisory_unlock(${sweepLockId})`);
+    }
+  } catch (err) {
+    console.error('[Background] Expiry sweep error:', err);
+  }
+}
 
 // ... (existing imports)
 
@@ -467,6 +494,13 @@ ${urlEntries
     console.log(
       `Chillyads / Classifieds_V5 (Node.js + Vite + Express + PostgreSQL + Full SSR) running on http://localhost:${PORT}`
     );
+
+    // Start background sweep task
+    const sweepIntervalMinutes = Math.max(1, parseInt(process.env.EXPIRY_SWEEP_MINUTES || '5', 10));
+    runExpirySweep().catch(err => console.error('[SweepStartup] Error:', err));
+    setInterval(() => {
+      runExpirySweep().catch(err => console.error('[SweepInterval] Error:', err));
+    }, sweepIntervalMinutes * 60 * 1000);
   });
 }
 

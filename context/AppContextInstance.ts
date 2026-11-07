@@ -67,7 +67,7 @@ export interface AppContextType {
   // Listing Operations
   approveListing: (id: string) => void;
   rejectListing: (id: string, reason: string) => void;
-  featureListing: (id: string, isFeatured: boolean) => void;
+  featureListing: (id: string, isFeatured: boolean, days?: number) => void;
   markAsSold: (id: string) => void;
   deleteListing: (id: string) => void;
   updateListing: (listing: Listing) => boolean;

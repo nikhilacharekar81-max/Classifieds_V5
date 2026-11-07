@@ -101,6 +101,13 @@ const MIGRATIONS: Record<string, string> = {
     CREATE INDEX IF NOT EXISTS "idx_email_logs_listing_id" ON "email_logs" ("listing_id");
     CREATE INDEX IF NOT EXISTS "idx_boost_orders_status" ON "boost_orders" ("status");
   `,
+  '010_expiry_sweep_optimization': `
+    -- Efficient index for background expiry sweep
+    CREATE INDEX IF NOT EXISTS "idx_listings_expiry_sweep" ON "listings" ("expires_at") WHERE "status" IN ('approved', 'pending');
+    
+    -- Efficient index for seller-scoped repost/status checks
+    CREATE INDEX IF NOT EXISTS "idx_listings_seller_status" ON "listings" ("seller_id", "status");
+  `,
 };
 
 async function runMigrations(executor: { query: (sql: string, params?: any[]) => Promise<any> }) {

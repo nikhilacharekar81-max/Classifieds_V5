@@ -24,6 +24,7 @@ export interface ListingOfferAndSellerCardProps {
   onRevealPhone: () => void;
   onOpenBoostModal: () => void;
 }
+import { useApp } from '@/context/AppContext';
 
 export const ListingOfferAndSellerCard: React.FC<ListingOfferAndSellerCardProps> = ({
   listing,
@@ -34,13 +35,15 @@ export const ListingOfferAndSellerCard: React.FC<ListingOfferAndSellerCardProps>
   onRevealPhone,
   onOpenBoostModal,
 }) => {
+  const { settings } = useApp();
   const boosted = isListingBoosted(listing);
   const isRental = isRentalListing(listing);
+  const boostEnabled = settings.boostEnabled ?? false;
 
   return (
     <>
       {/* Owner Management Controls & Boost Promotion */}
-      {isOwner && (
+      {isOwner && boostEnabled && (
         <div className="bg-gradient-to-br from-indigo-50/80 to-blue-50/80 dark:bg-slate-800/80 border border-indigo-200 dark:border-indigo-800/60 rounded-2xl p-5 shadow-sm space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-black uppercase tracking-wider text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">

@@ -24,6 +24,7 @@ interface BoostAndCheckoutSectionProps {
   quotaStatus?: 'loading' | 'loaded' | 'unavailable';
   onToggleFeatured: (checked: boolean) => void;
   onSelectPaymentMethod: (method: 'upi' | 'card' | 'netbanking') => void;
+  boostEnabled?: boolean;
 }
 
 export const BoostAndCheckoutSection: React.FC<BoostAndCheckoutSectionProps> = ({
@@ -47,7 +48,9 @@ export const BoostAndCheckoutSection: React.FC<BoostAndCheckoutSectionProps> = (
   quotaStatus = 'loaded',
   onToggleFeatured,
   onSelectPaymentMethod,
+  boostEnabled = false,
 }) => {
+  if (!boostEnabled) return null;
   const displayActiveCount = userActiveListingsCount ?? 0;
 
   return (

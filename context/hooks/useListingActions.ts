@@ -157,11 +157,12 @@ export function useListingActions({
     }
   };
 
-  const featureListing = (id: string, isFeatured: boolean) => {
+  const featureListing = (id: string, isFeatured: boolean, days?: number) => {
     const item = listings.find((l) => l.id === id);
     if (!item) return;
     const futureDate = new Date();
-    futureDate.setDate(futureDate.getDate() + 30);
+    const duration = days ?? 30;
+    futureDate.setDate(futureDate.getDate() + duration);
     const featuredUntil = isFeatured ? futureDate.toISOString().split('T')[0] : undefined;
 
     fetch(`/api/listings/${id}`, {

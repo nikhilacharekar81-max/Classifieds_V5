@@ -411,6 +411,8 @@ CREATE INDEX "idx_listings_boost_ranking" ON "listings" USING btree ("boost_stat
 CREATE INDEX "idx_listings_location_cat" ON "listings" USING btree ("city","category_id","status");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_webhook_gateway_event_unique" ON "payment_webhook_events" USING btree ("gateway","id");--> statement-breakpoint
 CREATE INDEX "idx_cache_invalidation_outbox_status_retry" ON "cache_invalidation_outbox" USING btree ("status","next_retry_at");--> statement-breakpoint
+CREATE INDEX "idx_listings_expiry_sweep" ON "listings" USING btree ("expires_at") WHERE "status" IN ('approved', 'pending');--> statement-breakpoint
+CREATE INDEX "idx_listings_seller_status" ON "listings" USING btree ("seller_id", "status");--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "ban_appeals" (
 	"id" varchar(64) PRIMARY KEY NOT NULL,
 	"user_id" varchar(64) NOT NULL,

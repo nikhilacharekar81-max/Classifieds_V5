@@ -211,12 +211,6 @@ export class ListingRepository {
     }
 
     try {
-      // 1. Atomically update any date-expired listings for this seller so status='expired' in database,
-      // freeing the PostgreSQL partial unique index from blocking reposts after expiry.
-      await db.execute(
-        sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW() AND deleted_at IS NULL`
-      );
-
       const conditions = [
         eq(schema.listings.sellerId, sellerId),
         sql`LOWER(REGEXP_REPLACE(TRIM(${schema.listings.title}), '\\s+', ' ', 'g')) = ${normalized}`,
@@ -256,17 +250,6 @@ export class ListingRepository {
     total: number;
   }> {
     try {
-      // 0. Update date-expired listings in PostgreSQL so status='expired'
-      if (options.sellerId) {
-        await db.execute(
-          sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${options.sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW() AND deleted_at IS NULL`
-        ).catch(() => {});
-      } else {
-        await db.execute(
-          sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE status IN ('approved', 'pending') AND expires_at <= NOW() AND deleted_at IS NULL`
-        ).catch(() => {});
-      }
-
       const conditions: any[] = [];
       // Always exclude soft-deleted listings from public view
       conditions.push(isNull(schema.listings.deletedAt));
@@ -684,10 +667,6 @@ export class ListingRepository {
       activeQuotaCount: 0,
     };
     try {
-      await db.execute(
-        sql`UPDATE listings SET status = 'expired', updated_at = NOW() WHERE seller_id = ${sellerId} AND status IN ('approved', 'pending') AND expires_at <= NOW() AND deleted_at IS NULL`
-      ).catch(() => {});
-
       const [rows, activeQuotaRes] = await Promise.all([
         withDbRetry(() =>
           db
@@ -924,6 +903,38 @@ export class ListingRepository {
       await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS).catch(() => {});
     }
     return this.mapRowToListing(updatedRow);
+  }
+
+  /**
+   * Database-wide background sweep to expire ads past their end date.
+   * Runs efficiently using the idx_listings_expiry_sweep index.
+   */
+  public async expireDueListings(): Promise<number> {
+    try {
+      return await db.transaction(async (tx) => {
+        const rows = await tx
+          .update(schema.listings)
+          .set({ 
+            status: 'expired',
+            updatedAt: new Date(),
+          })
+          .where(and(
+            inArray(schema.listings.status, ['approved', 'pending']),
+            lte(schema.listings.expiresAt, new Date()),
+            isNull(schema.listings.deletedAt)
+          ))
+          .returning({ id: schema.listings.id });
+
+        if (rows.length > 0) {
+          await enqueueDurableInvalidation(REFERENCE_CACHE_TAGS.LISTING_COUNTS, tx).catch(() => {});
+          console.log(`[ExpirySweep] Automatically expired ${rows.length} listings.`);
+        }
+        return rows.length;
+      });
+    } catch (error) {
+      console.error('ListingRepository.expireDueListings error:', error);
+      return 0;
+    }
   }
 }
 
